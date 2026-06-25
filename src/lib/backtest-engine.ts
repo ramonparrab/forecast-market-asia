@@ -14,6 +14,10 @@ import { computeEnsemble } from './ensemble'
 const FORECAST_BASE = 'https://api.open-meteo.com/v1/forecast'
 const ARCHIVE_BASE = 'https://archive-api.open-meteo.com/v1/archive'
 
+/** Sleep helper to respect Open-Meteo rate limits */
+const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
+const API_DELAY_MS = 300
+
 export interface BacktestDayResult {
   fecha: string
   ciudad: string
@@ -136,16 +140,20 @@ export async function runBacktest(days: number = 90): Promise<BacktestSummary> {
 
   console.log(`[BACKTEST] Running ${days} days from ${startStr} to ${endStr} for ${CIUDADES_ASIA.length} cities`)
 
-  // Fetch all data in parallel (forecasts + actuals per city)
-  const cityResults = await Promise.all(
-    CIUDADES_ASIA.map(async city => {
+  // Fetch cities sequentially with delays to respect rate limits
+  const cityResults: { slug: string; ciudad: string; forecastDays: ParsedForecastDay[]; actuals: Record<string, number> }[] = []
+  for (const city of CIUDADES_ASIA) {
+    try {
       const [forecastDays, actuals] = await Promise.all([
         fetchForecastsForCity(city.lat, city.lon, startStr, endStr),
         fetchActualsForCity(city.lat, city.lon, startStr, endStr),
       ])
-      return { slug: city.slug, ciudad: city.nombre, forecastDays, actuals }
-    })
-  )
+      cityResults.push({ slug: city.slug, ciudad: city.nombre, forecastDays, actuals })
+      await sleep(API_DELAY_MS)
+    } catch (e) {
+      console.warn(`[BACKTEST] Error fetching ${city.slug}:`, (e as Error).message)
+    }
+  }
 
   // Process each day for each city
   const allResults: BacktestDayResult[] = []
