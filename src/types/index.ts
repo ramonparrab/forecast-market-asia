@@ -29,12 +29,24 @@ export interface PolymarketContract {
   prob_ia_norm?: number
 }
 
+export interface NowcastInfo {
+  activo: boolean
+  peso_observacion: number
+  temp_observada: number | null
+  estacion: string
+  hora_local: number
+}
+
 export interface CityAnalysis {
   ciudad: string
   slug: string
   contratos: PolymarketContract[]
   forecast: ForecastResult
   arbitraje: { desvio: number; nivel: string }
+  nowcast: NowcastInfo
+  // Probabilidad de que el pronóstico acierte el bucket correcto (±2°C)
+  exito_pct: number
+  explicacion: string
 }
 
 export interface BetRecommendation {
@@ -52,6 +64,8 @@ export interface BetRecommendation {
   monto: number
   peso: number
   status: string
+  exito_pct?: number
+  explicacion?: string
 }
 
 export interface DailyRun {

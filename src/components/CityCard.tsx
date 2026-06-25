@@ -17,6 +17,26 @@ function ArbBadge({ nivel }: { nivel: string }) {
   return <span className="badge-green">{nivel}</span>
 }
 
+function ExitoPctBadge({ pct }: { pct: number }) {
+  if (pct >= 80) return <span className="text-emerald-400 font-bold">{pct}%</span>
+  if (pct >= 65) return <span className="text-green-400 font-bold">{pct}%</span>
+  if (pct >= 50) return <span className="text-amber-400 font-bold">{pct}%</span>
+  return <span className="text-red-400 font-bold">{pct}%</span>
+}
+
+function NowcastIndicator({ data }: { data: CityAnalysis }) {
+  const n = data.nowcast
+  if (!n || !n.activo) return null
+  const color = n.peso_observacion > 0.5 ? 'text-emerald-400' : 'text-blue-400'
+  return (
+    <span className={`inline-flex items-center gap-1 text-xs ${color}`}>
+      <span>📡</span>
+      Nowcast {(n.peso_observacion * 100).toFixed(0)}%
+      {n.temp_observada !== null && <span>({n.temp_observada.toFixed(1)}°C obs)</span>}
+    </span>
+  )
+}
+
 function ContractRow({ contract }: { contract: PolymarketContract }) {
   const probIAPct = Math.round((contract.prob_ia_norm ?? 0) * 10000) / 100
   const edge = Math.round((probIAPct - contract.prob_mkt) * 100) / 100
@@ -44,16 +64,47 @@ function ContractRow({ contract }: { contract: PolymarketContract }) {
 export default function CityCard({ data }: CityCardProps) {
   const { forecast } = data
   const modelosCount = Object.keys(forecast.ensemble_raw).length
+  const modelosTemps = Object.values(forecast.ensemble_raw)
+  const spread = modelosTemps.length > 0 ? Math.max(...modelosTemps) - Math.min(...modelosTemps) : 0
+  const totalMkt = data.contratos.reduce((s, c) => s + c.prob_mkt, 0)
 
   return (
-    <div className="card">
+    <div className="card relative overflow-hidden">
+      {/* Success probability bar at top */}
+      <div className="absolute top-0 left-0 right-0 h-1">
+        <div
+          className={`h-full transition-all duration-500 ${
+            data.exito_pct >= 80 ? 'bg-emerald-500' :
+            data.exito_pct >= 65 ? 'bg-green-500' :
+            data.exito_pct >= 50 ? 'bg-amber-500' : 'bg-red-500'
+          }`}
+          style={{ width: `${data.exito_pct}%` }}
+        />
+      </div>
+
       {/* Header */}
       <div className="mb-3 flex items-start justify-between">
         <div>
           <h3 className="text-lg font-bold text-white">{data.ciudad}</h3>
           <p className="text-xs text-gray-500">{data.slug} · {modelosCount} modelos</p>
         </div>
-        <ConsensoBadge consenso={forecast.consenso} />
+        <div className="flex items-center gap-2">
+          <NowcastIndicator data={data} />
+          <ConsensoBadge consenso={forecast.consenso} />
+        </div>
+      </div>
+
+      {/* Success % + Explanation */}
+      <div className={`mb-3 rounded-lg p-2.5 text-xs ${
+        data.exito_pct >= 65 ? 'bg-emerald-500/5 border border-emerald-500/10' :
+        data.exito_pct >= 50 ? 'bg-amber-500/5 border border-amber-500/10' :
+        'bg-red-500/5 border border-red-500/10'
+      }`}>
+        <div className="flex items-center justify-between mb-1">
+          <span className="text-gray-500">Precisión estimada</span>
+          <ExitoPctBadge pct={data.exito_pct} />
+        </div>
+        <p className="text-gray-400 leading-relaxed">{data.explicacion}</p>
       </div>
 
       {/* Temperatures */}
@@ -74,18 +125,25 @@ export default function CityCard({ data }: CityCardProps) {
 
       {/* Models */}
       <div className="mb-3 flex flex-wrap gap-1">
-        {Object.entries(forecast.ensemble_raw).map(([model, temp]) => (
-          <span key={model} className="rounded bg-slate-700/50 px-2 py-0.5 text-xs text-gray-400">
-            {model.split('_')[0]}: {temp.toFixed(1)}°
-          </span>
-        ))}
+        {Object.entries(forecast.ensemble_raw).map(([model, temp]) => {
+          const diff = temp - forecast.temp_corregida
+          const diffColor = Math.abs(diff) < 1.5 ? 'text-gray-400' : Math.abs(diff) < 3 ? 'text-amber-400' : 'text-red-400'
+          return (
+            <span key={model} className={`rounded bg-slate-700/50 px-2 py-0.5 text-xs ${diffColor}`}>
+              {model.split('_')[0]}: {temp.toFixed(1)}°{diff > 0 ? ' ↑' : diff < 0 ? ' ↓' : ''}
+            </span>
+          )
+        })}
       </div>
 
       {/* Contracts */}
       <div>
         <div className="mb-2 flex items-center justify-between">
           <span className="text-xs font-medium text-gray-500">CONTRATOS ({data.contratos.length})</span>
-          <ArbBadge nivel={data.arbitraje.nivel} />
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-gray-600">Σ Mkt: {totalMkt.toFixed(0)}%</span>
+            <ArbBadge nivel={data.arbitraje.nivel} />
+          </div>
         </div>
         <div className="max-h-48 overflow-y-auto">
           {data.contratos.map((c, i) => (
@@ -94,11 +152,17 @@ export default function CityCard({ data }: CityCardProps) {
         </div>
       </div>
 
-      {/* Volatility */}
-      <div className="mt-3 flex items-center gap-2 text-xs text-gray-500">
+      {/* Info bar */}
+      <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-500">
         <span>Vol: {forecast.volatilidad.toFixed(2)}</span>
         <span>·</span>
-        <span>Spread: {(Math.max(...Object.values(forecast.ensemble_raw)) - Math.min(...Object.values(forecast.ensemble_raw))).toFixed(1)}°</span>
+        <span>Spread: {spread.toFixed(1)}°</span>
+        {data.nowcast?.activo && (
+          <>
+            <span>·</span>
+            <span className="text-blue-400">Nowcast: {data.nowcast.estacion}</span>
+          </>
+        )}
       </div>
     </div>
   )

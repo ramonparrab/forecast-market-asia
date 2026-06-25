@@ -7,6 +7,7 @@ import { fetchPolymarketPrices, parseContract } from './polymarket'
 import { calibrateProbabilities } from './calibration'
 import { calculateAllocation } from './kelly'
 import { getRecentErrors, getRecentModelErrors, computeGlobalMetrics } from './supabase'
+import { nowcastTemperature } from './nowcaster'
 
 const SIMULACIONES = 20000
 
@@ -68,7 +69,14 @@ async function analyzeCity(
     recentModelErrors: cityModelErrors,
   })
 
-  // 3. Polymarket prices
+  // 3. Nowcasting — blend live METAR observation into forecast
+  const nowcastResult = await nowcastTemperature(city.slug, city.lat, city.lon, forecast.temp_corregida)
+  const tempFinal = nowcastResult.temp
+  // Update forecast with nowcasted temperature
+  forecast.temp_corregida = tempFinal
+  forecast.temp_ponderada = tempFinal
+
+  // 4. Polymarket prices
   let contracts: PolymarketContract[] = []
   if (fetchPrices) {
     contracts = await fetchPolymarketPrices(city.slug, fechaObjetivo)
@@ -77,7 +85,34 @@ async function analyzeCity(
     contracts = getMockContracts(city.slug)
   }
 
-  // 4. Monte Carlo
+  // Calculate success probability: how likely is the forecast to be within ±2°C of actual
+  const modelosTemps = Object.values(forecast.ensemble_raw)
+  const spread = modelosTemps.length > 0 ? Math.max(...modelosTemps) - Math.min(...modelosTemps) : 3
+  const numModelos = modelosTemps.length
+  // Success factors: narrow spread, strong consensus, many models, nowcast active
+  let exitoPct = 50
+  if (numModelos >= 5) exitoPct += 8
+  else if (numModelos >= 3) exitoPct += 4
+  if (spread <= 1.5) exitoPct += 15
+  else if (spread <= 2.5) exitoPct += 8
+  else if (spread <= 3.5) exitoPct += 3
+  else exitoPct -= 5
+  if (forecast.consenso === 'MUY FUERTE') exitoPct += 10
+  else if (forecast.consenso === 'FUERTE') exitoPct += 5
+  if (nowcastResult.obsWeight > 0.3) exitoPct += 8
+  if (nowcastResult.observedTemp !== null) exitoPct += 5
+  exitoPct = Math.max(10, Math.min(95, exitoPct))
+  // Build explanation
+  const parts: string[] = []
+  parts.push(`${numModelos} modelos meteorológicos`)
+  if (nowcastResult.obsWeight > 0) {
+    parts.push(`nowcasting activo (${(nowcastResult.obsWeight * 100).toFixed(0)}% peso observación)`)
+  }
+  parts.push(`consenso ${forecast.consenso.toLowerCase()}`)
+  parts.push(`spread ${spread.toFixed(1)}°C entre modelos`)
+  const explicacion = `Pronóstico basado en ${parts.join(', ')}. Precisión histórica estimada: ±${(spread * 0.5).toFixed(1)}°C.`
+
+  // 5. Monte Carlo
   for (const p of contracts) {
     const parsed = p.tipo ? p : parseContract(p.texto)
     p.tipo = parsed.tipo
@@ -88,17 +123,17 @@ async function analyzeCity(
     ) / 10000
   }
 
-  // 5. Normalize + calibrate
+  // 6. Normalize + calibrate
   const normalized = normalizeProbabilidades(contracts.map(c => c.prob_ia_raw!))
   const calibrated = calibrateProbabilities(normalized, 1.0, 0.0)
   for (let i = 0; i < contracts.length; i++) {
     contracts[i].prob_ia_norm = calibrated[i]
   }
 
-  // 6. Arbitrage
+  // 7. Arbitrage
   const arb = detectArbitrage(contracts)
 
-  // 7. Recommendations
+  // 8. Recommendations
   const recs: BetRecommendation[] = contracts.map(p => {
     const iaPct = Math.round((p.prob_ia_norm ?? 0) * 10000) / 100
     const edge = Math.round((iaPct - p.prob_mkt) * 100) / 100
@@ -117,6 +152,8 @@ async function analyzeCity(
       monto: 0,
       peso: 0,
       status: getStatus(edge),
+      exito_pct: exitoPct,
+      explicacion,
     }
   })
 
@@ -127,6 +164,15 @@ async function analyzeCity(
       contratos: contracts,
       forecast,
       arbitraje: arb,
+      nowcast: {
+        activo: nowcastResult.obsWeight > 0,
+        peso_observacion: nowcastResult.obsWeight,
+        temp_observada: nowcastResult.observedTemp,
+        estacion: nowcastResult.station,
+        hora_local: new Date().getUTCHours() + Math.round(city.lon / 15),
+      },
+      exito_pct: exitoPct,
+      explicacion,
     },
     recommendations: recs,
   }

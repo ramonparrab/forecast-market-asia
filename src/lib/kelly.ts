@@ -48,11 +48,13 @@ export function calculateAllocation(
 
   if (candidates.length === 0) return []
 
-  // Weight by edge * consensus factor * arb penalty
+  // Weight by edge * consensus factor * arb penalty * exito_pct
   for (const r of candidates) {
     let peso = r.edge
     if (r.consenso === 'MUY FUERTE') peso *= 1.4
+    if (r.consenso === 'FUERTE') peso *= 1.2
     if (r.arbitraje === 'ALTO') peso *= 0.7
+    if (r.exito_pct) peso *= (r.exito_pct / 50)
     r.peso = peso
   }
 
