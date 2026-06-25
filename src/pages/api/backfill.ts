@@ -1,5 +1,5 @@
 import { NextApiRequest, NextApiResponse } from 'next'
-import { getRecordsWithoutActuals, getClient, updateActualTemperature } from '@/lib/supabase'
+import { getRecordsWithoutActuals, updateActualTemperature } from '@/lib/supabase'
 import { fetchActualMaxTemp } from '@/lib/openmeteo'
 
 /**
