@@ -4,6 +4,7 @@ import CityCard from '@/components/CityCard'
 import AllocationPanel from '@/components/AllocationPanel'
 import MetricsChart from '@/components/MetricsChart'
 import ArbitragePanel from '@/components/ArbitragePanel'
+import ForecastTable from '@/components/ForecastTable'
 import { DailyAnalysis, GlobalMetrics, CityAnalysis } from '@/types'
 
 type View = 'dashboard' | 'table' | 'metrics' | 'arbitrage'
