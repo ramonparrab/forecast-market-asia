@@ -47,7 +47,7 @@ export default function ForecastVsActualChart({ metrics }: Props) {
   }, [selectedCity])
 
   // Extract unique cities from data
-  const cities = [...new Set(data.map(d => d.ciudad))].sort()
+  const cities = Array.from(new Set(data.map(d => d.ciudad))).sort()
 
   // Group by date for the evolution chart
   const byDate: Record<string, { fecha: string; pronosticado: number; real: number; error: number; count: number }> = {}
