@@ -252,7 +252,7 @@ function prepareEvolutionData(resultados: { fecha: string; error: number }[]) {
     byDate[r.fecha].push(Math.abs(r.error))
   }
 
-  const entries = Object.entries(byDate)
+  const entries: { fecha: string; mae_diario: number; mae_7d?: number }[] = Object.entries(byDate)
     .map(([fecha, errors]) => ({
       fecha,
       mae_diario: Math.round(errors.reduce((s, v) => s + v, 0) / errors.length * 100) / 100,
