@@ -93,6 +93,9 @@ export default function Home() {
           </button>
           <p className="mt-2 text-xs text-gray-500">
             Hora Caracas: <span className="text-gray-400">{caracasTime}</span>
+            {analysis && analysis.fecha_objetivo && (
+              <> · Pronóstico para: <span className="font-semibold text-blue-400">{analysis.fecha_objetivo}</span></>
+            )}
             {analysis && analysis.cities.length > 0 && (
               <> · {analysis.cities.length} ciudades · {analysis.recommendations.length} recom.</>
             )}
@@ -129,8 +132,11 @@ export default function Home() {
         <div className="card py-16 text-center">
           <div className="mb-4 text-5xl">🌤️</div>
           <h2 className="mb-2 text-xl font-semibold text-white">Forecast Market · Asia</h2>
-          <p className="mb-6 text-gray-400">
-            Presiona "Ejecutar Análisis" para obtener el pronóstico de hoy para 9 ciudades asiáticas
+          <p className="mb-4 text-gray-400">
+            Pronóstico para <span className="font-medium text-blue-400">{new Date(Date.now() + 86400000).toISOString().slice(0, 10)}</span> · 9 ciudades asiáticas
+          </p>
+          <p className="mb-6 text-sm text-gray-500">
+            Ejecuta a las 10PM Caracas. Compara la temperatura máxima pronosticada contra los precios de cierre de Polymarket.
           </p>
           <button onClick={runAnalysis} className="btn-primary">
             🚀 Comenzar Análisis

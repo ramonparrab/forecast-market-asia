@@ -68,7 +68,7 @@ export default function CityCard({ data }: CityCardProps) {
         </div>
         <div className="text-center">
           <div className="text-xs text-gray-500">Sesgo</div>
-          <div className="text-xl font-bold text-amber-400">-{forecast.sesgo_aplicado.toFixed(2)}°</div>
+          <div className="text-xl font-bold text-amber-400">{forecast.sesgo_aplicado > 0 ? '+' : ''}{forecast.sesgo_aplicado.toFixed(2)}°</div>
         </div>
       </div>
 

@@ -178,6 +178,7 @@ export async function runDailyAnalysis(
 
   return {
     fecha: fechaEjecucion,
+    fecha_objetivo: fechaObjetivo,
     message: `Análisis completado para ${fechaObjetivo} a las ${caracasTimeStr} Caracas`,
     cities,
     recommendations,

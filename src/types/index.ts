@@ -101,6 +101,7 @@ export interface GlobalMetrics {
 
 export interface DailyAnalysis {
   fecha: string
+  fecha_objetivo: string
   message: string
   cities: CityAnalysis[]
   recommendations: BetRecommendation[]
