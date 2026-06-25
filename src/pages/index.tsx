@@ -6,9 +6,10 @@ import MetricsChart from '@/components/MetricsChart'
 import ArbitragePanel from '@/components/ArbitragePanel'
 import ForecastTable from '@/components/ForecastTable'
 import ForecastVsActualChart from '@/components/ForecastVsActualChart'
+import BacktestChart from '@/components/BacktestChart'
 import { DailyAnalysis, GlobalMetrics, CityAnalysis } from '@/types'
 
-type View = 'dashboard' | 'table' | 'metrics' | 'comparison' | 'arbitrage'
+type View = 'dashboard' | 'table' | 'metrics' | 'comparison' | 'backtest' | 'arbitrage'
 
 /** Returns a friendly confidence label + color class */
 function getConfidence(city: CityAnalysis): { label: string; color: string; bg: string } {
@@ -161,6 +162,7 @@ export default function Home() {
     { key: 'table', label: 'Tabla', icon: '📊', desc: 'Datos completos' },
     { key: 'metrics', label: 'Precisión', icon: '📈', desc: 'Métricas históricas' },
     { key: 'comparison', label: 'Comparación', icon: '📉', desc: 'Pronóstico vs Real' },
+    { key: 'backtest', label: 'Backtest', icon: '⏳', desc: '90 días históricos' },
     { key: 'arbitrage', label: 'Arbitraje', icon: '🔍', desc: 'Alertas de ineficiencia' },
   ]
 
@@ -284,6 +286,9 @@ export default function Home() {
 
       {/* Comparison View (Forecast vs Actual) */}
       {activeView === 'comparison' && <ForecastVsActualChart metrics={metrics} />}
+
+      {/* Backtest View */}
+      {activeView === 'backtest' && <BacktestChart />}
 
       {/* Arbitrage View */}
       {activeView === 'arbitrage' && (
