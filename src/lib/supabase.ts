@@ -148,8 +148,8 @@ export async function updateActualTemperature(
   if (!client) return false
 
   // Get the forecast temp to compute error client-side
-  const { data, error: fetchErr } = await client
-    .from('forecast_history' as any)
+  const { data, error: fetchErr } = await (client
+    .from('forecast_history' as any) as any)
     .select('temp_corregida')
     .eq('id', recordId)
     .single()
@@ -162,9 +162,9 @@ export async function updateActualTemperature(
   const tc = (data as any).temp_corregida
   const error = Math.round((tempReal - tc) * 100) / 100
 
-  const { error: updateErr } = await client
-    .from('forecast_history' as any)
-    .update({ temp_real: tempReal, error } as any)
+  const { error: updateErr } = await (client
+    .from('forecast_history' as any) as any)
+    .update({ temp_real: tempReal, error })
     .eq('id', recordId)
 
   if (updateErr) {
