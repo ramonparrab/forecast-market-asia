@@ -12,23 +12,25 @@ export async function fetchWeatherModels(
   const toTry = modelos ?? MODELOS_CLIMATICOS
   const results: ModelTemps = {}
 
-  // Open-Meteo supports querying multiple models in one call
   const modelsParam = toTry.join(',')
   const url = `${OPENMETEO_BASE}?latitude=${lat}&longitude=${lon}&hourly=temperature_2m&temperature_unit=celsius&start_date=${fechaISO}&end_date=${fechaISO}&models=${modelsParam}`
 
   try {
-    const resp = await fetch(url, { signal: AbortSignal.timeout(20000) })
+    const resp = await fetch(url, { signal: AbortSignal.timeout(15000) })
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
     const data = await resp.json()
 
+    // Open-Meteo returns model data inside hourly as temperature_2m_{model}
+    const hourly = data.hourly || {}
     for (const model of toTry) {
-      const hourly = data[model]?.hourly?.temperature_2m
-      if (hourly && Array.isArray(hourly) && hourly.length > 0) {
-        results[model] = Math.max(...hourly)
+      const key = `temperature_2m_${model}`
+      const temps = hourly[key]
+      if (temps && Array.isArray(temps) && temps.length > 0) {
+        results[model] = Math.max(...temps)
       }
     }
   } catch (e) {
-    console.warn('Open-Meteo error:', (e as Error).message)
+    console.warn(`Open-Meteo error for lat=${lat} lon=${lon}:`, (e as Error).message)
   }
 
   return results
