@@ -1,7 +1,6 @@
 import { createClient } from '@supabase/supabase-js'
 import { HistoricalRecord, DailyRun, GlobalMetrics } from '@/types'
 
-// These will be replaced by user's Supabase credentials
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || ''
 const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
 
@@ -19,14 +18,14 @@ export async function saveDailyRun(run: DailyRun): Promise<number | null> {
   if (!client) return null
 
   const { data, error } = await client
-    .from('daily_runs')
+    .from('daily_runs' as any)
     .insert({
       fecha_ejecucion: run.fecha_ejecucion,
       fecha_objetivo: run.fecha_objetivo,
       resultados: JSON.stringify(run.resultados),
       recomendaciones: JSON.stringify(run.recomendaciones),
       total_asignado: run.total_asignado,
-    })
+    } as any)
     .select('id')
     .single()
 
@@ -34,7 +33,7 @@ export async function saveDailyRun(run: DailyRun): Promise<number | null> {
     console.error('Error saving daily run:', error)
     return null
   }
-  return data?.id ?? null
+  return (data as any)?.id ?? null
 }
 
 export async function saveForecastRecords(records: HistoricalRecord[]): Promise<void> {
@@ -42,7 +41,7 @@ export async function saveForecastRecords(records: HistoricalRecord[]): Promise<
   if (!client || records.length === 0) return
 
   const { error } = await client
-    .from('forecast_history')
+    .from('forecast_history' as any)
     .insert(records.map(r => ({
       fecha_ejecucion: r.fecha_ejecucion,
       fecha_objetivo: r.fecha_objetivo,
@@ -54,7 +53,7 @@ export async function saveForecastRecords(records: HistoricalRecord[]): Promise<
       error: r.error,
       modelos_usados: r.modelos_usados,
       consenso: r.consenso,
-    })))
+    })) as any)
 
   if (error) {
     console.error('Error saving forecast records:', error)
@@ -68,16 +67,21 @@ export async function getRecentErrors(
   const client = getClient()
   if (!client) return []
 
-  const { data, error } = await client
-    .from('forecast_history')
+  const q = client
+    .from('forecast_history' as any)
     .select('error')
-    .eq('slug', slug)
-    .is('error', 'not.null')
-    .order('fecha_ejecucion', { ascending: false })
+    .is('error', 'not.null' as any)
+    .order('fecha_ejecucion', { ascending: false } as any)
     .limit(limit)
 
+  if (slug !== 'all') {
+    q.eq('slug', slug)
+  }
+
+  const { data, error } = await q
+
   if (error || !data) return []
-  return data as { error: number }[]
+  return (data as any).map((r: any) => ({ error: r.error }))
 }
 
 export async function getRecentModelErrors(
@@ -87,16 +91,16 @@ export async function getRecentModelErrors(
   if (!client) return {}
 
   const { data, error } = await client
-    .from('forecast_history')
+    .from('forecast_history' as any)
     .select('slug, error')
-    .is('error', 'not.null')
-    .order('fecha_ejecucion', { ascending: false })
+    .is('error', 'not.null' as any)
+    .order('fecha_ejecucion', { ascending: false } as any)
     .limit(limit * 9)
 
   if (error || !data) return {}
 
   const grouped: Record<string, number[]> = {}
-  for (const row of data as { slug: string; error: number }[]) {
+  for (const row of (data as any[])) {
     if (!grouped[row.slug]) grouped[row.slug] = []
     if (grouped[row.slug].length < limit) {
       grouped[row.slug].push(row.error)
@@ -112,13 +116,13 @@ export async function getHistoricalRecords(
   if (!client) return []
 
   const { data, error } = await client
-    .from('forecast_history')
+    .from('forecast_history' as any)
     .select('*')
-    .order('fecha_ejecucion', { ascending: false })
+    .order('fecha_ejecucion', { ascending: false } as any)
     .limit(limit)
 
   if (error || !data) return []
-  return data as HistoricalRecord[]
+  return (data as any) as HistoricalRecord[]
 }
 
 export async function getDailyRuns(limit = 30): Promise<DailyRun[]> {
@@ -126,13 +130,13 @@ export async function getDailyRuns(limit = 30): Promise<DailyRun[]> {
   if (!client) return []
 
   const { data, error } = await client
-    .from('daily_runs')
+    .from('daily_runs' as any)
     .select('*')
-    .order('fecha_ejecucion', { ascending: false })
+    .order('fecha_ejecucion', { ascending: false } as any)
     .limit(limit)
 
   if (error || !data) return []
-  return data as DailyRun[]
+  return (data as any) as DailyRun[]
 }
 
 export async function computeGlobalMetrics(): Promise<GlobalMetrics | null> {
@@ -184,15 +188,10 @@ export async function computeGlobalMetrics(): Promise<GlobalMetrics | null> {
     .map(([fecha, errs]) => {
       const absM = errs.map(Math.abs).reduce((s, v) => s + v, 0) / errs.length
       const rmseD = Math.sqrt(errs.map(e => e * e).reduce((s, v) => s + v, 0) / errs.length)
-      return {
-        fecha,
-        mae: Math.round(absM * 100) / 100,
-        rmse: Math.round(rmseD * 100) / 100,
-      }
+      return { fecha, mae: Math.round(absM * 100) / 100, rmse: Math.round(rmseD * 100) / 100 }
     })
     .sort((a, b) => a.fecha.localeCompare(b.fecha))
 
-  // Accuracy percentage: predictions within 2°C
   const within2 = withActuals.filter(r => Math.abs(r.error!) <= 2).length
   const accuracyPct = Math.round((within2 / withActuals.length) * 10000) / 100
 
@@ -200,10 +199,10 @@ export async function computeGlobalMetrics(): Promise<GlobalMetrics | null> {
     overall_mae: Math.round(mae * 100) / 100,
     overall_rmse: Math.round(rmse * 100) / 100,
     overall_bias: Math.round(bias * 100) / 100,
-    brier_score: 0, // Will be computed when we have probability outcomes
+    brier_score: 0,
     total_muestras: withActuals.length,
     accuracy_pct: accuracyPct,
-    por_ciudad,
+    por_ciudad: porCiudad,
     evolucion_diaria: evolucion,
   }
 }

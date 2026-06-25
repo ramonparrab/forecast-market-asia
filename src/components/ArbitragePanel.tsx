@@ -32,7 +32,7 @@ export default function ArbitragePanel({ alerts, citiesCount }: ArbitragePanelPr
       <div className="mt-3 flex flex-wrap gap-2 text-xs text-gray-500">
         <span>• Forecast: Open-Meteo horario → máximo real del día</span>
         <span>• Polymarket: Gamma API, precio mid no-vig</span>
-        <span>• {20_000.toLocaleString()} sims Monte Carlo</span>
+        <span>• 20,000 sims Monte Carlo</span>
       </div>
     </div>
   )
