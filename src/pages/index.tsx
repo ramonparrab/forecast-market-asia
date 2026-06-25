@@ -5,9 +5,10 @@ import AllocationPanel from '@/components/AllocationPanel'
 import MetricsChart from '@/components/MetricsChart'
 import ArbitragePanel from '@/components/ArbitragePanel'
 import ForecastTable from '@/components/ForecastTable'
+import ForecastVsActualChart from '@/components/ForecastVsActualChart'
 import { DailyAnalysis, GlobalMetrics, CityAnalysis } from '@/types'
 
-type View = 'dashboard' | 'table' | 'metrics' | 'arbitrage'
+type View = 'dashboard' | 'table' | 'metrics' | 'comparison' | 'arbitrage'
 
 /** Returns a friendly confidence label + color class */
 function getConfidence(city: CityAnalysis): { label: string; color: string; bg: string } {
@@ -159,6 +160,7 @@ export default function Home() {
     { key: 'dashboard', label: 'Dashboard', icon: '🏠', desc: 'Vista general' },
     { key: 'table', label: 'Tabla', icon: '📊', desc: 'Datos completos' },
     { key: 'metrics', label: 'Precisión', icon: '📈', desc: 'Métricas históricas' },
+    { key: 'comparison', label: 'Comparación', icon: '📉', desc: 'Pronóstico vs Real' },
     { key: 'arbitrage', label: 'Arbitraje', icon: '🔍', desc: 'Alertas de ineficiencia' },
   ]
 
@@ -279,6 +281,9 @@ export default function Home() {
 
       {/* Metrics View */}
       {activeView === 'metrics' && <MetricsChart metrics={metrics} />}
+
+      {/* Comparison View (Forecast vs Actual) */}
+      {activeView === 'comparison' && <ForecastVsActualChart metrics={metrics} />}
 
       {/* Arbitrage View */}
       {activeView === 'arbitrage' && (

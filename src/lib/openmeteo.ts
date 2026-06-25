@@ -3,6 +3,28 @@ import { MODELOS_CLIMATICOS } from './cities'
 
 const OPENMETEO_BASE = 'https://api.open-meteo.com/v1/forecast'
 
+/**
+ * Fetch the ACTUAL maximum temperature for a past date.
+ * Uses the best_match model as ground truth.
+ */
+export async function fetchActualMaxTemp(
+  lat: number,
+  lon: number,
+  fechaISO: string
+): Promise<number | null> {
+  try {
+    const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&daily=temperature_2m_max&temperature_unit=celsius&start_date=${fechaISO}&end_date=${fechaISO}`
+    const resp = await fetch(url, { signal: AbortSignal.timeout(10000) })
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+    const data = await resp.json()
+    const maxTemp = data?.daily?.temperature_2m_max?.[0]
+    return maxTemp ?? null
+  } catch (e) {
+    console.warn(`Error fetching actual temp for ${fechaISO}:`, (e as Error).message)
+    return null
+  }
+}
+
 export async function fetchWeatherModels(
   lat: number,
   lon: number,

@@ -102,6 +102,16 @@ export interface AccuracyMetrics {
   muestras: number
 }
 
+export interface ForecastVsActual {
+  fecha_objetivo: string
+  ciudad: string
+  slug: string
+  temp_pronosticada: number
+  temp_corregida: number
+  temp_real: number
+  error: number
+}
+
 export interface GlobalMetrics {
   overall_mae: number
   overall_rmse: number

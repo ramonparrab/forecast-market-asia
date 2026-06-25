@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js'
 import { HistoricalRecord, DailyRun, GlobalMetrics } from '@/types'
+import { CIUDADES_ASIA } from './cities'
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || ''
 const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
@@ -137,6 +138,93 @@ export async function getDailyRuns(limit = 30): Promise<DailyRun[]> {
 
   if (error || !data) return []
   return (data as any) as DailyRun[]
+}
+
+export async function updateActualTemperature(
+  recordId: number,
+  tempReal: number
+): Promise<boolean> {
+  const client = getClient()
+  if (!client) return false
+
+  // Get the forecast temp to compute error client-side
+  const { data, error: fetchErr } = await client
+    .from('forecast_history' as any)
+    .select('temp_corregida')
+    .eq('id', recordId)
+    .single()
+
+  if (fetchErr || !data) {
+    console.error('Error fetching record for update:', fetchErr)
+    return false
+  }
+
+  const tc = (data as any).temp_corregida
+  const error = Math.round((tempReal - tc) * 100) / 100
+
+  const { error: updateErr } = await client
+    .from('forecast_history' as any)
+    .update({ temp_real: tempReal, error } as any)
+    .eq('id', recordId)
+
+  if (updateErr) {
+    console.error('Error updating actual temp:', updateErr)
+    return false
+  }
+
+  return true
+}
+
+export async function getRecordsWithoutActuals(
+  limit = 50
+): Promise<{ id: number; slug: string; ciudad: string; fecha_objetivo: string; lat: number; lon: number }[]> {
+  const client = getClient()
+  if (!client) return []
+
+  const { data, error } = await client
+    .from('forecast_history' as any)
+    .select('id, slug, ciudad, fecha_objetivo')
+    .is('temp_real', null)
+    .not('fecha_objetivo', 'gte', new Date().toISOString().slice(0, 10))
+    .order('fecha_objetivo', { ascending: false } as any)
+    .limit(limit)
+
+  if (error || !data) return []
+
+  return (data as any[]).map((r: any) => {
+    const city = CIUDADES_ASIA.find(c => c.slug === r.slug)
+    return {
+      id: r.id,
+      slug: r.slug,
+      ciudad: r.ciudad,
+      fecha_objetivo: r.fecha_objetivo,
+      lat: city?.lat ?? 0,
+      lon: city?.lon ?? 0,
+    }
+  })
+}
+
+export async function getForecastVsActual(
+  slug?: string,
+  limit = 100
+): Promise<{ fecha_objetivo: string; ciudad: string; slug: string; temp_pronosticada: number; temp_corregida: number; temp_real: number; error: number }[]> {
+  const client = getClient()
+  if (!client) return []
+
+  let q = client
+    .from('forecast_history' as any)
+    .select('fecha_objetivo, ciudad, slug, temp_pronosticada, temp_corregida, temp_real, error')
+    .not('temp_real', 'is', null)
+    .order('fecha_objetivo', { ascending: false } as any)
+    .limit(limit)
+
+  if (slug) {
+    q = q.eq('slug', slug)
+  }
+
+  const { data, error } = await q
+  if (error || !data) return []
+  return (data as any) as any[]
 }
 
 export async function computeGlobalMetrics(): Promise<GlobalMetrics | null> {
