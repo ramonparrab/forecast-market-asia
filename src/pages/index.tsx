@@ -2,8 +2,8 @@ import { useState, useEffect, useCallback } from 'react'
 import Layout from '@/components/Layout'
 import CityCard from '@/components/CityCard'
 import AllocationPanel from '@/components/AllocationPanel'
-import CityMetricsPanel from '@/components/CityMetricsPanel'
-import ComparisonPanel from '@/components/ComparisonPanel'
+import MetricsChart from '@/components/MetricsChart'
+import ForecastVsActualChart from '@/components/ForecastVsActualChart'
 import ArbitragePanel from '@/components/ArbitragePanel'
 import ForecastTable from '@/components/ForecastTable'
 import BacktestChart from '@/components/BacktestChart'
@@ -549,10 +549,10 @@ export default function Home({ initialAnalysis, initialMetrics, initialAvailable
       {activeView === 'table' && analysis && <ForecastTable data={analysis} />}
 
       {/* Metrics View - Per city with backtesting data */}
-      {activeView === 'metrics' && <CityMetricsPanel />}
+      {activeView === 'metrics' && <MetricsChart metrics={metrics} />}
 
       {/* Comparison View - Forecast vs Actual per city */}
-      {activeView === 'comparison' && <ComparisonPanel />}
+      {activeView === 'comparison' && <ForecastVsActualChart metrics={metrics} />}
 
       {/* Backtest View */}
       {activeView === 'backtest' && <BacktestChart />}
