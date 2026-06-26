@@ -19,7 +19,6 @@ export const MODELOS_CLIMATICOS = [
   'icon_seamless',
   'jma_seamless',
   'meteofrance_seamless',
-  'ecmwf_ens',
 ]
 
 export function getEstacion(mes: number): string {
