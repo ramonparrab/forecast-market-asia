@@ -3,7 +3,7 @@ import { HistoricalRecord, DailyRun, GlobalMetrics } from '@/types'
 import { CIUDADES_ASIA } from './cities'
 import { BacktestSummary, BacktestDayResult, BacktestCityMetrics } from './backtest-engine'
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || ''
+const supabaseUrl = (process.env.NEXT_PUBLIC_SUPABASE_URL || '').replace(/\/rest\/v1\/?$/, '')
 const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
 
 let supabase: ReturnType<typeof createClient> | null = null
