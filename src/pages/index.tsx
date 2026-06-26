@@ -143,7 +143,7 @@ export async function getServerSideProps() {
   }
 }
 
-type View = 'dashboard' | 'table' | 'metrics' | 'comparison' | 'backtest' | 'arbitrage'
+type View = 'dashboard' | 'table' | 'metrics' | 'comparison' | 'backtest' | 'arbitrage' | 'architecture'
 
 /** Returns a friendly confidence label + color class */
 function getConfidence(city: CityAnalysis): { label: string; color: string; bg: string } {
@@ -192,17 +192,17 @@ function ImprovementLegend() {
         <span className="ml-auto text-xs text-gray-500">(click para expandir)</span>
       </summary>
       <div className="grid gap-3 p-4 pt-2 text-sm sm:grid-cols-3">
-        <div className="rounded-lg bg-slate-900/50 p-3 border border-amber-500/20">
-          <p className="font-semibold text-amber-400 mb-1">📊 Student-t ν=4</p>
-          <p className="text-gray-400 text-xs">Distribución de colas más gordas que Gaussiana. Mejor calibración en eventos extremos de temperatura, donde Polymarket suele tener mayor error.</p>
-        </div>
-        <div className="rounded-lg bg-slate-900/50 p-3 border border-blue-500/20">
-          <p className="font-semibold text-blue-400 mb-1">🌡️ Nowcasting METAR</p>
-          <p className="text-gray-400 text-xs">Fusión de observaciones meteorológicas en vivo (METAR) con el ensemble. El peso de la observación sube de 0% a 80% durante el día, capturando la temperatura real.</p>
-        </div>
         <div className="rounded-lg bg-slate-900/50 p-3 border border-emerald-500/20">
-          <p className="font-semibold text-emerald-400 mb-1">🎯 Precisión por ciudad</p>
-          <p className="text-gray-400 text-xs">Cálculo dinámico de % de acierto por ciudad basado en: cantidad de modelos, dispersión del ensemble, consenso entre modelos, y actividad de nowcasting.</p>
+          <p className="font-semibold text-emerald-400 mb-1">🌍 ECMWF ENS 51 + Empirical CDF</p>
+          <p className="text-gray-400 text-xs">51 miembros del ensemble europeo reemplazan la distribución paramétrica. La CDF empírica es SIEMPRE más precisa que asumir Student-t. Disponible cuando hay ≥20 miembros.</p>
+        </div>
+        <div className="rounded-lg bg-slate-900/50 p-3 border border-purple-500/20">
+          <p className="font-semibold text-purple-400 mb-1">📈 Isotonic PAVA</p>
+          <p className="text-gray-400 text-xs">Calibración no paramétrica vía Pool Adjacent Violators Algorithm. No asume forma sigmoide; aprende la curva real de calibración desde los datos. ECE &lt;3% = excelente.</p>
+        </div>
+        <div className="rounded-lg bg-slate-900/50 p-3 border border-amber-500/20">
+          <p className="font-semibold text-amber-400 mb-1">⚡ EWMA + Z-score Filter</p>
+          <p className="text-gray-400 text-xs">Pesos dinámicos por fuente con decaimiento exponencial (EWMA) + exclusión de modelos outlier con |z| &gt; 3σ. GFS ya no puede arruinar el ensemble con valores extremos.</p>
         </div>
       </div>
     </details>
@@ -358,6 +358,7 @@ export default function Home({ initialAnalysis, initialMetrics, initialAvailable
     { key: 'comparison', label: 'Comparación', icon: '📉', desc: 'Pronóstico vs Real' },
     { key: 'backtest', label: 'Backtest', icon: '⏳', desc: '90 días históricos' },
     { key: 'arbitrage', label: 'Arbitraje', icon: '🔍', desc: 'Alertas de ineficiencia' },
+    { key: 'architecture', label: 'Arquitectura', icon: '🏗️', desc: 'Pipeline del sistema' },
   ]
 
   return (
@@ -474,14 +475,16 @@ export default function Home({ initialAnalysis, initialMetrics, initialAvailable
           <button onClick={() => runAnalysis()} className="btn-primary text-base px-8 py-3">
             🚀 Comenzar Análisis
           </button>
-          <div className="mt-6 flex justify-center gap-6 text-xs text-gray-600">
-            <span>6 modelos meteorológicos</span>
+          <div className="mt-6 flex justify-center gap-6 text-xs text-gray-600 flex-wrap">
+            <span>7 modelos (ECMWF ENS 51)</span>
             <span>·</span>
-            <span>20,000 simulaciones Monte Carlo</span>
+            <span>Empirical CDF</span>
             <span>·</span>
-            <span>Student-t ν=4</span>
+            <span>Isotonic PAVA</span>
             <span>·</span>
-            <span>Nowcasting en vivo</span>
+            <span>EWMA + Z-score</span>
+            <span>·</span>
+            <span>Walk-Forward</span>
           </div>
         </div>
       )}
@@ -560,6 +563,129 @@ export default function Home({ initialAnalysis, initialMetrics, initialAvailable
           alerts={analysis?.arbitrage_alerts ?? []}
           citiesCount={analysis?.cities.length ?? 0}
         />
+      )}
+
+      {/* System Architecture View */}
+      {activeView === 'architecture' && (
+        <div className="space-y-6">
+          <div className="rounded-2xl bg-gradient-to-br from-slate-900 to-slate-800 border border-gray-700/30 p-6">
+            <h2 className="text-xl font-bold text-white mb-1">🏗️ Arquitectura del Sistema</h2>
+            <p className="text-sm text-gray-400 mb-6">Pipeline completo de forecasting meteorológico con 5 mejoras implementadas</p>
+
+            {/* Pipeline Flow */}
+            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 mb-8">
+              <div className="rounded-xl bg-blue-500/5 border border-blue-500/20 p-4">
+                <div className="text-2xl mb-2">📡</div>
+                <h3 className="font-semibold text-blue-400 text-sm mb-2">1. Datos Meteorológicos</h3>
+                <ul className="text-xs text-gray-400 space-y-1">
+                  <li>• Open-Meteo: 6 modelos + ECMWF ENS 51 miembros</li>
+                  <li>• Nowcasting METAR: observaciones en vivo</li>
+                  <li>• Archive API: temperatura real histórica</li>
+                </ul>
+              </div>
+
+              <div className="rounded-xl bg-emerald-500/5 border border-emerald-500/20 p-4">
+                <div className="text-2xl mb-2">🔬</div>
+                <h3 className="font-semibold text-emerald-400 text-sm mb-2">2. Ensemble + Filtros</h3>
+                <ul className="text-xs text-gray-400 space-y-1">
+                  <li>• Z-score filter: excluye modelos outlier (&gt;3σ)</li>
+                  <li>• EWMA weighting: pesos dinámicos por precisión</li>
+                  <li>• Bias correction dinámico (EMA últimos 30 días)</li>
+                </ul>
+              </div>
+
+              <div className="rounded-xl bg-purple-500/5 border border-purple-500/20 p-4">
+                <div className="text-2xl mb-2">🎯</div>
+                <h3 className="font-semibold text-purple-400 text-sm mb-2">3. Calibración</h3>
+                <ul className="text-xs text-gray-400 space-y-1">
+                  <li>• Empirical CDF: ECMWF ENS 51 miembros</li>
+                  <li>• Isotonic PAVA: calibración no paramétrica</li>
+                  <li>• Platt Scaling: calibración sigmoide (fallback)</li>
+                </ul>
+              </div>
+
+              <div className="rounded-xl bg-amber-500/5 border border-amber-500/20 p-4">
+                <div className="text-2xl mb-2">📊</div>
+                <h3 className="font-semibold text-amber-400 text-sm mb-2">4. Probabilidad Monte Carlo</h3>
+                <ul className="text-xs text-gray-400 space-y-1">
+                  <li>• 20,000 simulaciones por contrato</li>
+                  <li>• Student-t ν=4 (colas gordas)</li>
+                  <li>• Empirical CDF cuando hay ≥20 miembros</li>
+                </ul>
+              </div>
+
+              <div className="rounded-xl bg-rose-500/5 border border-rose-500/20 p-4">
+                <div className="text-2xl mb-2">💰</div>
+                <h3 className="font-semibold text-rose-400 text-sm mb-2">5. Kelly + Asignación</h3>
+                <ul className="text-xs text-gray-400 space-y-1">
+                  <li>• Fractional Kelly (0.25)</li>
+                  <li>• Edge mínimo 6%</li>
+                  <li>• $10/día presupuesto, $1-5 por apuesta</li>
+                </ul>
+              </div>
+
+              <div className="rounded-xl bg-cyan-500/5 border border-cyan-500/20 p-4">
+                <div className="text-2xl mb-2">✅</div>
+                <h3 className="font-semibold text-cyan-400 text-sm mb-2">6. Validación Walk-Forward</h3>
+                <ul className="text-xs text-gray-400 space-y-1">
+                  <li>• Backtest walk-forward: sin look-ahead bias</li>
+                  <li>• 30 días training + test secuencial</li>
+                  <li>• MAE/RMSE/bias por ciudad</li>
+                </ul>
+              </div>
+            </div>
+
+            {/* Model Details */}
+            <div className="rounded-xl bg-slate-800/50 border border-gray-700/30 p-4 mb-4">
+              <h3 className="font-semibold text-white text-sm mb-3">🧩 Detalle de Modelos (Open-Meteo)</h3>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+                <div className="bg-slate-900/50 rounded-lg p-2"><span className="text-blue-400">best_match</span><p className="text-gray-500">Mejor modelo por coordenada</p></div>
+                <div className="bg-slate-900/50 rounded-lg p-2"><span className="text-blue-400">ecmwf_ifs025</span><p className="text-gray-500">ECMWF HRES (~9km)</p></div>
+                <div className="bg-slate-900/50 rounded-lg p-2"><span className="text-blue-400">gfs_seamless</span><p className="text-gray-500">NOAA GFS (~13km)</p></div>
+                <div className="bg-slate-900/50 rounded-lg p-2"><span className="text-blue-400">icon_seamless</span><p className="text-gray-500">DWD ICON (~13km)</p></div>
+                <div className="bg-slate-900/50 rounded-lg p-2"><span className="text-blue-400">jma_seamless</span><p className="text-gray-500">JMA Japonés (~20km)</p></div>
+                <div className="bg-slate-900/50 rounded-lg p-2"><span className="text-blue-400">meteofrance_seamless</span><p className="text-gray-500">Météo France (~10km)</p></div>
+                <div className="bg-slate-900/50 rounded-lg p-2 col-span-2"><span className="text-emerald-400 font-medium">ecmwf_ens</span><p className="text-gray-500">ECMWF ENS: 51 miembros + control → Empirical CDF</p></div>
+              </div>
+            </div>
+
+            {/* ECMWF ENS 51 */}
+            <div className="rounded-xl bg-emerald-500/5 border border-emerald-500/20 p-4 mb-4">
+              <h3 className="font-semibold text-emerald-400 text-sm mb-2">🟢 ECMWF ENS 51 Miembros</h3>
+              <p className="text-xs text-gray-400 mb-2">Mejora más importante: el Ensemble del Centro Europeo proporciona 51 perturbaciones del mismo modelo, dando una distribución de probabilidad REAL. Esto reemplaza la suposición paramétrica (Student-t) con una CDF empírica, eliminando el mayor error de calibración.</p>
+              <div className="text-xs text-gray-500">Cada miembro: misma fecha, misma ciudad, condiciones iniciales ligeramente perturbadas → spread realista</div>
+            </div>
+
+            {/* PAVA */}
+            <div className="rounded-xl bg-purple-500/5 border border-purple-500/20 p-4 mb-4">
+              <h3 className="font-semibold text-purple-400 text-sm mb-2">🟣 Isotonic PAVA</h3>
+              <p className="text-xs text-gray-400 mb-2">Pool Adjacent Violators Algorithm: calibración no paramétrica que aprende la forma exacta de la curva de calibración. A diferencia de Platt Scaling (que asume una sigmoide), PAVA encuentra la función monótona óptima directamente de los datos.</p>
+              <div className="text-xs text-gray-500">ECE (Expected Calibration Error) mide qué tan lejos está la línea de calibración de la diagonal perfecta. &lt;3% = excelente.</div>
+            </div>
+
+            {/* EWMA + Z-score */}
+            <div className="rounded-xl bg-amber-500/5 border border-amber-500/20 p-4 mb-4">
+              <h3 className="font-semibold text-amber-400 text-sm mb-2">🟠 EWMA + Z-score Filter</h3>
+              <p className="text-xs text-gray-400 mb-2">EWMA (Exponentially Weighted Moving Average) da más peso a errores recientes: decay=0.15. Z-score filter excluye modelos con |z| &gt; 3σ antes del promedio, eliminando outliers como GFS cuando produce valores extremos.</p>
+            </div>
+
+            {/* Walk-forward */}
+            <div className="rounded-xl bg-cyan-500/5 border border-cyan-500/20 p-4">
+              <h3 className="font-semibold text-cyan-400 text-sm mb-2">🔵 Walk-Forward Backtest</h3>
+              <p className="text-xs text-gray-400 mb-2">El gold standard de validación: para cada día, el sesgo se calcula SOLO con datos anteriores a esa fecha. Esto da la precisión real del sistema en producción, sin look-ahead bias. El backtest normal (que entrena con todos los datos) sobrestima la precisión.</p>
+              <div className="grid grid-cols-2 gap-4 mt-3 text-xs">
+                <div className="bg-slate-900/50 rounded-lg p-2">
+                  <p className="text-gray-500">Backtest Simple</p>
+                  <p className="text-gray-400">Entrena con datos pasados → sesgo calculado con 90 días</p>
+                </div>
+                <div className="bg-slate-900/50 rounded-lg p-2">
+                  <p className="text-emerald-400">Walk-Forward</p>
+                  <p className="text-gray-400">Cada día solo ve datos anteriores → precisión real</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Loading skeleton */}

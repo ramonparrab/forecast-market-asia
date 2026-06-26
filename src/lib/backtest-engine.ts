@@ -10,6 +10,7 @@
  */
 import { CIUDADES_ASIA, MODELOS_CLIMATICOS } from './cities'
 import { computeEnsemble } from './ensemble'
+import { WalkForwardResult } from '@/types'
 
 const FORECAST_BASE = 'https://api.open-meteo.com/v1/forecast'
 const ARCHIVE_BASE = 'https://archive-api.open-meteo.com/v1/archive'
@@ -93,39 +94,35 @@ async function fetchForecastsForCity(
   endDate: string
 ): Promise<ParsedForecastDay[]> {
   const modelsParam = MODELOS_CLIMATICOS.join(',')
-  const url = `${FORECAST_BASE}?latitude=${lat}&longitude=${lon}&hourly=temperature_2m&temperature_unit=celsius&start_date=${startDate}&end_date=${endDate}&timezone=auto&models=${modelsParam}`
+  const url = `${FORECAST_BASE}?latitude=${lat}&longitude=${lon}&daily=temperature_2m_max&temperature_unit=celsius&start_date=${startDate}&end_date=${endDate}&timezone=auto&models=${modelsParam}`
   const resp = await fetch(url, { signal: AbortSignal.timeout(30000) })
   if (!resp.ok) throw new Error(`Forecast HTTP ${resp.status}`)
   const data = await resp.json()
 
-  const hourly = data.hourly || {}
-  const times: string[] = hourly.time ?? []
+  const daily = data.daily || {}
+  const times: string[] = daily.time ?? []
 
   if (times.length === 0) return []
 
-  // Group hourly data by day
-  const days: Record<string, Record<string, number[]>> = {}
-  for (let i = 0; i < times.length; i++) {
-    const fecha = times[i].slice(0, 10)
-    if (!days[fecha]) days[fecha] = {}
+  const days: ParsedForecastDay[] = []
+  for (let t = 0; t < times.length; t++) {
+    const fecha = times[t]
+    const models: Record<string, number> = {}
+
     for (const model of MODELOS_CLIMATICOS) {
-      const key = `temperature_2m_${model}`
-      const val = hourly[key]?.[i]
-      if (val !== undefined && val !== null) {
-        if (!days[fecha][model]) days[fecha][model] = []
-        days[fecha][model].push(val)
+      const key = `temperature_2m_max_${model}`
+      const vals = daily[key]
+      if (vals && Array.isArray(vals) && vals[t] !== null && vals[t] !== undefined) {
+        models[model] = vals[t]
       }
+    }
+
+    if (Object.keys(models).length > 0) {
+      days.push({ fecha, models })
     }
   }
 
-  // Compute daily max per model per day
-  return Object.entries(days).map(([fecha, modelTemps]) => {
-    const models: Record<string, number> = {}
-    for (const [model, temps] of Object.entries(modelTemps)) {
-      models[model] = Math.max(...temps)
-    }
-    return { fecha, models }
-  })
+  return days
 }
 
 export async function runBacktest(days: number = 90, offsetDays: number = 0): Promise<BacktestSummary> {
@@ -249,5 +246,126 @@ export async function runBacktest(days: number = 90, offsetDays: number = 0): Pr
     peores_ciudades: peoresCiudades,
     resultados: allResults,
     timestamp: new Date().toISOString(),
+  }
+}
+
+/**
+ * Walk-Forward Backtest: chronologically trains on past data, tests on future.
+ * 
+ * Key principle: NEVER use future data to evaluate past forecasts.
+ * For each city, the first N dates are training only; each subsequent date
+ * uses bias computed from ALL prior dates (no look-ahead).
+ * 
+ * This gives the TRUE expected accuracy of the system in production.
+ */
+export async function walkForwardBacktest(
+  minTrainDays: number = 30,
+  testWindow: number = 1
+): Promise<WalkForwardResult> {
+  const endDate = new Date()
+  endDate.setDate(endDate.getDate() - 1)
+  const startDate = new Date(endDate)
+  startDate.setDate(startDate.getDate() - 90)
+
+  const startStr = startDate.toISOString().slice(0, 10)
+  const endStr = endDate.toISOString().slice(0, 10)
+
+  // Fetch all data first (same as runBacktest)
+  const cityData: { slug: string; nombre: string; forecastDays: ParsedForecastDay[]; actuals: Record<string, number> }[] = []
+  for (const city of CIUDADES_ASIA) {
+    try {
+      const [forecastDays, actuals] = await Promise.all([
+        fetchForecastsForCity(city.lat, city.lon, startStr, endStr),
+        fetchActualsForCity(city.lat, city.lon, startStr, endStr),
+      ])
+      cityData.push({ slug: city.slug, nombre: city.nombre, forecastDays, actuals })
+      await sleep(API_DELAY_MS)
+    } catch (e) {
+      console.warn(`[WF] Error fetching ${city.slug}:`, (e as Error).message)
+    }
+  }
+
+  type WFEntry = { error: number; absError: number; within2: boolean; within4: boolean }
+  const overallEntries: WFEntry[] = []
+  const perCityEntries: Record<string, WFEntry[]> = {}
+
+  for (const city of cityData) {
+    const { slug, nombre, forecastDays, actuals } = city
+
+    // Sort dates chronologically
+    const sortedDays = [...forecastDays].sort((a, b) => a.fecha.localeCompare(b.fecha))
+    if (sortedDays.length < minTrainDays + testWindow) continue
+
+    const cityEntries: WFEntry[] = []
+
+    for (let i = minTrainDays; i < sortedDays.length; i += testWindow) {
+      const trainDays = sortedDays.slice(0, i)
+      const testDays = sortedDays.slice(i, i + testWindow)
+
+      // Training: compute bias from all prior days
+      const trainErrors: { error: number }[] = []
+      for (const td of trainDays) {
+        const actualTemp = actuals[td.fecha]
+        if (actualTemp === undefined || Object.keys(td.models).length === 0) continue
+        const rawMean = Object.values(td.models).reduce((s, v) => s + v, 0) / Object.keys(td.models).length
+        trainErrors.push({ error: actualTemp - rawMean })
+      }
+
+      // Test: apply bias and measure error
+      for (const td of testDays) {
+        const actualTemp = actuals[td.fecha]
+        if (actualTemp === undefined || Object.keys(td.models).length === 0) continue
+
+        const forecast = computeEnsemble({
+          slug,
+          mes: new Date(td.fecha + 'T12:00:00').getMonth() + 1,
+          modelsRaw: td.models,
+          recentErrors: trainErrors.slice(-30),
+          recentModelErrors: {},
+        })
+
+        const error = actualTemp - forecast.temp_corregida
+        const absError = Math.abs(error)
+        const entry: WFEntry = { error, absError, within2: absError <= 2, within4: absError <= 4 }
+        cityEntries.push(entry)
+        overallEntries.push(entry)
+      }
+    }
+
+    if (cityEntries.length >= 5) {
+      perCityEntries[slug] = cityEntries
+    }
+  }
+
+  function computeMetrics(entries: WFEntry[]) {
+    const n = entries.length
+    if (n === 0) return { n_tests: 0, mae_f: 0, rmse_f: 0, bias_f: 0, within_2f_pct: 0, within_4f_pct: 0 }
+    const mae = entries.reduce((s, e) => s + e.absError, 0) / n
+    const rmse = Math.sqrt(entries.reduce((s, e) => s + e.error * e.error, 0) / n)
+    const bias = entries.reduce((s, e) => s + e.error, 0) / n
+    const w2 = entries.filter(e => e.within2).length / n * 100
+    const w4 = entries.filter(e => e.within4).length / n * 100
+    return {
+      n_tests: n,
+      mae_f: Math.round(mae * 100) / 100,
+      rmse_f: Math.round(rmse * 100) / 100,
+      bias_f: Math.round(bias * 100) / 100,
+      within_2f_pct: Math.round(w2 * 100) / 100,
+      within_4f_pct: Math.round(w4 * 100) / 100,
+    }
+  }
+
+  const overall = computeMetrics(overallEntries)
+  const perCity: Record<string, { n_tests: number; mae_f: number; rmse_f: number; bias_f: number; within_2f_pct: number }> = {}
+  for (const [slug, entries] of Object.entries(perCityEntries)) {
+    perCity[slug] = computeMetrics(entries)
+  }
+
+  return {
+    method: 'walk_forward',
+    min_train_days: minTrainDays,
+    test_window: testWindow,
+    overall: { ...overall, n_cities: Object.keys(perCity).length },
+    per_city: perCity,
   }
 }

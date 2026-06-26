@@ -17,6 +17,7 @@ export interface ForecastResult {
   consenso: string
   ensemble_raw: ModelTemps
   sesgo_aplicado: number
+  ensemble_members?: number[]
 }
 
 export interface PolymarketContract {
@@ -146,6 +147,28 @@ export interface CityImprovement {
   descripcion_impacto: string
   ultima_mejora_fecha: string
   ultima_mejora_desc: string
+}
+
+export interface WalkForwardResult {
+  method: string
+  min_train_days: number
+  test_window: number
+  overall: {
+    n_cities: number
+    n_tests: number
+    mae_f: number
+    rmse_f: number
+    bias_f: number
+    within_2f_pct: number
+    within_4f_pct: number
+  }
+  per_city: Record<string, {
+    n_tests: number
+    mae_f: number
+    rmse_f: number
+    bias_f: number
+    within_2f_pct: number
+  }>
 }
 
 export interface DailyAnalysis {

@@ -9,14 +9,15 @@ interface EnsembleInput {
   modelsRaw: ModelTemps
   recentErrors: { error: number }[]
   recentModelErrors: Record<string, number[]>
-  backtestBiasCorrection?: number // second-order correction from 180-day backtest
+  backtestBiasCorrection?: number
+  ensembleMembers?: number[]
 }
 
 export function computeEnsemble(input: EnsembleInput): ForecastResult {
-  const { slug, mes, modelsRaw, recentErrors, recentModelErrors } = input
+  const { slug, mes, modelsRaw, recentErrors, recentModelErrors, ensembleMembers } = input
 
-  const modelos = Object.keys(modelsRaw)
-  const numModelos = modelos.length
+  let modelos = Object.keys(modelsRaw)
+  let numModelos = modelos.length
 
   if (numModelos < 2) {
     return {
@@ -26,6 +27,25 @@ export function computeEnsemble(input: EnsembleInput): ForecastResult {
       consenso: 'FALLBACK',
       ensemble_raw: modelsRaw,
       sesgo_aplicado: 0,
+      ensemble_members: ensembleMembers,
+    }
+  }
+
+  // Z-score anomaly filter: exclude models >3σ from ensemble mean
+  if (numModelos >= 3) {
+    const temps = modelos.map(m => modelsRaw[m])
+    const m = mean(temps)
+    const s = Math.max(std(temps), 0.5)
+    const filtered: string[] = []
+    for (const model of modelos) {
+      const z = Math.abs(modelsRaw[model] - m) / s
+      if (z <= 3.0) {
+        filtered.push(model)
+      }
+    }
+    if (filtered.length >= 2) {
+      modelos = filtered
+      numModelos = filtered.length
     }
   }
 
@@ -46,16 +66,14 @@ export function computeEnsemble(input: EnsembleInput): ForecastResult {
   const sesgo = computeDynamicBias(slug, mes, recentErrors)
   let tempCorregida = Math.max(0, tempPonderada - sesgo)
 
-  // Second-order correction from 180-day backtest
-  // backtestBiasCorrection = mean(actual - forecast). Positive = we under-predicted → add temp
   if (input.backtestBiasCorrection !== undefined && Math.abs(input.backtestBiasCorrection) >= 0.15) {
     tempCorregida = Math.max(0, tempCorregida + input.backtestBiasCorrection)
   }
 
-  // Spread & volatility
-  const temps = Object.values(modelsRaw)
-  const spread = Math.max(...temps) - Math.min(...temps)
-  const stdDev = std(temps)
+  // Spread & volatility (using Z-score filtered models)
+  const filteredTemps = modelos.map(m => modelsRaw[m])
+  const spread = Math.max(...filteredTemps) - Math.min(...filteredTemps)
+  const stdDev = std(filteredTemps)
   const volatilidad = Math.max(0.9, Math.min(stdDev * 1.75, 5.2))
 
   // Consensus
@@ -77,5 +95,31 @@ export function computeEnsemble(input: EnsembleInput): ForecastResult {
     consenso,
     ensemble_raw: modelsRaw,
     sesgo_aplicado: Math.round(sesgo * 100) / 100,
+    ensemble_members: ensembleMembers,
   }
+}
+
+export function ensembleEmpiricalCDF(
+  members: number[],
+  threshold: number
+): number {
+  const n = members.length
+  if (n === 0) return 0.5
+  const countBelow = members.filter(m => m < threshold).length
+  let p = countBelow / n
+  p = Math.max(1 / (n + 1), Math.min(1 - 1 / (n + 1), p))
+  return p
+}
+
+export function ensembleEmpiricalProbInRange(
+  members: number[],
+  low: number,
+  high: number
+): number {
+  const n = members.length
+  if (n === 0) return 0.5
+  const countIn = members.filter(m => m >= low && m <= high).length
+  let p = countIn / n
+  p = Math.max(1 / (n + 1), Math.min(1 - 1 / (n + 1), p))
+  return p
 }

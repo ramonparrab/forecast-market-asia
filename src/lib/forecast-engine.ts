@@ -50,13 +50,13 @@ async function analyzeCity(
   fetchPrices: boolean,
   backtestBiasCorrection?: number
 ): Promise<{ cityAnalysis: CityAnalysis | null; recommendations: BetRecommendation[] }> {
-  // 1. Weather models
-  const ensembleRaw = await fetchWeatherModels(city.lat, city.lon, fechaISO)
+  // 1. Weather models (includes ECMWF ENS 51 members)
+  const { models: ensembleRaw, ensembleMembers } = await fetchWeatherModels(city.lat, city.lon, fechaISO)
   if (Object.keys(ensembleRaw).length === 0) {
     return { cityAnalysis: null, recommendations: [] }
   }
 
-  // 2. Ensemble with biases
+  // 2. Ensemble with biases + Z-score filter + empirical CDF
   const recentErrors = await getRecentErrors(city.slug, 30)
   const cityModelErrors: Record<string, number[]> = {}
   for (const [slug, errs] of Object.entries(recentModelErrors)) {
@@ -70,6 +70,7 @@ async function analyzeCity(
     recentErrors,
     recentModelErrors: cityModelErrors,
     backtestBiasCorrection,
+    ensembleMembers,
   })
 
   // 3. Nowcasting — blend live METAR observation into forecast
@@ -115,15 +116,43 @@ async function analyzeCity(
   parts.push(`spread ${spread.toFixed(1)}°C entre modelos`)
   const explicacion = `Pronóstico basado en ${parts.join(', ')}. Precisión histórica estimada: ±${(spread * 0.5).toFixed(1)}°C.`
 
-  // 5. Monte Carlo
+  // 5. Probability: empirical CDF (ECMWF ENS 51) or Monte Carlo
+  const useEmpirical = forecast.ensemble_members && forecast.ensemble_members.length >= 20
   for (const p of contracts) {
     const parsed = p.tipo ? p : parseContract(p.texto)
     p.tipo = parsed.tipo
     p.valor = parsed.valor
 
-    p.prob_ia_raw = Math.round(
-      monteCarloProbability(forecast.ensemble_raw, forecast.temp_corregida, forecast.volatilidad, SIMULACIONES, parsed.tipo, parsed.valor) * 10000
-    ) / 10000
+    if (useEmpirical) {
+      const members = forecast.ensemble_members!
+      const high = forecast.temp_corregida
+      const std = forecast.volatilidad
+      let rawProb = 0
+      if (parsed.tipo === 'inferior' && typeof parsed.valor === 'number') {
+        const countBelow = members.filter(m => m < parsed.valor).length
+        rawProb = Math.max(1 / (members.length + 1), Math.min(1 - 1 / (members.length + 1), countBelow / members.length))
+      } else if (parsed.tipo === 'superior' && typeof parsed.valor === 'number') {
+        const countAbove = members.filter(m => m > parsed.valor).length
+        rawProb = Math.max(1 / (members.length + 1), Math.min(1 - 1 / (members.length + 1), countAbove / members.length))
+      } else if (parsed.tipo === 'exacto') {
+        const val = typeof parsed.valor === 'number' ? parsed.valor : 0
+        const low = val - 0.5
+        const highVal = val + 0.5
+        const countIn = members.filter(m => m >= low && m <= highVal).length
+        rawProb = Math.max(1 / (members.length + 1), Math.min(1 - 1 / (members.length + 1), countIn / members.length))
+      } else if (parsed.tipo === 'rango' && Array.isArray(parsed.valor)) {
+        const [low, highVal] = parsed.valor
+        const countIn = members.filter(m => m >= low && m <= highVal).length
+        rawProb = Math.max(1 / (members.length + 1), Math.min(1 - 1 / (members.length + 1), countIn / members.length))
+      } else {
+        rawProb = monteCarloProbability(forecast.ensemble_raw, forecast.temp_corregida, forecast.volatilidad, SIMULACIONES, parsed.tipo, parsed.valor)
+      }
+      p.prob_ia_raw = Math.round(rawProb * 10000) / 10000
+    } else {
+      p.prob_ia_raw = Math.round(
+        monteCarloProbability(forecast.ensemble_raw, forecast.temp_corregida, forecast.volatilidad, SIMULACIONES, parsed.tipo, parsed.valor) * 10000
+      ) / 10000
+    }
   }
 
   // 6. Normalize + calibrate
