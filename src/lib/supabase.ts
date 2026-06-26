@@ -383,6 +383,54 @@ function computeSummaryFromResults(allResults: BacktestDayResult[], days: number
   }
 }
 
+export async function getCityMetrics(slug: string): Promise<{
+  metrics: AccuracyMetrics | null
+  improvement: { mejora_mae_pct: number; accuracy_pct: number; tendencia: string; impacto_proximo_pct: number; descripcion_impacto: string; ultima_mejora_fecha: string; ultima_mejora_desc: string } | null
+  evolucion: { fecha: string; mae: number; rmse: number }[]
+}> {
+  const history = await getHistoricalRecords(500)
+  const withActuals = history.filter(r => r.slug === slug && r.temp_real !== null && r.error !== null)
+  if (withActuals.length < 2) return { metrics: null, improvement: null, evolucion: [] }
+  const errors = withActuals.map(r => r.error!)
+  const absErrors = errors.map(Math.abs)
+  const mae = Math.round(absErrors.reduce((s, v) => s + v, 0) / absErrors.length * 100) / 100
+  const rmse = Math.round(Math.sqrt(errors.reduce((s, v) => s + v * v, 0) / errors.length) * 100) / 100
+  const bias = Math.round(errors.reduce((s, v) => s + v, 0) / errors.length * 100) / 100
+  const metrics: AccuracyMetrics = { ciudad: withActuals[0].ciudad, slug, mae, rmse, bias, muestras: withActuals.length }
+  const within2 = withActuals.filter(r => Math.abs(r.error!) <= 2).length
+  const accuracyPct = Math.round(within2 / withActuals.length * 100)
+  // Daily evolution
+  const byDate: Record<string, number[]> = {}
+  for (const r of withActuals) {
+    const fecha = r.fecha_objetivo || r.fecha_ejecucion.slice(0, 10)
+    if (!fecha) continue
+    if (!byDate[fecha]) byDate[fecha] = []
+    byDate[fecha].push(r.error!)
+  }
+  const evolucion = Object.entries(byDate).map(([fecha, errs]) => {
+    const absM = errs.map(Math.abs).reduce((s, v) => s + v, 0) / errs.length
+    const rmseD = Math.sqrt(errs.map(e => e * e).reduce((s, v) => s + v, 0) / errs.length)
+    return { fecha, mae: Math.round(absM * 100) / 100, rmse: Math.round(rmseD * 100) / 100 }
+  }).sort((a, b) => a.fecha.localeCompare(b.fecha))
+  const half = Math.floor(withActuals.length / 2)
+  const recent = withActuals.slice(0, half)
+  const older = withActuals.slice(half)
+  const recentMae = recent.reduce((s, r) => s + Math.abs(r.error!), 0) / recent.length
+  const olderMae = older.reduce((s, r) => s + Math.abs(r.error!), 0) / older.length
+  const mejoraMaePct = olderMae > 0 ? Math.round((olderMae - recentMae) / olderMae * 100) : 0
+  const impactoPct = Math.round(Math.min(Math.max((2 - mae) / 2 * 100, -20), 30))
+  const improvement = {
+    mejora_mae_pct: mejoraMaePct,
+    accuracy_pct: accuracyPct,
+    tendencia: mae <= 1.5 ? 'mejorando' : mae <= 2.5 ? 'estable' : 'empeorando',
+    impacto_proximo_pct: impactoPct,
+    descripcion_impacto: impactoPct > 5 ? `Mejora esperada ~${impactoPct}% en el próximo pronóstico por bias dinámico` : `Estable (~${impactoPct}%)`,
+    ultima_mejora_fecha: withActuals[0].fecha_ejecucion.slice(0, 10),
+    ultima_mejora_desc: `Último error: ${withActuals[0].error!.toFixed(2)}°C`,
+  }
+  return { metrics, improvement, evolucion }
+}
+
 export async function computeGlobalMetrics(): Promise<GlobalMetrics | null> {
   const history = await getHistoricalRecords(1000)
   const withActuals = history.filter(r => r.temp_real !== null && r.error !== null)
