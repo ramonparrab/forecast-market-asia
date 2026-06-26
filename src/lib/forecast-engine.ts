@@ -8,6 +8,7 @@ import { calibrateProbabilities } from './calibration'
 import { calculateAllocation } from './kelly'
 import { getRecentErrors, getRecentModelErrors, computeGlobalMetrics } from './supabase'
 import { nowcastTemperature } from './nowcaster'
+import { loadBacktestBias } from './backtest-bias'
 
 const SIMULACIONES = 20000
 
@@ -46,7 +47,8 @@ async function analyzeCity(
   fechaObjetivo: string,
   targetMonth: number,
   recentModelErrors: Record<string, number[]>,
-  fetchPrices: boolean
+  fetchPrices: boolean,
+  backtestBiasCorrection?: number
 ): Promise<{ cityAnalysis: CityAnalysis | null; recommendations: BetRecommendation[] }> {
   // 1. Weather models
   const ensembleRaw = await fetchWeatherModels(city.lat, city.lon, fechaISO)
@@ -67,6 +69,7 @@ async function analyzeCity(
     modelsRaw: ensembleRaw,
     recentErrors,
     recentModelErrors: cityModelErrors,
+    backtestBiasCorrection,
   })
 
   // 3. Nowcasting — blend live METAR observation into forecast
@@ -193,15 +196,16 @@ export async function runDailyAnalysis(
   const targetMonth = new Date(fechaObjetivo).getMonth() + 1
 
   // Pre-load history (parallel)
-  const [recentModelErrors, globalMetrics] = await Promise.all([
+  const [recentModelErrors, globalMetrics, backtestBias] = await Promise.all([
     getRecentModelErrors(30),
     computeGlobalMetrics(),
+    loadBacktestBias(),
   ])
 
   // Analyze all cities in parallel
   const results = await Promise.all(
     CIUDADES_ASIA.map(city =>
-      analyzeCity(city, fechaISO, fechaObjetivo, targetMonth, recentModelErrors, fetchPrices)
+      analyzeCity(city, fechaISO, fechaObjetivo, targetMonth, recentModelErrors, fetchPrices, backtestBias[city.slug])
     )
   )
 

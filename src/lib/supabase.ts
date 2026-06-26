@@ -1,6 +1,7 @@
 import { createClient } from '@supabase/supabase-js'
 import { HistoricalRecord, DailyRun, GlobalMetrics } from '@/types'
 import { CIUDADES_ASIA } from './cities'
+import { BacktestSummary, BacktestDayResult, BacktestCityMetrics } from './backtest-engine'
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || ''
 const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
@@ -225,6 +226,161 @@ export async function getForecastVsActual(
   const { data, error } = await q
   if (error || !data) return []
   return (data as any) as any[]
+}
+
+// ===== Backtest Bias =====
+
+export interface BacktestBiasEntry {
+  slug: string
+  mes: number
+  bias: number
+  mae: number
+  muestras: number
+}
+
+export async function saveBacktestBias(entries: BacktestBiasEntry[]): Promise<void> {
+  const client = getClient()
+  if (!client || entries.length === 0) return
+
+  // Upsert per slug+mes
+  for (const e of entries) {
+    const { error } = await (client
+      .from('backtest_bias' as any) as any)
+      .upsert({
+        slug: e.slug,
+        mes: e.mes,
+        bias: Math.round(e.bias * 100) / 100,
+        mae: Math.round(e.mae * 100) / 100,
+        muestras: e.muestras,
+        fecha_actualizacion: new Date().toISOString(),
+      }, {
+        onConflict: 'slug,mes',
+      })
+    if (error) console.error('Error saving backtest bias:', error)
+  }
+}
+
+export async function getBacktestBias(): Promise<BacktestBiasEntry[]> {
+  const client = getClient()
+  if (!client) return []
+
+  const { data, error } = await client
+    .from('backtest_bias' as any)
+    .select('*')
+    .order('slug', { ascending: true } as any)
+
+  if (error || !data) return []
+  return (data as any) as BacktestBiasEntry[]
+}
+
+export async function saveBacktestChunk(dias: number, offset: number, summary: BacktestSummary): Promise<void> {
+  const client = getClient()
+  if (!client) return
+
+  const { error } = await client
+    .from('backtest_results' as any)
+    .insert({
+      total_dias: dias,
+      total_muestras: summary.total_muestras,
+      overall_mae: summary.overall_mae,
+      overall_rmse: summary.overall_rmse,
+      overall_bias: summary.overall_bias,
+      overall_accuracy_2c: summary.overall_accuracy_2c,
+      overall_accuracy_1c: summary.overall_accuracy_1c,
+      offset,
+      por_ciudad: JSON.stringify(summary.por_ciudad),
+      resultados: JSON.stringify(summary.resultados),
+    } as any)
+
+  if (error) console.error('Error saving backtest chunk:', error)
+}
+
+export async function getAccumulatedBacktest(limitDays = 180): Promise<BacktestSummary | null> {
+  const client = getClient()
+  if (!client) return null
+
+  const { data, error } = await client
+    .from('backtest_results' as any)
+    .select('*')
+    .order('timestamp', { ascending: false } as any)
+    .limit(20)
+
+  if (error || !data || (data as any[]).length === 0) return null
+
+  const rows = (data as any[]).filter(r => (r.offset ?? 0) + (r.total_dias ?? 0) <= limitDays)
+  if (rows.length === 0) return null
+
+  // Combine all results
+  const allResults: BacktestDayResult[] = []
+  for (const row of rows) {
+    const chunkResults: BacktestDayResult[] = typeof row.resultados === 'string' ? JSON.parse(row.resultados) : (row.resultados ?? [])
+    allResults.push(...chunkResults)
+  }
+
+  // Deduplicate by slug+fecha
+  const seen = new Set<string>()
+  const deduped: BacktestDayResult[] = []
+  for (const r of allResults) {
+    const key = `${r.slug}|${r.fecha}`
+    if (!seen.has(key)) {
+      seen.add(key)
+      deduped.push(r)
+    }
+  }
+
+  // Compute combined metrics
+  return computeSummaryFromResults(deduped, limitDays)
+}
+
+function computeSummaryFromResults(allResults: BacktestDayResult[], days: number): BacktestSummary {
+  const byCity: Record<string, BacktestDayResult[]> = {}
+  for (const r of allResults) {
+    if (!byCity[r.slug]) byCity[r.slug] = []
+    byCity[r.slug].push(r)
+  }
+
+  const cityMetrics: BacktestCityMetrics[] = Object.entries(byCity).map(([slug, results]) => {
+    const errors = results.map(r => r.error)
+    const absErrors = errors.map(Math.abs)
+    const mae = Math.round(absErrors.reduce((s, v) => s + v, 0) / errors.length * 100) / 100
+    const rmse = Math.round(Math.sqrt(errors.reduce((s, v) => s + v * v, 0) / errors.length) * 100) / 100
+    const bias = Math.round(errors.reduce((s, v) => s + v, 0) / errors.length * 100) / 100
+    const within2 = results.filter(r => Math.abs(r.error) <= 2).length
+    const within1 = results.filter(r => Math.abs(r.error) <= 1).length
+    const maxError = Math.round(Math.max(...absErrors) * 100) / 100
+    return {
+      ciudad: results[0]?.ciudad ?? slug,
+      slug,
+      muestras: results.length,
+      mae, rmse, bias,
+      accuracy_within_2c: Math.round(within2 / results.length * 10000) / 100,
+      accuracy_within_1c: Math.round(within1 / results.length * 10000) / 100,
+      max_error: maxError,
+    }
+  })
+
+  const sorted = [...cityMetrics].sort((a, b) => a.mae - b.mae)
+  const allErrors = allResults.map(r => r.error)
+  const allAbs = allErrors.map(Math.abs)
+  const overallMae = Math.round(allAbs.reduce((s, v) => s + v, 0) / allErrors.length * 100) / 100
+  const overallBias = Math.round(allErrors.reduce((s, v) => s + v, 0) / allErrors.length * 100) / 100
+  const within2 = allResults.filter(r => Math.abs(r.error) <= 2).length
+
+  return {
+    total_dias: days,
+    total_ciudades: Object.keys(byCity).length,
+    total_muestras: allResults.length,
+    overall_mae: overallMae,
+    overall_rmse: Math.round(Math.sqrt(allErrors.reduce((s, v) => s + v * v, 0) / allErrors.length) * 100) / 100,
+    overall_bias: overallBias,
+    overall_accuracy_2c: Math.round(within2 / allResults.length * 10000) / 100,
+    overall_accuracy_1c: Math.round(allResults.filter(r => Math.abs(r.error) <= 1).length / allResults.length * 10000) / 100,
+    por_ciudad: cityMetrics,
+    mejores_ciudades: sorted.slice(0, 3).map(c => c.ciudad),
+    peores_ciudades: sorted.slice(-3).reverse().map(c => c.ciudad),
+    resultados: allResults,
+    timestamp: new Date().toISOString(),
+  }
 }
 
 export async function computeGlobalMetrics(): Promise<GlobalMetrics | null> {

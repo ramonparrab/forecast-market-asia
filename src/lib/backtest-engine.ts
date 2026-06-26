@@ -128,10 +128,10 @@ async function fetchForecastsForCity(
   })
 }
 
-export async function runBacktest(days: number = 90): Promise<BacktestSummary> {
+export async function runBacktest(days: number = 90, offsetDays: number = 0): Promise<BacktestSummary> {
   const endDate = new Date()
-  // End date = yesterday (don't include today, which is incomplete)
-  endDate.setDate(endDate.getDate() - 1)
+  // End date = yesterday minus offset (don't include today, which is incomplete)
+  endDate.setDate(endDate.getDate() - 1 - offsetDays)
   const startDate = new Date(endDate)
   startDate.setDate(startDate.getDate() - days + 1)
 

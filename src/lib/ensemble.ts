@@ -9,6 +9,7 @@ interface EnsembleInput {
   modelsRaw: ModelTemps
   recentErrors: { error: number }[]
   recentModelErrors: Record<string, number[]>
+  backtestBiasCorrection?: number // second-order correction from 180-day backtest
 }
 
 export function computeEnsemble(input: EnsembleInput): ForecastResult {
@@ -43,7 +44,13 @@ export function computeEnsemble(input: EnsembleInput): ForecastResult {
 
   // Dynamic bias correction
   const sesgo = computeDynamicBias(slug, mes, recentErrors)
-  const tempCorregida = Math.max(0, tempPonderada - sesgo)
+  let tempCorregida = Math.max(0, tempPonderada - sesgo)
+
+  // Second-order correction from 180-day backtest
+  // backtestBiasCorrection = mean(actual - forecast). Positive = we under-predicted → add temp
+  if (input.backtestBiasCorrection !== undefined && Math.abs(input.backtestBiasCorrection) >= 0.15) {
+    tempCorregida = Math.max(0, tempCorregida + input.backtestBiasCorrection)
+  }
 
   // Spread & volatility
   const temps = Object.values(modelsRaw)

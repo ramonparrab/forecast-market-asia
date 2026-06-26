@@ -1,8 +1,9 @@
 import { NextApiRequest, NextApiResponse } from 'next'
 import { runDailyAnalysis } from '@/lib/forecast-engine'
-import { saveDailyRun, saveForecastRecords, getRecordsWithoutActuals, updateActualTemperature } from '@/lib/supabase'
+import { saveDailyRun, saveForecastRecords, getRecordsWithoutActuals, updateActualTemperature, getHistoricalRecords, saveBacktestBias } from '@/lib/supabase'
 import { fetchActualMaxTemp } from '@/lib/openmeteo'
 import { CIUDADES_ASIA } from '@/lib/cities'
+import { computeBacktestBiasFromResults } from '@/lib/backtest-bias'
 
 /**
  * Vercel Cron Job - runs at 2:00 AM UTC (10:00 PM Caracas UTC-4)
@@ -46,7 +47,31 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     console.log(`[CRON] Backfill: ${backfilled} actualizados, ${backfillErrors.length} errores`)
 
-    // ===== STEP 2: Run forecast for tomorrow =====
+    // ===== STEP 2: Update backtest bias from forecast_history =====
+    console.log('[CRON] Updating backtest bias from historical records...')
+    const allHistory = await getHistoricalRecords(1000)
+    const withActuals = allHistory.filter(r => r.temp_real !== null && r.error !== null)
+    if (withActuals.length >= 5) {
+      const biasData = withActuals.map(r => ({
+        fecha: r.fecha_objetivo || r.fecha_ejecucion.slice(0, 10),
+        ciudad: r.ciudad,
+        slug: r.slug,
+        temp_pronosticada: r.temp_pronosticada,
+        temp_corregida: r.temp_corregida,
+        temp_real: r.temp_real!,
+        error: r.error!,
+        modelos_usados: r.modelos_usados,
+        consenso: r.consenso,
+        sesgo_aplicado: 0,
+      }))
+      const biasEntries = computeBacktestBiasFromResults(biasData)
+      await saveBacktestBias(biasEntries)
+      console.log(`[CRON] Backtest bias updated: ${biasEntries.length} entries from ${withActuals.length} records`)
+    } else {
+      console.log(`[CRON] Not enough records for bias (${withActuals.length}), skipping`)
+    }
+
+    // ===== STEP 3: Run forecast for tomorrow =====
     const tomorrow = new Date()
     tomorrow.setDate(tomorrow.getDate() + 1)
     const fechaObjetivo = tomorrow.toISOString().slice(0, 10)

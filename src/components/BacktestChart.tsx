@@ -6,16 +6,16 @@ import {
 } from 'recharts'
 
 const COLORS = ['#10b981', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#14b8a6', '#f97316', '#6366f1']
+const CHUNK_SIZE = 30
 
 export default function BacktestChart() {
   const [data, setData] = useState<BacktestSummary | null>(null)
-  const [loading, setLoading] = useState(false)
   const [running, setRunning] = useState(false)
+  const [progress, setProgress] = useState(0)
   const [error, setError] = useState<string | null>(null)
   const [days, setDays] = useState(90)
 
   useEffect(() => {
-    // Check cache on mount
     fetch('/api/backtest')
       .then(r => r.json())
       .then(j => { if (j?.data) setData(j.data) })
@@ -25,14 +25,43 @@ export default function BacktestChart() {
   async function runBacktest() {
     setRunning(true)
     setError(null)
+    setProgress(0)
+    
     try {
-      const resp = await fetch(`/api/backtest?days=${days}`, { method: 'POST', signal: AbortSignal.timeout(120000) })
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
-      const json = await resp.json()
-      if (json.status === 'ok') {
-        setData(json.data)
+      if (days <= CHUNK_SIZE) {
+        const resp = await fetch(`/api/backtest?days=${days}`, { method: 'POST', signal: AbortSignal.timeout(120000) })
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+        const json = await resp.json()
+        if (json.status === 'ok') {
+          setData(json.data)
+        } else {
+          throw new Error(json.message || 'Error')
+        }
       } else {
-        throw new Error(json.message || 'Error')
+        // Chunked for 60-180 days: process one chunk at a time to stay within Vercel 10s limit
+        const numChunks = Math.ceil(days / CHUNK_SIZE)
+        
+        for (let chunk = 0; chunk < numChunks; chunk++) {
+          setProgress(Math.round((chunk + 1) / numChunks * 100))
+          const offset = chunk * CHUNK_SIZE
+          const chunkDays = Math.min(CHUNK_SIZE, days - offset)
+          
+          const resp = await fetch(`/api/backtest?days=${chunkDays}&offset=${offset}`, { method: 'POST', signal: AbortSignal.timeout(120000) })
+          if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+          const json = await resp.json()
+          if (json.status !== 'ok') {
+            throw new Error(json.message || `Error en chunk ${chunk + 1}`)
+          }
+        }
+        
+        setProgress(100)
+        
+        // Fetch combined result from cache
+        const finalResp = await fetch('/api/backtest', { signal: AbortSignal.timeout(10000) })
+        if (finalResp.ok) {
+          const finalJson = await finalResp.json()
+          if (finalJson?.data) setData(finalJson.data)
+        }
       }
     } catch (e: any) {
       setError(e.message || 'Error ejecutando backtest')
@@ -74,7 +103,7 @@ export default function BacktestChart() {
               {running ? (
                 <>
                   <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-white/30 border-t-white"></span>
-                  Procesando {days} días × 9 ciudades...
+                  {days > 30 ? `Procesando (${progress}%)` : 'Procesando...'}
                 </>
               ) : (
                 <>
@@ -90,10 +119,23 @@ export default function BacktestChart() {
             ⚠️ {error}
           </div>
         )}
+        {running && days > 30 && (
+          <div className="mt-3">
+            <div className="h-2 rounded-full bg-slate-700 overflow-hidden">
+              <div
+                className="h-full rounded-full bg-gradient-to-r from-blue-500 to-emerald-500 transition-all duration-300"
+                style={{ width: `${progress}%` }}
+              />
+            </div>
+            <p className="text-xs text-gray-500 mt-1">
+              Procesando {days} días en {Math.ceil(days / CHUNK_SIZE)} bloques de {CHUNK_SIZE} días...
+            </p>
+          </div>
+        )}
         <div className="mt-3 flex flex-wrap gap-3 text-xs text-gray-500">
           <span>• 6 modelos por ciudad (ECMWF, GFS, ICON, JMA, MeteoFrance, best_match)</span>
           <span>• Temperatura real vía Open-Meteo Archive API</span>
-          <span>• Bias dinámico y pesos adaptativos incluidos</span>
+          <span>• Bias dinámico + sesgo de backtest incluidos</span>
         </div>
       </div>
 
@@ -101,7 +143,7 @@ export default function BacktestChart() {
         <div className="card text-center py-8">
           <div className="mb-3 text-4xl animate-pulse">⏳</div>
           <p className="text-gray-400">Procesando datos históricos...</p>
-          <p className="text-xs text-gray-600 mt-1">Fetching Open-Meteo para {days} días × 9 ciudades (18 llamadas API)</p>
+          <p className="text-xs text-gray-600 mt-1">Fetching Open-Meteo para {days} días × 9 ciudades</p>
         </div>
       )}
 
@@ -115,7 +157,6 @@ export default function BacktestChart() {
 
       {hasData && (
         <>
-          {/* Overall summary cards */}
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <SummaryCard label="MAE Global" value={`${data.overall_mae}°C`} desc="Error absoluto medio" color="text-blue-400" />
             <SummaryCard label="RMSE Global" value={`${data.overall_rmse}°C`} desc="Raíz del error cuadrático" color="text-amber-400" />
@@ -123,7 +164,6 @@ export default function BacktestChart() {
             <SummaryCard label="Bias" value={`${data.overall_bias > 0 ? '+' : ''}${data.overall_bias}°C`} desc={data.overall_bias > 0 ? 'Sobre-estimación' : 'Sub-estimación'} color={Math.abs(data.overall_bias) < 0.3 ? 'text-emerald-400' : 'text-red-400'} />
           </div>
 
-          {/* Info banner */}
           <div className="rounded-xl bg-gradient-to-r from-blue-600/10 to-emerald-600/10 border border-blue-500/20 p-4 text-sm">
             <div className="flex flex-wrap items-center gap-4">
               <span className="text-gray-300">🏆 <strong className="text-emerald-400">{data.mejores_ciudades.join(', ')}</strong> — mejores MAE</span>
@@ -134,7 +174,6 @@ export default function BacktestChart() {
             </div>
           </div>
 
-          {/* Per city MAE bar chart */}
           <div className="card">
             <h3 className="mb-3 text-sm font-medium text-gray-400">MAE por ciudad</h3>
             <div className="h-72">
@@ -159,17 +198,15 @@ export default function BacktestChart() {
             </div>
           </div>
 
-          {/* City details grid */}
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {data.por_ciudad.map(city => (
               <CityBacktestCard key={city.slug} city={city} />
             ))}
           </div>
 
-          {/* Error distribution per day */}
           {data.resultados.length > 0 && (
             <div className="card">
-              <h3 className="mb-3 text-sm font-medium text-gray-400">Distribución del error por fecha</h3>
+              <h3 className="mb-3 text-sm font-medium text-gray-400">Evolución del error en el tiempo</h3>
               <div className="h-72">
                 <ResponsiveContainer width="100%" height="100%">
                   <ComposedChart data={prepareEvolutionData(data.resultados)}>
@@ -189,7 +226,26 @@ export default function BacktestChart() {
             </div>
           )}
 
-          {/* Explanatory footer */}
+          {/* Bias correction indicator */}
+          {data.overall_bias !== undefined && (
+            <div className="rounded-xl bg-gradient-to-r from-amber-600/10 to-red-600/10 border border-amber-500/20 p-4 text-sm">
+              <div className="flex items-start gap-3">
+                <span className="text-xl">🎯</span>
+                <div>
+                  <p className="text-gray-300 font-medium mb-1">Auto-corrección por backtest activa</p>
+                  <p className="text-gray-500 text-xs">
+                    El modelo se ajusta automáticamente según el sesgo observado en los últimos {data.total_muestras} registros.
+                    {data.overall_bias > 0.15 
+                      ? ` Bias de +${data.overall_bias}°C detectado → se reducirán las temperaturas pronosticadas.`
+                      : data.overall_bias < -0.15
+                      ? ` Bias de ${data.overall_bias}°C detectado → se aumentarán las temperaturas pronosticadas.`
+                      : ' Bias actual dentro del rango aceptable (±0.15°C).'}
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
           <div className="rounded-xl bg-slate-800/30 border border-gray-700/30 p-4 text-xs text-gray-500">
             <p className="font-medium text-gray-400 mb-2">📖 Cómo interpretar el backtest</p>
             <div className="grid gap-2 sm:grid-cols-2">
@@ -259,7 +315,6 @@ function prepareEvolutionData(resultados: { fecha: string; error: number }[]) {
     }))
     .sort((a, b) => a.fecha.localeCompare(b.fecha))
 
-  // 7-day moving average
   for (let i = 0; i < entries.length; i++) {
     const window = entries.slice(Math.max(0, i - 6), i + 1)
     entries[i].mae_7d = Math.round(window.reduce((s, w) => s + w.mae_diario, 0) / window.length * 100) / 100
