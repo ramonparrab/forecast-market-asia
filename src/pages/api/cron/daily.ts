@@ -71,10 +71,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       console.log(`[CRON] Not enough records for bias (${withActuals.length}), skipping`)
     }
 
-    // ===== STEP 3: Run forecast for tomorrow =====
-    const tomorrow = new Date()
-    tomorrow.setDate(tomorrow.getDate() + 1)
-    const fechaObjetivo = tomorrow.toISOString().slice(0, 10)
+    // ===== STEP 3: Run forecast for tomorrow (Caracas timezone) =====
+    const caracasOffset = -4 * 60 * 60000
+    const nowCaracas = new Date(Date.now() + caracasOffset)
+    nowCaracas.setDate(nowCaracas.getDate() + 1)
+    const fechaObjetivo = nowCaracas.toISOString().slice(0, 10)
 
     console.log(`[CRON] Running daily analysis for ${fechaObjetivo}`)
     const result = await runDailyAnalysis(fechaObjetivo, true)

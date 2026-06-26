@@ -9,13 +9,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   }
 
   try {
-    const fechaObjetivo = req.query.fecha as string || req.body?.fecha
-    const today = new Date()
-    const tomorrow = new Date(today)
-    tomorrow.setDate(tomorrow.getDate() + 1)
-    const defaultFecha = tomorrow.toISOString().slice(0, 10)
-
-    const fecha = fechaObjetivo || defaultFecha
+    const fechaQuery = req.query.fecha as string || req.body?.fecha
+    // Default to tomorrow in Caracas timezone (UTC-4): 
+    // if it's 10pm Caracas (02:00 UTC+1d), "tomorrow" in Caracas is today+1 in Caracas
+    const caracasOffset = -4 * 60 * 60000
+    const nowCaracas = new Date(Date.now() + caracasOffset)
+    nowCaracas.setDate(nowCaracas.getDate() + 1)
+    const defaultFecha = nowCaracas.toISOString().slice(0, 10)
+    const fecha = fechaQuery || defaultFecha
     const result = await runDailyAnalysis(fecha, true)
 
     // Save to Supabase (fire-and-forget for manual runs)

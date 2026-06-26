@@ -119,8 +119,33 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null)
   const [activeView, setActiveView] = useState<View>('dashboard')
   const [lastUpdated, setLastUpdated] = useState<string>('')
+  const [selectedDate, setSelectedDate] = useState<string>('')
+  const [availableDates, setAvailableDates] = useState<string[]>([])
+  const [isHistorical, setIsHistorical] = useState(false)
 
-  useEffect(() => { fetchMetrics() }, [])
+  // Compute default target date (tomorrow in Caracas)
+  const getDefaultTargetDate = () => {
+    const caracasOffset = -4 * 60 * 60000
+    const nowCaracas = new Date(Date.now() + caracasOffset)
+    nowCaracas.setDate(nowCaracas.getDate() + 1)
+    return nowCaracas.toISOString().slice(0, 10)
+  }
+
+  useEffect(() => { 
+    fetchMetrics()
+    fetchAvailableDates()
+    setSelectedDate(getDefaultTargetDate())
+  }, [])
+
+  async function fetchAvailableDates() {
+    try {
+      const resp = await fetch('/api/forecast-history?action=dates')
+      if (resp.ok) {
+        const data = await resp.json()
+        setAvailableDates(data.dates ?? [])
+      }
+    } catch { /* silent */ }
+  }
 
   async function fetchMetrics() {
     try {
@@ -132,16 +157,45 @@ export default function Home() {
     } catch { /* silent */ }
   }
 
-  const runAnalysis = useCallback(async () => {
+  const runAnalysis = useCallback(async (fecha?: string) => {
     setLoading(true)
     setError(null)
     try {
-      const resp = await fetch('/api/forecast', { method: 'POST' })
+      const targetDate = fecha || selectedDate || getDefaultTargetDate()
+      const resp = await fetch(`/api/forecast?fecha=${targetDate}`, { method: 'POST' })
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
       const data: DailyAnalysis = await resp.json()
       setAnalysis(data)
+      setIsHistorical(false)
+      setSelectedDate(data.fecha_objetivo)
       setLastUpdated(new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit', second: '2-digit' }))
       await fetchMetrics()
+      await fetchAvailableDates()
+    } catch (e) {
+      setError((e as Error).message)
+    } finally {
+      setLoading(false)
+    }
+  }, [selectedDate])
+
+  const loadHistoricalDate = useCallback(async (fecha: string) => {
+    setLoading(true)
+    setError(null)
+    setSelectedDate(fecha)
+    try {
+      const resp = await fetch(`/api/forecast-history?fecha=${fecha}`)
+      if (resp.ok) {
+        const data: DailyAnalysis = await resp.json()
+        setAnalysis(data)
+        setIsHistorical(true)
+        setLastUpdated(`Historial: ${data.fecha_objetivo}`)
+      } else if (resp.status === 404) {
+        setAnalysis(null)
+        setError(`No hay pronóstico guardado para ${fecha}. Ejecuta el análisis.`)
+        setIsHistorical(false)
+      } else {
+        throw new Error(`HTTP ${resp.status}`)
+      }
     } catch (e) {
       setError((e as Error).message)
     } finally {
@@ -172,7 +226,7 @@ export default function Home() {
       <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-3">
           <button
-            onClick={runAnalysis}
+            onClick={() => runAnalysis()}
             disabled={loading}
             className="btn-primary flex items-center gap-2 text-sm px-5 py-2.5"
           >
@@ -184,7 +238,7 @@ export default function Home() {
             ) : (
               <>
                 <span>🚀</span>
-                {analysis ? 'Actualizar Análisis' : 'Ejecutar Análisis'}
+                {analysis ? 'Actualizar' : 'Ejecutar'}
               </>
             )}
           </button>
@@ -193,6 +247,35 @@ export default function Home() {
               <span className="inline-block h-2 w-2 rounded-full bg-emerald-400 mr-1"></span>
               {analysis.cities.length} ciudades · {analysis.recommendations.length} recom. · ${analysis.total_allocated.toFixed(2)} asignados
             </span>
+          )}
+        </div>
+
+        {/* Date picker */}
+        <div className="flex items-center gap-2">
+          <input
+            type="date"
+            value={selectedDate}
+            onChange={e => loadHistoricalDate(e.target.value)}
+            className="rounded-lg bg-slate-800 border border-gray-600 px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
+          />
+          {availableDates.length > 0 && (
+            <select
+              value={selectedDate}
+              onChange={e => loadHistoricalDate(e.target.value)}
+              className="rounded-lg bg-slate-800 border border-gray-600 px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500 max-w-[140px]"
+            >
+              {availableDates.map(d => (
+                <option key={d} value={d}>{d}</option>
+              ))}
+            </select>
+          )}
+          {isHistorical && (
+            <button
+              onClick={() => { setSelectedDate(getDefaultTargetDate()); runAnalysis() }}
+              className="rounded-lg bg-blue-600/20 border border-blue-500/30 px-3 py-2 text-xs text-blue-400 hover:bg-blue-600/30 transition"
+            >
+              ↻ Hoy
+            </button>
           )}
         </div>
 
@@ -219,6 +302,12 @@ export default function Home() {
       {analysis?.fecha_objetivo && (
         <TargetDateBanner fechaObjetivo={analysis.fecha_objetivo} caracasTime={caracasTime} />
       )}
+      {isHistorical && (
+        <div className="mb-4 rounded-lg bg-amber-500/10 border border-amber-500/20 px-4 py-2 text-sm text-amber-400 flex items-center gap-2">
+          <span>📖</span>
+          <span>Viendo pronóstico histórico del {analysis?.fecha_objetivo}. Los datos de nowcasting y precios pueden no reflejar el estado en tiempo real.</span>
+        </div>
+      )}
 
       {/* Improvements Legend */}
       <ImprovementLegend />
@@ -237,7 +326,7 @@ export default function Home() {
           <div className="mb-4 text-6xl">🌤️</div>
           <h2 className="mb-2 text-2xl font-bold text-white">Forecast Market · Asia</h2>
           <p className="mb-2 text-gray-400 max-w-lg mx-auto">
-            Pronóstico de temperatura máxima para <span className="font-semibold text-blue-400">{new Date(Date.now() + 86400000).toISOString().slice(0, 10)}</span> en 9 ciudades asiáticas
+            Pronóstico de temperatura máxima para <span className="font-semibold text-blue-400">{getDefaultTargetDate()}</span> en 9 ciudades asiáticas
           </p>
           <p className="mb-6 text-sm text-gray-500 max-w-md mx-auto">
             Ejecuta el análisis a las 22:00 hora Caracas. El sistema compara la temperatura máxima pronosticada por 6 modelos meteorológicos contra los precios de cierre en Polymarket, identificando ineficiencias y calculando la asignación óptima vía Kelly.

@@ -192,7 +192,6 @@ export async function runDailyAnalysis(
   const nowCaracas = new Date(now.getTime() + caracasOffset * 60000)
   const caracasTimeStr = `${nowCaracas.getUTCHours().toString().padStart(2, '0')}:${nowCaracas.getUTCMinutes().toString().padStart(2, '0')}`
 
-  const fechaISO = now.toISOString().slice(0, 10)
   const targetMonth = new Date(fechaObjetivo).getMonth() + 1
 
   // Pre-load history (parallel)
@@ -202,10 +201,10 @@ export async function runDailyAnalysis(
     loadBacktestBias(),
   ])
 
-  // Analyze all cities in parallel
+  // Analyze all cities in parallel — use fechaObjetivo for Open-Meteo API calls
   const results = await Promise.all(
     CIUDADES_ASIA.map(city =>
-      analyzeCity(city, fechaISO, fechaObjetivo, targetMonth, recentModelErrors, fetchPrices, backtestBias[city.slug])
+      analyzeCity(city, fechaObjetivo, fechaObjetivo, targetMonth, recentModelErrors, fetchPrices, backtestBias[city.slug])
     )
   )
 
