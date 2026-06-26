@@ -73,7 +73,8 @@ export async function getServerSideProps() {
     }
 
     const { data: datesData } = await client.from('daily_runs' as any).select('fecha_objetivo').order('fecha_objetivo', { ascending: false } as any).limit(90)
-    const availableDates = [...new Set<string>((datesData as any[] | undefined)?.map(r => r.fecha_objetivo) ?? [])]
+    const raw = ((datesData as any[] | undefined)?.map(r => r.fecha_objetivo) ?? [])
+    const availableDates = Array.from(new Set<string>(raw))
 
     const { computeGlobalMetrics } = await import('@/lib/supabase')
     const metrics = await computeGlobalMetrics()
