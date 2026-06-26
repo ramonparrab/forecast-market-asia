@@ -10,6 +10,13 @@ dist/
 wheels/
 *.egg-info
 
+# Node / Next.js
+node_modules/
+.next/
+out/
+*.tsbuildinfo
+next-env.d.ts
+
 # Virtual environments
 .venv
 .backfill_cursor
