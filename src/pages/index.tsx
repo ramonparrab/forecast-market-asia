@@ -352,27 +352,30 @@ export default function Home() {
           {/* City Success Summary */}
           <CitySuccessSummary cities={analysis.cities} />
 
-          {/* 10PM Caracas Forecast Banner */}
+          {/* 10PM Caracas Forecast Banner — reference value */}
           {analysis.cities.length > 0 && (
-            <div className="rounded-2xl bg-gradient-to-r from-blue-600/20 via-blue-500/10 to-emerald-600/20 border border-blue-500/20 p-6 text-center">
-              <p className="text-sm text-blue-300 font-medium mb-1">🌙 PRONÓSTICO 10PM HORA CARACAS</p>
-              <div className="flex items-center justify-center gap-6 flex-wrap">
-                {analysis.cities.slice(0, 3).map(city => (
-                  <div key={city.slug} className="text-center">
-                    <p className="text-xs text-gray-400">{city.ciudad}</p>
-                    <p className="text-3xl font-bold text-emerald-400">{city.forecast.temp_corregida.toFixed(1)}°C</p>
+            <div className="rounded-2xl bg-gradient-to-br from-slate-900 via-blue-900/20 to-slate-900 border border-blue-500/20 overflow-hidden">
+              <div className="p-4 sm:p-6 text-center">
+                <p className="text-xs text-blue-300 font-semibold tracking-wider mb-2">🌙 VALOR DE REFERENCIA · PRONÓSTICO 10PM CARACAS</p>
+                <div className="flex items-baseline justify-center gap-4 mb-3 flex-wrap">
+                  <span className="text-6xl sm:text-7xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-emerald-300 via-blue-300 to-cyan-300">
+                    {(analysis.cities.reduce((s, c) => s + c.forecast.temp_corregida, 0) / analysis.cities.length).toFixed(1)}°C
+                  </span>
+                  <span className="text-sm text-gray-500">promedio {analysis.cities.length} ciudades</span>
+                </div>
+                <div className="flex justify-center gap-6 text-xs text-gray-500">
+                  <span>📡 {analysis.cities.filter(c => c.nowcast?.activo).length}/{analysis.cities.length} nowcast activo</span>
+                  <span>🎯 Meta: ±2°C &gt;70%</span>
+                </div>
+              </div>
+              <div className="grid grid-cols-3 sm:grid-cols-5 lg:grid-cols-9 divide-x divide-blue-500/10 border-t border-blue-500/10">
+                {analysis.cities.map(city => (
+                  <div key={city.slug} className="p-3 text-center hover:bg-blue-500/5 transition">
+                    <p className="text-[10px] text-gray-500 truncate">{city.ciudad.split(',')[0]}</p>
+                    <p className="text-lg sm:text-xl font-bold text-emerald-400">{city.forecast.temp_corregida.toFixed(1)}°C</p>
+                    <p className="text-[9px] text-gray-600">{city.exito_pct}% acierto</p>
                   </div>
                 ))}
-                {analysis.cities.length > 3 && (
-                  <div className="text-center">
-                    <p className="text-xs text-gray-500">+{analysis.cities.length - 3} ciudades</p>
-                    <p className="text-lg text-gray-300">ver abajo ↓</p>
-                  </div>
-                )}
-              </div>
-              <div className="mt-3 flex justify-center gap-4 text-xs text-gray-500">
-                <span>📡 {analysis.cities.filter(c => c.nowcast?.activo).length}/{analysis.cities.length} nowcast activo</span>
-                <span>🎯 Promedio: {(analysis.cities.reduce((s, c) => s + c.forecast.temp_corregida, 0) / analysis.cities.length).toFixed(1)}°C</span>
               </div>
             </div>
           )}
