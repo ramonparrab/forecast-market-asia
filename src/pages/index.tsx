@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import Layout from '@/components/Layout'
 import CityCard from '@/components/CityCard'
 import AllocationPanel from '@/components/AllocationPanel'
@@ -122,6 +122,7 @@ export default function Home() {
   const [selectedDate, setSelectedDate] = useState<string>('')
   const [availableDates, setAvailableDates] = useState<string[]>([])
   const [isHistorical, setIsHistorical] = useState(false)
+  const autoRunDone = useRef(false)
 
   // Compute default target date (tomorrow in Caracas)
   const getDefaultTargetDate = () => {
@@ -136,6 +137,28 @@ export default function Home() {
     fetchAvailableDates()
     setSelectedDate(getDefaultTargetDate())
   }, [])
+
+  // Auto-run forecast on load if no data exists
+  useEffect(() => {
+    if (autoRunDone.current) return
+    if (availableDates.length === 0 && !loading && !analysis) {
+      autoRunDone.current = true
+      const target = getDefaultTargetDate()
+      setLoading(true)
+      setError(null)
+      fetch(`/api/forecast?fecha=${target}`, { method: 'POST' })
+        .then(res => res.ok ? res.json() : Promise.reject())
+        .then(data => {
+          setAnalysis(data)
+          setSelectedDate(data.fecha_objetivo)
+          setLastUpdated(new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit', second: '2-digit' }))
+          fetchMetrics()
+          fetchAvailableDates()
+        })
+        .catch(() => setError('Error al generar pronóstico automático'))
+        .finally(() => setLoading(false))
+    }
+  }, [availableDates])
 
   async function fetchAvailableDates() {
     try {
