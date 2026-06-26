@@ -125,23 +125,22 @@ async function analyzeCity(
 
     if (useEmpirical) {
       const members = forecast.ensemble_members!
-      const high = forecast.temp_corregida
-      const std = forecast.volatilidad
+      const rawVal = parsed.valor
       let rawProb = 0
-      if (parsed.tipo === 'inferior' && typeof parsed.valor === 'number') {
-        const countBelow = members.filter(m => m < parsed.valor).length
+      if (parsed.tipo === 'inferior' && typeof rawVal === 'number') {
+        const countBelow = members.filter(m => m < rawVal).length
         rawProb = Math.max(1 / (members.length + 1), Math.min(1 - 1 / (members.length + 1), countBelow / members.length))
-      } else if (parsed.tipo === 'superior' && typeof parsed.valor === 'number') {
-        const countAbove = members.filter(m => m > parsed.valor).length
+      } else if (parsed.tipo === 'superior' && typeof rawVal === 'number') {
+        const countAbove = members.filter(m => m > rawVal).length
         rawProb = Math.max(1 / (members.length + 1), Math.min(1 - 1 / (members.length + 1), countAbove / members.length))
       } else if (parsed.tipo === 'exacto') {
-        const val = typeof parsed.valor === 'number' ? parsed.valor : 0
+        const val = typeof rawVal === 'number' ? rawVal : 0
         const low = val - 0.5
         const highVal = val + 0.5
         const countIn = members.filter(m => m >= low && m <= highVal).length
         rawProb = Math.max(1 / (members.length + 1), Math.min(1 - 1 / (members.length + 1), countIn / members.length))
-      } else if (parsed.tipo === 'rango' && Array.isArray(parsed.valor)) {
-        const [low, highVal] = parsed.valor
+      } else if (parsed.tipo === 'rango' && Array.isArray(rawVal)) {
+        const [low, highVal] = rawVal
         const countIn = members.filter(m => m >= low && m <= highVal).length
         rawProb = Math.max(1 / (members.length + 1), Math.min(1 - 1 / (members.length + 1), countIn / members.length))
       } else {
