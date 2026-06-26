@@ -1,7 +1,7 @@
 import { NextApiRequest, NextApiResponse } from 'next'
 import { runBacktest } from '@/lib/backtest-engine'
 import { getAccumulatedBacktest, saveBacktestChunk, saveBacktestBias } from '@/lib/supabase'
-import { computeBacktestBiasFromResults } from '@/lib/backtest-bias'
+import { computeBacktestBiasFromResults, setBiasCache } from '@/lib/backtest-bias'
 
 let inMemoryCache: { data: any; ts: number } | null = null
 const CACHE_TTL = 300_000
@@ -34,18 +34,25 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // Run a single chunk
     const result = await runBacktest(chunkSize, offset)
 
-    // Try to save to Supabase (best effort)
-    try {
-      await saveBacktestChunk(chunkSize, offset, result)
-      // Update bias from all accumulated chunks
-      const accumulated = await getAccumulatedBacktest(totalDays)
-      if (accumulated) {
-        const biasEntries = computeBacktestBiasFromResults(accumulated.resultados)
-        await saveBacktestBias(biasEntries)
+    // Compute and cache bias from this chunk's results
+    if (result.resultados.length >= 5) {
+      const biasEntries = computeBacktestBiasFromResults(result.resultados)
+      const biasMap: Record<string, number> = {}
+      for (const e of biasEntries) {
+        if (e.muestras >= 3 && Math.abs(e.bias) >= 0.15) {
+          biasMap[e.slug] = e.bias
+        }
       }
-    } catch { /* tables may not exist yet */ }
+      if (Object.keys(biasMap).length > 0) {
+        setBiasCache(biasMap) // immediately available to forecast engine
+      }
+      // Try to save to Supabase (best effort)
+      try {
+        await saveBacktestChunk(chunkSize, offset, result)
+        await saveBacktestBias(biasEntries)
+      } catch { /* tables may not exist yet */ }
+    }
 
-    // Always cache in memory
     inMemoryCache = { data: { data: result }, ts: Date.now() }
 
     return res.status(200).json({

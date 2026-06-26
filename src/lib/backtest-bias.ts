@@ -1,10 +1,16 @@
-import { getBacktestBias, getHistoricalRecords, saveBacktestBias, BacktestBiasEntry } from './supabase'
+import { getBacktestBias, getHistoricalRecords, getAccumulatedBacktest, saveBacktestBias, BacktestBiasEntry } from './supabase'
 import { BacktestDayResult } from './backtest-engine'
 
 // In-memory cache for bias (persists across requests within same serverless instance)
 let cachedBias: Record<string, number> | null = null
 let cacheTimestamp = 0
 const BIAS_CACHE_TTL = 300_000 // 5 min
+
+/** Force-set the bias cache (used by backtest API after computing bias) */
+export function setBiasCache(bias: Record<string, number>) {
+  cachedBias = bias
+  cacheTimestamp = Date.now()
+}
 
 export async function loadBacktestBias(): Promise<Record<string, number>> {
   if (cachedBias && (Date.now() - cacheTimestamp) < BIAS_CACHE_TTL) {
@@ -37,7 +43,20 @@ export async function loadBacktestBias(): Promise<Record<string, number>> {
         const biasEntries = computeBacktestBiasFromResults(mapped as any)
         if (biasEntries.length > 0) {
           entries = biasEntries
-          // Save for future (best effort)
+          try { await saveBacktestBias(biasEntries) } catch {}
+        }
+      }
+    } catch {}
+  }
+
+  // 3. Fall back to accumulated backtest results from Supabase
+  if (!entries || entries.length === 0) {
+    try {
+      const backtestData = await getAccumulatedBacktest(365)
+      if (backtestData && backtestData.resultados.length >= 5) {
+        const biasEntries = computeBacktestBiasFromResults(backtestData.resultados)
+        if (biasEntries.length > 0) {
+          entries = biasEntries
           try { await saveBacktestBias(biasEntries) } catch {}
         }
       }
