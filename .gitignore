@@ -1,0 +1,44 @@
+.DS_Store
+**/.DS_Store
+.env
+
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+.backfill_cursor
+data
+data.zip
+
+research/*
+!research/main.tex
+!research/main.pdf
+!research/fig
+!research/analysis
+!research/sections
+
+scratchpad
+
+fig
+*.tar.zst
+output
+.tmp
+
+# Untracked local artifacts
+.ralph-tui/
+CLAUDE.md
+api/main.py.backup
+config/polymarket.env
+logs/
+storage/
+tests/baseline_snapshots/
+tests/load/
+odds/vegas_cache.json
+mcp/MCP_OPTIMIZATION.md
+mcp/polyrouter/
