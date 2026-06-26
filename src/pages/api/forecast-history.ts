@@ -19,7 +19,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       .limit(90)
 
     if (error) return res.status(500).json({ error: error.message })
-    const dates = [...new Set((data as any[])?.map(r => r.fecha_objetivo) ?? [])]
+    const dates: string[] = []
+    for (const r of (data as any[]) ?? []) {
+      if (!dates.includes(r.fecha_objetivo)) dates.push(r.fecha_objetivo)
+    }
     return res.status(200).json({ dates })
   }
 
