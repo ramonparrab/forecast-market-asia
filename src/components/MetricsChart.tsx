@@ -1,215 +1,329 @@
+import { useState, useEffect } from 'react'
 import { GlobalMetrics } from '@/types'
+import { CIUDADES_ASIA } from '@/lib/cities'
 import {
-  LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
-  ResponsiveContainer, Legend, ComposedChart
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
+  ResponsiveContainer, Legend
 } from 'recharts'
 
 interface MetricsChartProps {
   metrics: GlobalMetrics | null
 }
 
-function MetricCard({ label, value, unit, color, sub, subColor }: { label: string; value: string; unit: string; color: string; sub?: string; subColor?: string }) {
+function CityMetricRow({ ciudad, mae, rmse, bias, muestras, fuente }: {
+  ciudad: string; mae: string; rmse: string; bias: string; muestras: number; fuente: string
+}) {
   return (
-    <div className="rounded-lg bg-slate-900/50 p-3 text-center">
-      <div className="text-xs text-gray-500">{label}</div>
-      <div className={`text-2xl font-bold ${color}`}>{value}<span className="ml-0.5 text-sm">{unit}</span></div>
-      {sub && <div className={`text-[10px] mt-0.5 ${subColor || 'text-gray-500'}`}>{sub}</div>}
-    </div>
+    <tr className="border-t border-gray-700/30 hover:bg-slate-800/50">
+      <td className="p-2 text-gray-300 font-medium">{ciudad}</td>
+      <td className="p-2 text-blue-400 font-mono">{mae}</td>
+      <td className="p-2 text-amber-400 font-mono">{rmse}</td>
+      <td className={`p-2 font-mono ${Math.abs(parseFloat(bias)) < 0.5 ? 'text-emerald-400' : 'text-red-400'}`}>{bias}</td>
+      <td className="p-2 text-gray-500 text-xs">{muestras}</td>
+      <td className="p-2 text-[10px] text-gray-500">{fuente}</td>
+    </tr>
   )
 }
 
 export default function MetricsChart({ metrics }: MetricsChartProps) {
-  const live = metrics && metrics.total_muestras > 0 ? metrics : null
-  const bt = metrics?.backtest
+  const [btData, setBtData] = useState<any>(null)
+  const [btLoading, setBtLoading] = useState(false)
+  const [btError, setBtError] = useState<string | null>(null)
+  const [biasCorrections, setBiasCorrections] = useState<Record<string, number>>({})
+  const [bcLoading, setBcLoading] = useState(false)
 
-  const hasLive = !!live
-  const hasBacktest = !!bt && bt.total_muestras > 0
-  const hasAny = hasLive || hasBacktest
+  const live = metrics?.total_muestras ? metrics : null
 
-  if (!hasAny) {
-    return (
-      <div className="card text-center text-gray-500">
-        <div className="py-4 text-4xl">📈</div>
-        <p className="text-lg font-medium text-gray-400">Métricas de precisión</p>
-        <p className="mt-1 text-sm">No hay suficientes datos históricos aún. Ejecuta el backtest desde la pestaña Backtest para generar métricas.</p>
-      </div>
-    )
+  // Load backtest data on mount
+  useEffect(() => {
+    fetchBacktestData()
+    fetchBiasCorrections()
+  }, [])
+
+  async function fetchBacktestData() {
+    try {
+      const resp = await fetch('/api/backtest', { signal: AbortSignal.timeout(10000) })
+      if (resp.ok) {
+        const json = await resp.json()
+        if (json?.data) setBtData(json.data)
+      }
+    } catch { /* silent */ }
   }
 
-  // Build per-city comparison data
-  const cityNames = new Set<string>()
-  if (hasLive) for (const c of live!.por_ciudad) cityNames.add(c.ciudad)
-  if (hasBacktest) for (const c of bt!.por_ciudad) cityNames.add(c.ciudad)
+  async function fetchBiasCorrections() {
+    setBcLoading(true)
+    try {
+      const resp = await fetch('/api/backtest-bias', { signal: AbortSignal.timeout(8000) })
+      if (resp.ok) {
+        const json = await resp.json()
+        if (json?.active_corrections) setBiasCorrections(json.active_corrections)
+      }
+    } catch { /* silent */ }
+    setBcLoading(false)
+  }
 
-  const cityComparison = Array.from(cityNames).map(name => {
-    const l = hasLive ? live!.por_ciudad.find(c => c.ciudad === name) : null
-    const b = hasBacktest ? bt!.por_ciudad.find(c => c.ciudad === name) : null
+  async function run30dBacktest() {
+    setBtLoading(true)
+    setBtError(null)
+    try {
+      const resp = await fetch('/api/backtest?days=30', { method: 'POST', signal: AbortSignal.timeout(60000) })
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+      const json = await resp.json()
+      if (json?.data) setBtData(json.data)
+      await fetchBiasCorrections()
+    } catch (e: any) {
+      setBtError(e.message || 'Error')
+    } finally {
+      setBtLoading(false)
+    }
+  }
+
+  const bt = btData?.overall_mae != null ? btData : null
+  const hasBt = bt && bt.total_muestras > 0
+  const hasLive = !!live
+
+  // Build ALL city names from both sources
+  const cityNames = new Set<string>()
+  if (hasLive) for (const c of live.por_ciudad) cityNames.add(c.ciudad)
+  if (hasBt) for (const c of bt.por_ciudad) cityNames.add(c.ciudad)
+
+  const sortedCities = Array.from(cityNames).sort()
+
+  // City name → slug mapping
+  const nameToSlug: Record<string, string> = {}
+  for (const c of CIUDADES_ASIA) { nameToSlug[c.nombre] = c.slug }
+
+  // Per-city table data
+  const cityRows = sortedCities.map(name => {
+    const l = hasLive ? live.por_ciudad.find(c => c.ciudad === name) : null
+    const b = hasBt ? bt.por_ciudad.find((c: any) => c.ciudad === name) : null
+    const slug = nameToSlug[name] || name.toLowerCase().replace(/\s+/g, '-')
+    const correction = biasCorrections[slug]
     return {
       ciudad: name,
-      live_mae: l?.mae ?? null,
-      live_rmse: l?.rmse ?? null,
-      live_bias: l?.bias ?? null,
-      backtest_mae: b?.mae ?? null,
-      backtest_rmse: b?.rmse ?? null,
-      backtest_bias: b?.bias ?? null,
-      live_muestras: l?.muestras ?? 0,
-      backtest_muestras: b?.muestras ?? 0,
+      live_mae: l?.mae, live_rmse: l?.rmse, live_bias: l?.bias, live_n: l?.muestras ?? 0,
+      bt_mae: b?.mae, bt_rmse: b?.rmse, bt_bias: b?.bias, bt_n: b?.muestras ?? 0,
+      correction,
     }
   })
 
-  // Build evolution chart (prefer live, fallback to nothing)
-  const evolucion = live?.evolucion_diaria ?? []
+  const showTable = cityRows.length > 0
+
+  // Bar chart data (prefer live, fallback to backtest)
+  const barData = cityRows.map(r => ({
+    ciudad: r.ciudad,
+    MAE: r.live_mae ?? r.bt_mae ?? 0,
+    fuente: r.live_mae != null ? 'Live' : 'Backtest',
+  }))
+
+  // Bias corrections chart
+  const biasBarData = cityRows
+    .filter(r => r.correction != null)
+    .map(r => ({ ciudad: r.ciudad, correccion: r.correction }))
 
   return (
     <div className="space-y-6">
-      {/* Source badges */}
-      <div className="flex items-center gap-4 text-xs text-gray-400">
-        {hasLive && <span className="flex items-center gap-1"><span className="inline-block h-2.5 w-2.5 rounded-full bg-emerald-400"></span> Tiempo real ({live!.total_muestras} muestras)</span>}
-        {hasBacktest && <span className="flex items-center gap-1"><span className="inline-block h-2.5 w-2.5 rounded-full bg-blue-400"></span> Backtest ({bt!.total_muestras} muestras · {bt!.total_dias}d)</span>}
+      {/* Action: Run Backtest */}
+      <div className="card">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div>
+            <h2 className="text-lg font-semibold text-white">📈 Precisión por Ciudad</h2>
+            <p className="text-xs text-gray-500 mt-0.5">
+              {hasLive
+                ? `${live.total_muestras} registros en vivo · ${hasBt ? `${bt.total_muestras} de backtest` : 'backtest disponible bajo demanda'}`
+                : hasBt
+                  ? `${bt.total_muestras} registros de backtest (${bt.total_dias} días)`
+                  : 'Ejecuta backtest para generar métricas históricas'}
+            </p>
+          </div>
+          <button
+            onClick={run30dBacktest}
+            disabled={btLoading}
+            className="btn-primary flex items-center gap-2 text-sm px-4 py-2"
+          >
+            {btLoading ? (
+              <>
+                <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-white/30 border-t-white"></span>
+                Ejecutando...
+              </>
+            ) : (
+              <>
+                <span>⏳</span>
+                Backtest 30d
+              </>
+            )}
+          </button>
+        </div>
+        {btError && (
+          <div className="mt-3 rounded-lg bg-red-500/10 p-3 text-sm text-red-400">⚠️ {btError}</div>
+        )}
+        {btLoading && (
+          <div className="mt-3 h-1 rounded-full bg-slate-700 overflow-hidden">
+            <div className="h-full rounded-full bg-blue-500 animate-pulse w-3/4" />
+          </div>
+        )}
       </div>
 
-      {/* Summary cards — show best available (live preferred) */}
-
-      {/* If both sources exist, show comparison grid */}
-      {hasLive && hasBacktest && (
+      {/* Bias corrections */}
+      {biasBarData.length > 0 && (
         <div className="card">
-          <h3 className="mb-3 text-sm font-medium text-gray-400">Comparativa: Tiempo Real vs Backtest</h3>
+          <h3 className="mb-3 text-sm font-medium text-gray-400">
+            🔧 Correcciones activas por ciudad {bcLoading && <span className="text-blue-400 animate-pulse">cargando...</span>}
+          </h3>
+          <p className="text-xs text-gray-500 mb-3">
+            Ajuste aplicado automáticamente al pronóstico de cada ciudad basado en el error histórico (backtest). Corrección positiva = el modelo subestima, se suma temperatura.
+          </p>
+          <div className="h-48">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={biasBarData}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
+                <XAxis dataKey="ciudad" stroke="#64748b" tick={{ fontSize: 10 }} />
+                <YAxis stroke="#64748b" tick={{ fontSize: 10 }} />
+                <Tooltip
+                  contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '8px' }}
+                  labelStyle={{ color: '#f1f5f9' }}
+                  formatter={(value: number) => [`${value > 0 ? '+' : ''}${value.toFixed(2)}°C`, 'Corrección']}
+                />
+                <Bar dataKey="correccion" fill="#f59e0b" radius={[4, 4, 0, 0]} name="Corrección °C" />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      )}
+
+      {/* Live vs Backtest summary (when both available) */}
+      {hasLive && hasBt && (
+        <div className="card">
+          <h3 className="mb-3 text-sm font-medium text-gray-400">Comparativa global: Live vs Backtest</h3>
           <div className="grid gap-3 sm:grid-cols-4">
-            <MetricCard label="MAE" value={live!.overall_mae.toFixed(2)} unit="°C" color="text-emerald-400"
-              sub={`Backtest: ${bt!.overall_mae.toFixed(2)}°C`} subColor="text-blue-400" />
-            <MetricCard label="RMSE" value={live!.overall_rmse.toFixed(2)} unit="°C" color="text-amber-400"
-              sub={`Backtest: ${bt!.overall_rmse.toFixed(2)}°C`} subColor="text-blue-400" />
-            <MetricCard label="Bias" value={live!.overall_bias.toFixed(2)} unit="°C" color={Math.abs(live!.overall_bias) < 0.5 ? 'text-emerald-400' : 'text-red-400'}
-              sub={`Backtest: ${bt!.overall_bias > 0 ? '+' : ''}${bt!.overall_bias.toFixed(2)}°C`} subColor="text-blue-400" />
-            <MetricCard label="±2°C" value={live!.accuracy_pct.toFixed(1)} unit="%" color="text-emerald-400"
-              sub={`Backtest: ${bt!.accuracy_2c.toFixed(1)}%`} subColor="text-blue-400" />
+            <SummaryCard label="MAE Live" value={`${live.overall_mae.toFixed(2)}°`} sub={`Backtest: ${bt.overall_mae.toFixed(2)}°`} color="text-emerald-400" />
+            <SummaryCard label="RMSE Live" value={`${live.overall_rmse.toFixed(2)}°`} sub={`Backtest: ${bt.overall_rmse.toFixed(2)}°`} color="text-amber-400" />
+            <SummaryCard label="Bias Live" value={`${live.overall_bias > 0 ? '+' : ''}${live.overall_bias.toFixed(2)}°`} sub={`Backtest: ${bt.overall_bias > 0 ? '+' : ''}${bt.overall_bias.toFixed(2)}°`} color={Math.abs(live.overall_bias) < 0.5 ? 'text-emerald-400' : 'text-red-400'} />
+            <SummaryCard label="±2°C Live" value={`${live.accuracy_pct.toFixed(1)}%`} sub={`Backtest: ${bt.overall_accuracy_2c.toFixed(1)}%`} color="text-emerald-400" />
           </div>
         </div>
       )}
 
-      {/* Only one source available */}
-      {!hasLive && hasBacktest && (
-        <div className="grid gap-3 sm:grid-cols-4">
-          <MetricCard label="MAE (Backtest)" value={bt!.overall_mae.toFixed(2)} unit="°C" color="text-blue-400" />
-          <MetricCard label="RMSE (Backtest)" value={bt!.overall_rmse.toFixed(2)} unit="°C" color="text-amber-400" />
-          <MetricCard label="Bias (Backtest)" value={`${bt!.overall_bias > 0 ? '+' : ''}${bt!.overall_bias.toFixed(2)}`} unit="°C" color={Math.abs(bt!.overall_bias) < 0.5 ? 'text-emerald-400' : 'text-red-400'} />
-          <MetricCard label="±2°C (Backtest)" value={bt!.accuracy_2c.toFixed(1)} unit="%" color="text-emerald-400" />
-        </div>
-      )}
-
-      {hasLive && !hasBacktest && (
-        <div className="grid gap-3 sm:grid-cols-4">
-          <MetricCard label="MAE" value={live!.overall_mae.toFixed(2)} unit="°C" color="text-blue-400" />
-          <MetricCard label="RMSE" value={live!.overall_rmse.toFixed(2)} unit="°C" color="text-amber-400" />
-          <MetricCard label="Bias" value={`${live!.overall_bias > 0 ? '+' : ''}${live!.overall_bias.toFixed(2)}`} unit="°C" color={Math.abs(live!.overall_bias) < 0.5 ? 'text-emerald-400' : 'text-red-400'} />
-          <MetricCard label="±2°C" value={live!.accuracy_pct.toFixed(1)} unit="%" color="text-emerald-400" />
-        </div>
-      )}
-
-      {/* Per-city comparison chart (when both sources available) */}
-      {hasLive && hasBacktest && cityComparison.length > 0 && (
+      {/* Only backtest summary */}
+      {!hasLive && hasBt && (
         <div className="card">
-          <h3 className="mb-3 text-sm font-medium text-gray-400">MAE por ciudad: Tiempo Real vs Backtest</h3>
-          <div className="h-72">
+          <h3 className="mb-3 text-sm font-medium text-gray-400">Métricas de Backtest ({bt.total_dias} días)</h3>
+          <div className="grid gap-3 sm:grid-cols-4">
+            <SummaryCard label="MAE" value={`${bt.overall_mae.toFixed(2)}°`} sub={`${bt.total_muestras} muestras`} color="text-blue-400" />
+            <SummaryCard label="RMSE" value={`${bt.overall_rmse.toFixed(2)}°`} sub="" color="text-amber-400" />
+            <SummaryCard label="Bias" value={`${bt.overall_bias > 0 ? '+' : ''}${bt.overall_bias.toFixed(2)}°`} sub={bt.overall_bias > 0 ? 'Sobre-est.' : 'Sub-est.'} color={Math.abs(bt.overall_bias) < 0.5 ? 'text-emerald-400' : 'text-red-400'} />
+            <SummaryCard label="±2°C" value={`${bt.overall_accuracy_2c.toFixed(1)}%`} sub={`±1°C: ${bt.overall_accuracy_1c.toFixed(1)}%`} color="text-emerald-400" />
+          </div>
+        </div>
+      )}
+
+      {/* Only live summary */}
+      {hasLive && !hasBt && (
+        <div className="card">
+          <h3 className="mb-3 text-sm font-medium text-gray-400">Métricas en Tiempo Real ({live.total_muestras} muestras)</h3>
+          <div className="grid gap-3 sm:grid-cols-4">
+            <SummaryCard label="MAE" value={`${live.overall_mae.toFixed(2)}°`} sub="Error absoluto medio" color="text-emerald-400" />
+            <SummaryCard label="RMSE" value={`${live.overall_rmse.toFixed(2)}°`} sub="Raíz error cuadrático" color="text-amber-400" />
+            <SummaryCard label="Bias" value={`${live.overall_bias > 0 ? '+' : ''}${live.overall_bias.toFixed(2)}°`} sub={live.overall_bias > 0 ? 'Sobre-est.' : 'Sub-est.'} color={Math.abs(live.overall_bias) < 0.5 ? 'text-emerald-400' : 'text-red-400'} />
+            <SummaryCard label="±2°C" value={`${live.accuracy_pct.toFixed(1)}%`} sub={`${live.total_muestras} muestras`} color="text-emerald-400" />
+          </div>
+        </div>
+      )}
+
+      {/* No data banner */}
+      {!hasLive && !hasBt && (
+        <div className="card">
+          <p className="text-gray-500 text-sm text-center py-4">
+            No hay datos aún. Presiona <strong className="text-blue-400">"Backtest 30d"</strong> para generar métricas históricas simuladas,
+            o ejecuta el análisis diario desde el dashboard para acumular datos reales.
+          </p>
+        </div>
+      )}
+
+      {/* Bar chart: MAE per city */}
+      {showTable && (
+        <div className="card">
+          <h3 className="mb-3 text-sm font-medium text-gray-400">MAE por ciudad</h3>
+          <div className="h-64">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={cityComparison}>
+              <BarChart data={barData}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
                 <XAxis dataKey="ciudad" stroke="#64748b" tick={{ fontSize: 10 }} />
-                <YAxis stroke="#64748b" tick={{ fontSize: 10 }} />
+                <YAxis stroke="#64748b" tick={{ fontSize: 10 }} domain={[0, 'auto']} />
                 <Tooltip
                   contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '8px' }}
                   labelStyle={{ color: '#f1f5f9' }}
+                  formatter={(value: number) => [`${value.toFixed(2)}°C`, 'MAE']}
                 />
-                <Legend />
-                <Bar dataKey="live_mae" fill="#10b981" name="MAE Tiempo Real" radius={[4, 4, 0, 0]} />
-                <Bar dataKey="backtest_mae" fill="#3b82f6" name="MAE Backtest" radius={[4, 4, 0, 0]} opacity={0.7} />
+                <Bar dataKey="MAE" fill="#3b82f6" radius={[4, 4, 0, 0]} name="MAE °C" />
               </BarChart>
             </ResponsiveContainer>
           </div>
         </div>
       )}
 
-      {/* Per-city chart from backtest (when only backtest available) */}
-      {!hasLive && hasBacktest && bt!.por_ciudad.length > 0 && (
+      {/* Per-city detailed table */}
+      {showTable && (
         <div className="card">
-          <h3 className="mb-3 text-sm font-medium text-gray-400">MAE por ciudad (Backtest)</h3>
-          <div className="h-72">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={bt!.por_ciudad.map(c => ({ ciudad: c.ciudad, mae: c.mae }))}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-                <XAxis dataKey="ciudad" stroke="#64748b" tick={{ fontSize: 10 }} />
-                <YAxis stroke="#64748b" tick={{ fontSize: 10 }} />
-                <Tooltip
-                  contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '8px' }}
-                  labelStyle={{ color: '#f1f5f9' }}
-                />
-                <Bar dataKey="mae" fill="#3b82f6" name="MAE" radius={[4, 4, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
+          <h3 className="mb-3 text-sm font-medium text-gray-400">Detalle por ciudad</h3>
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs text-gray-400">
+              <thead>
+                <tr className="text-left text-gray-500 border-b border-gray-700/30">
+                  <th className="p-2 font-medium">Ciudad</th>
+                  <th className="p-2 font-medium">MAE</th>
+                  <th className="p-2 font-medium">RMSE</th>
+                  <th className="p-2 font-medium">Bias</th>
+                  <th className="p-2 font-medium">Muestras</th>
+                  <th className="p-2 font-medium">Fuente</th>
+                  {biasBarData.length > 0 && <th className="p-2 font-medium text-amber-400">Corrección</th>}
+                </tr>
+              </thead>
+              <tbody>
+                {cityRows.map(r => {
+                  const mae = r.live_mae ?? r.bt_mae
+                  const rmse = r.live_rmse ?? r.bt_rmse
+                  const bias = r.live_bias ?? r.bt_bias
+                  const n = r.live_n || r.bt_n
+                  const fuente = r.live_mae != null ? '🟢 Live' : '🔵 BT'
+                  return (
+                    <CityMetricRow
+                      key={r.ciudad}
+                      ciudad={r.ciudad}
+                      mae={mae != null ? mae.toFixed(2) + '°' : '—'}
+                      rmse={rmse != null ? rmse.toFixed(2) + '°' : '—'}
+                      bias={bias != null ? `${bias > 0 ? '+' : ''}${bias.toFixed(2)}°` : '—'}
+                      muestras={n}
+                      fuente={fuente}
+                    />
+                  )
+                })}
+              </tbody>
+            </table>
           </div>
+          {hasBt && !hasLive && (
+            <p className="mt-3 text-[10px] text-gray-600">
+              🔵 BT = Backtest. Datos generados mediante simulaci├│n hist├│rica de 30 d├¡as con 6 modelos meteorol├│gicos.
+              Correcciones activas se aplican autom├íticamente al pr├│ximo pron├│stico.
+            </p>
+          )}
+          {hasLive && (
+            <p className="mt-3 text-[10px] text-gray-600">
+              🟢 Live = Temperatura real registrada despu├®s del pron├│stico. Fuente: Open-Meteo Archive API.
+            </p>
+          )}
         </div>
       )}
+    </div>
+  )
+}
 
-      {/* Per-city chart from live (when only live available) — already existed */}
-      {hasLive && !hasBacktest && live!.por_ciudad.length > 0 && (
-        <div className="card">
-          <h3 className="mb-3 text-sm font-medium text-gray-400">Error por ciudad</h3>
-          <div className="h-64">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={live!.por_ciudad.map(c => ({ ...c, error: c.bias }))}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-                <XAxis dataKey="ciudad" stroke="#64748b" tick={{ fontSize: 10 }} />
-                <YAxis stroke="#64748b" tick={{ fontSize: 10 }} />
-                <Tooltip contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '8px' }} labelStyle={{ color: '#f1f5f9' }} />
-                <Bar dataKey="mae" fill="#3b82f6" name="MAE" radius={[4, 4, 0, 0]} />
-                <Bar dataKey="rmse" fill="#f59e0b" name="RMSE" radius={[4, 4, 0, 0]} />
-                <Legend />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-      )}
-
-      {/* Daily evolution (live only) */}
-      {evolucion.length > 1 && (
-        <div className="card">
-          <h3 className="mb-3 text-sm font-medium text-gray-400">Evolución diaria del error (Tiempo Real)</h3>
-          <div className="h-64">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={evolucion}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-                <XAxis dataKey="fecha" stroke="#64748b" tick={{ fontSize: 10 }} tickFormatter={(v) => v.slice(5)} />
-                <YAxis stroke="#64748b" tick={{ fontSize: 10 }} />
-                <Tooltip contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '8px' }} labelStyle={{ color: '#f1f5f9' }} />
-                <Line type="monotone" dataKey="mae" stroke="#3b82f6" strokeWidth={2} dot={{ r: 3 }} name="MAE" />
-                <Line type="monotone" dataKey="rmse" stroke="#f59e0b" strokeWidth={2} dot={{ r: 3 }} name="RMSE" />
-                <Legend />
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-      )}
-
-      {/* Backtest accuracy distribution */}
-      {hasBacktest && (
-        <div className="card">
-          <h3 className="mb-3 text-sm font-medium text-gray-400">Precisión del Backtest</h3>
-          <div className="grid gap-3 sm:grid-cols-3">
-            <div className="rounded-lg bg-emerald-500/10 border border-emerald-500/20 p-4 text-center">
-              <p className="text-2xl font-bold text-emerald-400">{bt!.accuracy_2c.toFixed(1)}%</p>
-              <p className="text-xs text-gray-400">Acierto dentro de ±2°C</p>
-            </div>
-            <div className="rounded-lg bg-blue-500/10 border border-blue-500/20 p-4 text-center">
-              <p className="text-2xl font-bold text-blue-400">{bt!.accuracy_1c.toFixed(1)}%</p>
-              <p className="text-xs text-gray-400">Acierto dentro de ±1°C</p>
-            </div>
-            <div className="rounded-lg bg-amber-500/10 border border-amber-500/20 p-4 text-center">
-              <p className="text-2xl font-bold text-amber-400">{bt!.total_muestras}</p>
-              <p className="text-xs text-gray-400">Muestras totales ({bt!.total_dias} días × 9 ciudades)</p>
-            </div>
-          </div>
-        </div>
-      )}
+function SummaryCard({ label, value, sub, color }: { label: string; value: string; sub: string; color: string }) {
+  return (
+    <div className="rounded-lg bg-slate-900/50 p-3 text-center">
+      <div className="text-xs text-gray-500">{label}</div>
+      <div className={`text-xl font-bold ${color}`}>{value}</div>
+      {sub && <div className="text-[10px] text-gray-500 mt-0.5">{sub}</div>}
     </div>
   )
 }
