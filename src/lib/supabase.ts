@@ -1,5 +1,5 @@
 import { createClient } from '@supabase/supabase-js'
-import { HistoricalRecord, DailyRun, GlobalMetrics } from '@/types'
+import { HistoricalRecord, DailyRun, GlobalMetrics, AccuracyMetrics } from '@/types'
 import { CIUDADES_ASIA } from './cities'
 import { BacktestSummary, BacktestDayResult, BacktestCityMetrics } from './backtest-engine'
 
