@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import Layout from '@/components/Layout'
 import CityCard from '@/components/CityCard'
 import AllocationPanel from '@/components/AllocationPanel'
@@ -8,6 +8,88 @@ import ArbitragePanel from '@/components/ArbitragePanel'
 import ForecastTable from '@/components/ForecastTable'
 import BacktestChart from '@/components/BacktestChart'
 import { DailyAnalysis, GlobalMetrics, CityAnalysis } from '@/types'
+
+export async function getServerSideProps() {
+  const supabaseUrl = String(process.env.NEXT_PUBLIC_SUPABASE_URL || '').replace(/\/rest\/v1\/?$/, '')
+  const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
+
+  if (!supabaseUrl || !supabaseKey) {
+    return { props: { initialAnalysis: null, initialMetrics: null, initialAvailableDates: [] } }
+  }
+
+  try {
+    const { createClient } = await import('@supabase/supabase-js')
+    const client = createClient(supabaseUrl, supabaseKey)
+
+    const caracasOffset = -4 * 60 * 60000
+    const nowCaracas = new Date(Date.now() + caracasOffset)
+    nowCaracas.setDate(nowCaracas.getDate() + 1)
+    const fecha = nowCaracas.toISOString().slice(0, 10)
+
+    const { data: runs } = await client.from('daily_runs' as any).select('*').eq('fecha_objetivo', fecha).order('fecha_ejecucion', { ascending: false } as any).limit(1)
+
+    let analysis: DailyAnalysis | null = null
+
+    if ((runs as any[] | undefined)?.length) {
+      const row = (runs as any[])[0]
+      analysis = {
+        fecha: row.fecha_ejecucion,
+        fecha_objetivo: row.fecha_objetivo,
+        message: `Pronóstico del ${new Date(row.fecha_ejecucion).toLocaleDateString('es-ES', { timeZone: 'America/Caracas' })}`,
+        cities: typeof row.resultados === 'string' ? JSON.parse(row.resultados) : row.resultados,
+        recommendations: typeof row.recomendaciones === 'string' ? JSON.parse(row.recomendaciones) : row.recomendaciones,
+        total_allocated: row.total_asignado ?? 0,
+        global_metrics: null,
+        arbitrage_alerts: [],
+      }
+    } else {
+      const { runDailyAnalysis } = await import('@/lib/forecast-engine')
+      const { saveForecastRecords, saveDailyRun } = await import('@/lib/supabase')
+
+      const result = await runDailyAnalysis(fecha, true)
+
+      const records = result.cities.map(city => ({
+        fecha_ejecucion: result.fecha,
+        fecha_objetivo: fecha,
+        ciudad: city.ciudad,
+        slug: city.slug,
+        temp_pronosticada: city.forecast.temp_ponderada,
+        temp_corregida: city.forecast.temp_corregida,
+        temp_real: null, error: null,
+        modelos_usados: Object.keys(city.forecast.ensemble_raw).length,
+        consenso: city.forecast.consenso,
+      }))
+
+      await saveForecastRecords(records)
+      await saveDailyRun({
+        fecha_ejecucion: result.fecha,
+        fecha_objetivo: fecha,
+        resultados: result.cities,
+        recomendaciones: result.recommendations,
+        total_asignado: result.total_allocated,
+      })
+
+      analysis = result
+    }
+
+    const { data: datesData } = await client.from('daily_runs' as any).select('fecha_objetivo').order('fecha_objetivo', { ascending: false } as any).limit(90)
+    const availableDates = [...new Set<string>((datesData as any[] | undefined)?.map(r => r.fecha_objetivo) ?? [])]
+
+    const { computeGlobalMetrics } = await import('@/lib/supabase')
+    const metrics = await computeGlobalMetrics()
+
+    return {
+      props: {
+        initialAnalysis: JSON.parse(JSON.stringify(analysis)),
+        initialMetrics: metrics ? JSON.parse(JSON.stringify(metrics)) : null,
+        initialAvailableDates: availableDates,
+      }
+    }
+  } catch (e) {
+    console.error('[getServerSideProps]', e)
+    return { props: { initialAnalysis: null, initialMetrics: null, initialAvailableDates: [] } }
+  }
+}
 
 type View = 'dashboard' | 'table' | 'metrics' | 'comparison' | 'backtest' | 'arbitrage'
 
@@ -112,19 +194,23 @@ function CitySuccessSummary({ cities }: { cities: CityAnalysis[] }) {
   )
 }
 
-export default function Home() {
-  const [analysis, setAnalysis] = useState<DailyAnalysis | null>(null)
-  const [metrics, setMetrics] = useState<GlobalMetrics | null>(null)
+interface HomeProps {
+  initialAnalysis: DailyAnalysis | null
+  initialMetrics: GlobalMetrics | null
+  initialAvailableDates: string[]
+}
+
+export default function Home({ initialAnalysis, initialMetrics, initialAvailableDates }: HomeProps) {
+  const [analysis, setAnalysis] = useState<DailyAnalysis | null>(initialAnalysis)
+  const [metrics, setMetrics] = useState<GlobalMetrics | null>(initialMetrics)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [activeView, setActiveView] = useState<View>('dashboard')
-  const [lastUpdated, setLastUpdated] = useState<string>('')
+  const [lastUpdated, setLastUpdated] = useState<string>(initialAnalysis ? `Auto ${new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}` : '')
   const [selectedDate, setSelectedDate] = useState<string>('')
-  const [availableDates, setAvailableDates] = useState<string[]>([])
+  const [availableDates, setAvailableDates] = useState<string[]>(initialAvailableDates)
   const [isHistorical, setIsHistorical] = useState(false)
-  const autoRunDone = useRef(false)
 
-  // Compute default target date (tomorrow in Caracas)
   const getDefaultTargetDate = () => {
     const caracasOffset = -4 * 60 * 60000
     const nowCaracas = new Date(Date.now() + caracasOffset)
@@ -132,33 +218,11 @@ export default function Home() {
     return nowCaracas.toISOString().slice(0, 10)
   }
 
-  useEffect(() => { 
+  useEffect(() => {
     fetchMetrics()
     fetchAvailableDates()
-    setSelectedDate(getDefaultTargetDate())
+    if (!selectedDate) setSelectedDate(getDefaultTargetDate())
   }, [])
-
-  // Auto-run forecast on load if no data exists
-  useEffect(() => {
-    if (autoRunDone.current) return
-    if (availableDates.length === 0 && !loading && !analysis) {
-      autoRunDone.current = true
-      const target = getDefaultTargetDate()
-      setLoading(true)
-      setError(null)
-      fetch(`/api/forecast?fecha=${target}`, { method: 'POST' })
-        .then(res => res.ok ? res.json() : Promise.reject())
-        .then(data => {
-          setAnalysis(data)
-          setSelectedDate(data.fecha_objetivo)
-          setLastUpdated(new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit', second: '2-digit' }))
-          fetchMetrics()
-          fetchAvailableDates()
-        })
-        .catch(() => setError('Error al generar pronóstico automático'))
-        .finally(() => setLoading(false))
-    }
-  }, [availableDates])
 
   async function fetchAvailableDates() {
     try {

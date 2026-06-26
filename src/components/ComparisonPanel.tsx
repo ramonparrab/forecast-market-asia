@@ -22,28 +22,11 @@ export default function ComparisonPanel() {
   const [cities, setCities] = useState<CityComparison[]>([])
   const [loading, setLoading] = useState(true)
 
-  async function load() {
-    setLoading(true)
-    try {
-      const resp = await fetch('/api/metrics/comparison')
-      if (resp.ok) {
-        const json = await resp.json()
-        if (json.cities?.length) { setCities(json.cities); setLoading(false); return true }
-      }
-    } catch { /* silent */ }
-    setLoading(false)
-    return false
-  }
-
   useEffect(() => {
-    let cancelled = false
-    let retries = 0
-    async function tryLoad() {
-      const ok = await load()
-      if (!cancelled && !ok && retries++ < 8) { setTimeout(tryLoad, 2000) }
-    }
-    tryLoad()
-    return () => { cancelled = true }
+    fetch('/api/metrics/comparison').then(r => r.ok ? r.json() : null).then(d => {
+      if (d?.cities?.length) setCities(d.cities)
+      setLoading(false)
+    }).catch(() => setLoading(false))
   }, [])
 
   if (loading) {
@@ -62,7 +45,7 @@ export default function ComparisonPanel() {
             <h2 className="text-lg font-semibold text-white">📊 Comparación: Pronóstico 10PM Caracas vs Cierre</h2>
             <p className="text-xs text-gray-500 mt-0.5">Últimos 30 días · Azul = pronóstico corregido (10PM Caracas), naranja = temperatura real al cierre</p>
           </div>
-          <button onClick={load} className="text-xs text-blue-400 hover:text-blue-300 px-2 py-1">🔄</button>
+          <button onClick={() => { setLoading(true); fetch('/api/metrics/comparison').then(r => r.ok ? r.json() : null).then(d => { if (d?.cities?.length) setCities(d.cities); setLoading(false) }).catch(() => setLoading(false)) }} className="text-xs text-blue-400 hover:text-blue-300 px-2 py-1">🔄</button>
         </div>
       </div>
 

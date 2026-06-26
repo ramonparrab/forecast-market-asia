@@ -35,18 +35,10 @@ export default function CityMetricsPanel() {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    let cancelled = false
-    let retries = 0
-    function load() {
-      fetch('/api/metrics').then(r => r.ok ? r.json() : null).then(d => {
-        if (cancelled) return
-        if (d && d.total_muestras > 0) { setMetrics(d); setLoading(false); return }
-        if (retries++ < 8) { setTimeout(load, 2000); return }
-        setLoading(false)
-      }).catch(() => { if (!cancelled && retries++ < 4) setTimeout(load, 3000); else setLoading(false) })
-    }
-    load()
-    return () => { cancelled = true }
+    fetch('/api/metrics').then(r => r.ok ? r.json() : null).then(d => {
+      if (d && d.total_muestras > 0) setMetrics(d)
+      setLoading(false)
+    }).catch(() => setLoading(false))
   }, [])
 
   const city = metrics?.por_ciudad?.find(c => c.slug === selectedSlug)
