@@ -22,19 +22,24 @@ export default function ComparisonPanel() {
   const [cities, setCities] = useState<CityComparison[]>([])
   const [loading, setLoading] = useState(true)
 
-  useEffect(() => { loadComparison() }, [])
-
-  async function loadComparison() {
-    setLoading(true)
-    try {
-      const resp = await fetch('/api/metrics/comparison')
-      if (resp.ok) {
-        const json = await resp.json()
-        if (json.cities) setCities(json.cities)
-      }
-    } catch { /* silent */ }
-    setLoading(false)
-  }
+  useEffect(() => {
+    let cancelled = false
+    let retries = 0
+    async function load() {
+      try {
+        const resp = await fetch('/api/metrics/comparison')
+        if (cancelled) return
+        if (resp.ok) {
+          const json = await resp.json()
+          if (json.cities?.length) { setCities(json.cities); setLoading(false); return }
+        }
+      } catch { /* silent */ }
+      if (!cancelled && retries++ < 8) { setTimeout(load, 2000); return }
+      setLoading(false)
+    }
+    load()
+    return () => { cancelled = true }
+  }, [])
 
   if (loading) {
     return <div className="card text-center py-8 text-gray-500">Cargando comparación...</div>
