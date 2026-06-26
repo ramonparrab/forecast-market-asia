@@ -331,7 +331,7 @@ export default function Home() {
           <p className="mb-6 text-sm text-gray-500 max-w-md mx-auto">
             Ejecuta el análisis a las 22:00 hora Caracas. El sistema compara la temperatura máxima pronosticada por 6 modelos meteorológicos contra los precios de cierre en Polymarket, identificando ineficiencias y calculando la asignación óptima vía Kelly.
           </p>
-          <button onClick={runAnalysis} className="btn-primary text-base px-8 py-3">
+          <button onClick={() => runAnalysis()} className="btn-primary text-base px-8 py-3">
             🚀 Comenzar Análisis
           </button>
           <div className="mt-6 flex justify-center gap-6 text-xs text-gray-600">
