@@ -13,8 +13,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   try {
     const slug = req.query.slug as string | undefined
-    const limit = parseInt(req.query.limit as string || '100')
-    const data = await getForecastVsActual(slug, limit)
+    const data = await getForecastVsActual(slug)
 
     return res.status(200).json({
       status: 'ok',
