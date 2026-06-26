@@ -62,7 +62,7 @@ export default function ComparisonPanel() {
             <h2 className="text-lg font-semibold text-white">📊 Comparación: Pronóstico 10PM Caracas vs Cierre</h2>
             <p className="text-xs text-gray-500 mt-0.5">Últimos 30 días · Azul = pronóstico corregido (10PM Caracas), naranja = temperatura real al cierre</p>
           </div>
-          <button onClick={loadComparison} className="text-xs text-blue-400 hover:text-blue-300 px-2 py-1">🔄</button>
+          <button onClick={load} className="text-xs text-blue-400 hover:text-blue-300 px-2 py-1">🔄</button>
         </div>
       </div>
 
