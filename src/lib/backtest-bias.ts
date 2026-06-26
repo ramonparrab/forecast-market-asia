@@ -1,10 +1,54 @@
-import { getBacktestBias, saveBacktestBias, BacktestBiasEntry } from './supabase'
+import { getBacktestBias, getHistoricalRecords, saveBacktestBias, BacktestBiasEntry } from './supabase'
 import { BacktestDayResult } from './backtest-engine'
-import { CIUDADES_ASIA } from './cities'
+
+// In-memory cache for bias (persists across requests within same serverless instance)
+let cachedBias: Record<string, number> | null = null
+let cacheTimestamp = 0
+const BIAS_CACHE_TTL = 300_000 // 5 min
 
 export async function loadBacktestBias(): Promise<Record<string, number>> {
-  const entries = await getBacktestBias()
-  if (entries.length === 0) return {}
+  if (cachedBias && (Date.now() - cacheTimestamp) < BIAS_CACHE_TTL) {
+    return cachedBias
+  }
+  // 1. Try Supabase backtest_bias table first
+  let entries: BacktestBiasEntry[] = []
+  try {
+    entries = await getBacktestBias()
+  } catch { /* table may not exist */ }
+
+  // 2. Fall back to forecast_history if no backtest_bias entries
+  if (!entries || entries.length === 0) {
+    try {
+      const history = await getHistoricalRecords(500)
+      const withActuals = history.filter(r => r.temp_real !== null && r.error !== null)
+      if (withActuals.length >= 5) {
+        const mapped = withActuals.map(r => ({
+          fecha: r.fecha_objetivo || r.fecha_ejecucion.slice(0, 10),
+          ciudad: r.ciudad,
+          slug: r.slug,
+          temp_pronosticada: r.temp_pronosticada,
+          temp_corregida: r.temp_corregida,
+          temp_real: r.temp_real!,
+          error: r.error!,
+          modelos_usados: r.modelos_usados,
+          consenso: r.consenso,
+          sesgo_aplicado: 0,
+        }))
+        const biasEntries = computeBacktestBiasFromResults(mapped as any)
+        if (biasEntries.length > 0) {
+          entries = biasEntries
+          // Save for future (best effort)
+          try { await saveBacktestBias(biasEntries) } catch {}
+        }
+      }
+    } catch {}
+  }
+
+  if (!entries || entries.length === 0) {
+    cachedBias = {}
+    cacheTimestamp = Date.now()
+    return {}
+  }
 
   // Group by slug, take most recent month's bias
   const bySlug: Record<string, BacktestBiasEntry[]> = {}
@@ -33,6 +77,8 @@ export async function loadBacktestBias(): Promise<Record<string, number>> {
     }
   }
 
+  cachedBias = result
+  cacheTimestamp = Date.now()
   return result
 }
 
