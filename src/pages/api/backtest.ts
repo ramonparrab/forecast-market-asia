@@ -8,15 +8,17 @@ const CACHE_TTL = 300_000
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method === 'GET') {
-    // Try Supabase cache first
-    const cached = await getAccumulatedBacktest(180)
-    if (cached) {
-      return res.status(200).json({ status: 'ok', cached: true, data: cached })
-    }
-    // Fall back to in-memory
     if (inMemoryCache && (Date.now() - inMemoryCache.ts) < CACHE_TTL) {
-      return res.status(200).json({ status: 'ok', cached: true, ...inMemoryCache.data })
+      return res.status(200).json({ status: 'ok', cached: true, data: inMemoryCache.data.data })
     }
+    // Try Supabase cache
+    try {
+      const cached = await getAccumulatedBacktest(180)
+      if (cached) {
+        inMemoryCache = { data: { data: cached }, ts: Date.now() }
+        return res.status(200).json({ status: 'ok', cached: true, data: cached })
+      }
+    } catch { /* table may not exist yet */ }
     return res.status(200).json({ status: 'ok', cached: false, data: null })
   }
 
@@ -26,46 +28,31 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   try {
     const totalDays = Math.min(parseInt(req.query.days as string || '90'), 365)
-    const chunkSize = 30 // process 30 days per chunk to stay within timeout
-    
-    // Check if we have accumulated data in Supabase
-    const existing = await getAccumulatedBacktest(totalDays)
-    if (existing && existing.total_muestras > 0) {
-      return res.status(200).json({
-        status: 'ok',
-        cached: true,
-        data: existing,
-      })
-    }
+    const chunkSize = Math.min(30, totalDays)
+    const offset = parseInt(req.query.offset as string || '0')
 
-    // Process chunks until we have enough days
-    let combinedResults: any[] = []
-    let processedDays = 0
+    // Run a single chunk
+    const result = await runBacktest(chunkSize, offset)
 
-    for (let offset = 0; offset < totalDays; offset += chunkSize) {
-      const chunkDays = Math.min(chunkSize, totalDays - offset)
-      
-      const chunkResult = await runBacktest(chunkDays, offset)
-      combinedResults.push(...chunkResult.resultados)
-      processedDays += chunkDays
+    // Try to save to Supabase (best effort)
+    try {
+      await saveBacktestChunk(chunkSize, offset, result)
+      // Update bias from all accumulated chunks
+      const accumulated = await getAccumulatedBacktest(totalDays)
+      if (accumulated) {
+        const biasEntries = computeBacktestBiasFromResults(accumulated.resultados)
+        await saveBacktestBias(biasEntries)
+      }
+    } catch { /* tables may not exist yet */ }
 
-      // Save chunk to Supabase for future requests
-      await saveBacktestChunk(chunkDays, offset, chunkResult)
-    }
+    // Always cache in memory
+    inMemoryCache = { data: { data: result }, ts: Date.now() }
 
-    // Compute bias from ALL results and save to Supabase
-    const biasEntries = computeBacktestBiasFromResults(combinedResults)
-    await saveBacktestBias(biasEntries)
-
-    // Get final combined result
-    const finalResult = await getAccumulatedBacktest(totalDays)
-    
-    if (finalResult) {
-      inMemoryCache = { data: { data: finalResult }, ts: Date.now() }
-      return res.status(200).json({ status: 'ok', cached: false, data: finalResult })
-    }
-
-    return res.status(500).json({ status: 'error', message: 'No results generated' })
+    return res.status(200).json({
+      status: 'ok',
+      cached: false,
+      data: result,
+    })
   } catch (error) {
     console.error('[BACKTEST] Error:', error)
     return res.status(500).json({

@@ -26,43 +26,33 @@ export default function BacktestChart() {
     setRunning(true)
     setError(null)
     setProgress(0)
-    
+
     try {
-      if (days <= CHUNK_SIZE) {
-        const resp = await fetch(`/api/backtest?days=${days}`, { method: 'POST', signal: AbortSignal.timeout(120000) })
+      const numChunks = Math.ceil(days / CHUNK_SIZE)
+
+      for (let chunk = 0; chunk < numChunks; chunk++) {
+        setProgress(Math.round((chunk + 1) / numChunks * 100))
+        const offset = chunk * CHUNK_SIZE
+        const chunkDays = Math.min(CHUNK_SIZE, days - offset)
+
+        const resp = await fetch(`/api/backtest?days=${chunkDays}&offset=${offset}`, { method: 'POST', signal: AbortSignal.timeout(120000) })
         if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
         const json = await resp.json()
-        if (json.status === 'ok') {
-          setData(json.data)
-        } else {
-          throw new Error(json.message || 'Error')
-        }
-      } else {
-        // Chunked for 60-180 days: process one chunk at a time to stay within Vercel 10s limit
-        const numChunks = Math.ceil(days / CHUNK_SIZE)
-        
-        for (let chunk = 0; chunk < numChunks; chunk++) {
-          setProgress(Math.round((chunk + 1) / numChunks * 100))
-          const offset = chunk * CHUNK_SIZE
-          const chunkDays = Math.min(CHUNK_SIZE, days - offset)
-          
-          const resp = await fetch(`/api/backtest?days=${chunkDays}&offset=${offset}`, { method: 'POST', signal: AbortSignal.timeout(120000) })
-          if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
-          const json = await resp.json()
-          if (json.status !== 'ok') {
-            throw new Error(json.message || `Error en chunk ${chunk + 1}`)
-          }
-        }
-        
-        setProgress(100)
-        
-        // Fetch combined result from cache
+        if (json.status !== 'ok') throw new Error(json.message || `Error en bloque ${chunk + 1}`)
+        // Keep last chunk's data as display data
+        if (chunk === 0) setData(json.data)
+      }
+
+      setProgress(100)
+
+      // Try to fetch combined data from cache (may include Supabase-accumulated data)
+      try {
         const finalResp = await fetch('/api/backtest', { signal: AbortSignal.timeout(10000) })
         if (finalResp.ok) {
           const finalJson = await finalResp.json()
           if (finalJson?.data) setData(finalJson.data)
         }
-      }
+      } catch { /* use last chunk data */ }
     } catch (e: any) {
       setError(e.message || 'Error ejecutando backtest')
     } finally {
@@ -74,13 +64,12 @@ export default function BacktestChart() {
 
   return (
     <div className="space-y-6">
-      {/* Controls */}
       <div className="card">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <div>
             <h2 className="text-lg font-semibold text-white">📊 Backtesting Histórico</h2>
             <p className="text-xs text-gray-500 mt-0.5">
-              Compara el pronóstico del ensemble contra la temperatura real observada en los últimos meses
+              Compara el pronóstico del ensemble contra la temperatura real observada
             </p>
           </div>
           <div className="flex items-center gap-3">
@@ -133,9 +122,9 @@ export default function BacktestChart() {
           </div>
         )}
         <div className="mt-3 flex flex-wrap gap-3 text-xs text-gray-500">
-          <span>• 6 modelos por ciudad (ECMWF, GFS, ICON, JMA, MeteoFrance, best_match)</span>
-          <span>• Temperatura real vía Open-Meteo Archive API</span>
-          <span>• Bias dinámico + sesgo de backtest incluidos</span>
+          <span>• 6 modelos por ciudad</span>
+          <span>• Temperatura real vía Open-Meteo Archive</span>
+          <span>• Bias dinámico + sesgo de backtest</span>
         </div>
       </div>
 
@@ -143,7 +132,6 @@ export default function BacktestChart() {
         <div className="card text-center py-8">
           <div className="mb-3 text-4xl animate-pulse">⏳</div>
           <p className="text-gray-400">Procesando datos históricos...</p>
-          <p className="text-xs text-gray-600 mt-1">Fetching Open-Meteo para {days} días × 9 ciudades</p>
         </div>
       )}
 
@@ -151,7 +139,7 @@ export default function BacktestChart() {
         <div className="card text-center py-8 text-gray-500">
           <div className="mb-3 text-5xl">📊</div>
           <p className="text-lg font-medium text-gray-400">Backtesting histórico</p>
-          <p className="mt-1 text-sm">Presiona "Ejecutar Backtest" para validar la precisión del modelo contra datos reales observados.</p>
+          <p className="mt-1 text-sm">Presiona "Ejecutar Backtest" para validar la precisión del modelo.</p>
         </div>
       )}
 
@@ -166,11 +154,11 @@ export default function BacktestChart() {
 
           <div className="rounded-xl bg-gradient-to-r from-blue-600/10 to-emerald-600/10 border border-blue-500/20 p-4 text-sm">
             <div className="flex flex-wrap items-center gap-4">
-              <span className="text-gray-300">🏆 <strong className="text-emerald-400">{data.mejores_ciudades.join(', ')}</strong> — mejores MAE</span>
+              <span className="text-gray-300">🏆 <strong className="text-emerald-400">{data.mejores_ciudades.join(', ')}</strong></span>
               <span className="text-gray-500">|</span>
-              <span className="text-gray-300">⚠️ <strong className="text-red-400">{data.peores_ciudades.join(', ')}</strong> — peores MAE</span>
+              <span className="text-gray-300">⚠️ <strong className="text-red-400">{data.peores_ciudades.join(', ')}</strong></span>
               <span className="text-gray-500">|</span>
-              <span className="text-gray-400">{data.total_dias} días · {data.total_ciudades} ciudades · {data.total_muestras} muestras</span>
+              <span className="text-gray-400">{data.total_muestras} muestras · {data.total_dias}d</span>
             </div>
           </div>
 
@@ -182,15 +170,9 @@ export default function BacktestChart() {
                   <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
                   <XAxis dataKey="ciudad" stroke="#64748b" tick={{ fontSize: 10 }} />
                   <YAxis stroke="#64748b" tick={{ fontSize: 10 }} domain={[0, 'auto']} />
-                  <Tooltip
-                    contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '8px' }}
-                    labelStyle={{ color: '#f1f5f9' }}
-                    formatter={(value: number, name: string) => [`${value.toFixed(2)}°C`, name]}
-                  />
+                  <Tooltip contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '8px' }} labelStyle={{ color: '#f1f5f9' }} />
                   <Bar dataKey="mae" radius={[4, 4, 0, 0]}>
-                    {data.por_ciudad.map((_, i) => (
-                      <Cell key={i} fill={COLORS[i % COLORS.length]} />
-                    ))}
+                    {data.por_ciudad.map((_, i) => (<Cell key={i} fill={COLORS[i % COLORS.length]} />))}
                   </Bar>
                   <ReferenceLine y={2} stroke="#f59e0b" strokeDasharray="3 3" label={{ value: '±2°C', fill: '#f59e0b', fontSize: 10 }} />
                 </BarChart>
@@ -199,24 +181,19 @@ export default function BacktestChart() {
           </div>
 
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {data.por_ciudad.map(city => (
-              <CityBacktestCard key={city.slug} city={city} />
-            ))}
+            {data.por_ciudad.map(city => (<CityBacktestCard key={city.slug} city={city} />))}
           </div>
 
           {data.resultados.length > 0 && (
             <div className="card">
-              <h3 className="mb-3 text-sm font-medium text-gray-400">Evolución del error en el tiempo</h3>
+              <h3 className="mb-3 text-sm font-medium text-gray-400">Evolución del error</h3>
               <div className="h-72">
                 <ResponsiveContainer width="100%" height="100%">
                   <ComposedChart data={prepareEvolutionData(data.resultados)}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
                     <XAxis dataKey="fecha" stroke="#64748b" tick={{ fontSize: 9 }} tickFormatter={v => v.slice(5)} />
                     <YAxis stroke="#64748b" tick={{ fontSize: 10 }} domain={[0, 'auto']} />
-                    <Tooltip
-                      contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '8px' }}
-                      labelStyle={{ color: '#f1f5f9' }}
-                    />
+                    <Tooltip contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '8px' }} labelStyle={{ color: '#f1f5f9' }} />
                     <Legend />
                     <Bar dataKey="mae_diario" fill="#3b82f6" name="MAE diario" radius={[2, 2, 0, 0]} opacity={0.6} />
                     <Line type="monotone" dataKey="mae_7d" stroke="#10b981" strokeWidth={2} dot={false} name="MAE (media 7d)" />
@@ -227,40 +204,28 @@ export default function BacktestChart() {
           )}
 
           {/* Bias correction indicator */}
-          {data.overall_bias !== undefined && (
-            <div className="rounded-xl bg-gradient-to-r from-amber-600/10 to-red-600/10 border border-amber-500/20 p-4 text-sm">
-              <div className="flex items-start gap-3">
-                <span className="text-xl">🎯</span>
-                <div>
-                  <p className="text-gray-300 font-medium mb-1">Auto-corrección por backtest activa</p>
-                  <p className="text-gray-500 text-xs">
-                    El modelo se ajusta automáticamente según el sesgo observado en los últimos {data.total_muestras} registros.
-                    {data.overall_bias > 0.15 
-                      ? ` Bias de +${data.overall_bias}°C detectado → se reducirán las temperaturas pronosticadas.`
-                      : data.overall_bias < -0.15
-                      ? ` Bias de ${data.overall_bias}°C detectado → se aumentarán las temperaturas pronosticadas.`
-                      : ' Bias actual dentro del rango aceptable (±0.15°C).'}
-                  </p>
-                </div>
+          <div className="rounded-xl bg-gradient-to-r from-amber-600/10 to-red-600/10 border border-amber-500/20 p-4 text-sm">
+            <div className="flex items-start gap-3">
+              <span className="text-xl">🎯</span>
+              <div>
+                <p className="text-gray-300 font-medium mb-1">Auto-corrección por backtest activa</p>
+                <p className="text-gray-500 text-xs">
+                  El modelo se ajusta según el sesgo observado. 
+                  {Math.abs(data.overall_bias) >= 0.15
+                    ? ` Bias de ${data.overall_bias > 0 ? '+' : ''}${data.overall_bias}°C → ajustando pronóstico.`
+                    : ' Bias dentro del rango aceptable (±0.15°C).'}
+                </p>
               </div>
             </div>
-          )}
+          </div>
 
           <div className="rounded-xl bg-slate-800/30 border border-gray-700/30 p-4 text-xs text-gray-500">
-            <p className="font-medium text-gray-400 mb-2">📖 Cómo interpretar el backtest</p>
+            <p className="font-medium text-gray-400 mb-2">📖 Interpretación</p>
             <div className="grid gap-2 sm:grid-cols-2">
-              <div>
-                <strong className="text-gray-400">MAE (Mean Absolute Error):</strong> Error promedio absoluto. Un MAE de 1.5°C significa que el pronóstico se desvía 1.5°C en promedio.
-              </div>
-              <div>
-                <strong className="text-gray-400">RMSE:</strong> Penaliza errores grandes. Si RMSE &gt; MAE × 1.5, hay outliers (días con error muy alto).
-              </div>
-              <div>
-                <strong className="text-gray-400">Acierto ±2°C:</strong> % de días donde el pronóstico acertó dentro de 2°C. Objetivo: &gt;70%.
-              </div>
-              <div>
-                <strong className="text-gray-400">Bias:</strong> Error sistemático. Positivo = sobre-estimamos la temperatura. Negativo = sub-estimamos.
-              </div>
+              <div><strong className="text-gray-400">MAE:</strong> Error absoluto medio en °C.</div>
+              <div><strong className="text-gray-400">RMSE:</strong> Penaliza errores grandes. Si RMSE &gt; MAE×1.5 hay outliers.</div>
+              <div><strong className="text-gray-400">Acierto ±2°C:</strong> % de días con error &lt; 2°C. Objetivo &gt;70%.</div>
+              <div><strong className="text-gray-400">Bias:</strong> Error sistemático. Positivo = sobre-estimamos.</div>
             </div>
           </div>
         </>
@@ -282,7 +247,6 @@ function SummaryCard({ label, value, desc, color }: { label: string; value: stri
 function CityBacktestCard({ city }: { city: BacktestCityMetrics }) {
   const accuracyColor = city.accuracy_within_2c >= 70 ? 'text-emerald-400' : city.accuracy_within_2c >= 50 ? 'text-amber-400' : 'text-red-400'
   const maeColor = city.mae <= 1.5 ? 'text-emerald-400' : city.mae <= 2.5 ? 'text-amber-400' : 'text-red-400'
-
   return (
     <div className="rounded-xl bg-slate-900/50 border border-gray-700/30 p-4">
       <div className="flex items-center justify-between mb-2">
@@ -307,18 +271,15 @@ function prepareEvolutionData(resultados: { fecha: string; error: number }[]) {
     if (!byDate[r.fecha]) byDate[r.fecha] = []
     byDate[r.fecha].push(Math.abs(r.error))
   }
-
   const entries: { fecha: string; mae_diario: number; mae_7d?: number }[] = Object.entries(byDate)
     .map(([fecha, errors]) => ({
       fecha,
       mae_diario: Math.round(errors.reduce((s, v) => s + v, 0) / errors.length * 100) / 100,
     }))
     .sort((a, b) => a.fecha.localeCompare(b.fecha))
-
   for (let i = 0; i < entries.length; i++) {
     const window = entries.slice(Math.max(0, i - 6), i + 1)
     entries[i].mae_7d = Math.round(window.reduce((s, w) => s + w.mae_diario, 0) / window.length * 100) / 100
   }
-
   return entries
 }
