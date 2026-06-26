@@ -2,10 +2,10 @@ import { useState, useEffect, useCallback } from 'react'
 import Layout from '@/components/Layout'
 import CityCard from '@/components/CityCard'
 import AllocationPanel from '@/components/AllocationPanel'
-import MetricsChart from '@/components/MetricsChart'
+import CityMetricsPanel from '@/components/CityMetricsPanel'
+import ComparisonPanel from '@/components/ComparisonPanel'
 import ArbitragePanel from '@/components/ArbitragePanel'
 import ForecastTable from '@/components/ForecastTable'
-import ForecastVsActualChart from '@/components/ForecastVsActualChart'
 import BacktestChart from '@/components/BacktestChart'
 import { DailyAnalysis, GlobalMetrics, CityAnalysis } from '@/types'
 
@@ -352,6 +352,31 @@ export default function Home() {
           {/* City Success Summary */}
           <CitySuccessSummary cities={analysis.cities} />
 
+          {/* 10PM Caracas Forecast Banner */}
+          {analysis.cities.length > 0 && (
+            <div className="rounded-2xl bg-gradient-to-r from-blue-600/20 via-blue-500/10 to-emerald-600/20 border border-blue-500/20 p-6 text-center">
+              <p className="text-sm text-blue-300 font-medium mb-1">🌙 PRONÓSTICO 10PM HORA CARACAS</p>
+              <div className="flex items-center justify-center gap-6 flex-wrap">
+                {analysis.cities.slice(0, 3).map(city => (
+                  <div key={city.slug} className="text-center">
+                    <p className="text-xs text-gray-400">{city.ciudad}</p>
+                    <p className="text-3xl font-bold text-emerald-400">{city.forecast.temp_corregida.toFixed(1)}°C</p>
+                  </div>
+                ))}
+                {analysis.cities.length > 3 && (
+                  <div className="text-center">
+                    <p className="text-xs text-gray-500">+{analysis.cities.length - 3} ciudades</p>
+                    <p className="text-lg text-gray-300">ver abajo ↓</p>
+                  </div>
+                )}
+              </div>
+              <div className="mt-3 flex justify-center gap-4 text-xs text-gray-500">
+                <span>📡 {analysis.cities.filter(c => c.nowcast?.activo).length}/{analysis.cities.length} nowcast activo</span>
+                <span>🎯 Promedio: {(analysis.cities.reduce((s, c) => s + c.forecast.temp_corregida, 0) / analysis.cities.length).toFixed(1)}°C</span>
+              </div>
+            </div>
+          )}
+
           {/* City Cards Grid */}
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {analysis.cities.map(city => (
@@ -370,11 +395,11 @@ export default function Home() {
       {/* Table View */}
       {activeView === 'table' && analysis && <ForecastTable data={analysis} />}
 
-      {/* Metrics View */}
-      {activeView === 'metrics' && <MetricsChart metrics={metrics} />}
+      {/* Metrics View - Per city with backtesting data */}
+      {activeView === 'metrics' && <CityMetricsPanel />}
 
-      {/* Comparison View (Forecast vs Actual) */}
-      {activeView === 'comparison' && <ForecastVsActualChart metrics={metrics} />}
+      {/* Comparison View - Forecast vs Actual per city */}
+      {activeView === 'comparison' && <ComparisonPanel />}
 
       {/* Backtest View */}
       {activeView === 'backtest' && <BacktestChart />}

@@ -134,6 +134,20 @@ export interface GlobalMetrics {
   }
 }
 
+export interface CityImprovement {
+  slug: string
+  ciudad: string
+  mejora_mae_pct: number
+  mejora_bias_pct: number
+  accuracy_pct: number
+  muestras: number
+  tendencia: 'mejorando' | 'estable' | 'empeorando'
+  impacto_proximo_pct: number
+  descripcion_impacto: string
+  ultima_mejora_fecha: string
+  ultima_mejora_desc: string
+}
+
 export interface DailyAnalysis {
   fecha: string
   fecha_objetivo: string
