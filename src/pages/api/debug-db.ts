@@ -1,5 +1,4 @@
 import { NextApiRequest, NextApiResponse } from 'next'
-import { createClient } from '@supabase/supabase-js'
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL || ''
@@ -8,58 +7,43 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   const results: any[] = []
 
-  // Test with anon key - query
-  try {
-    const client = createClient(url, anonKey)
-    const { data, error, count } = await client
-      .from('backtest_bias' as any)
-      .select('*', { count: 'exact', head: true })
-    results.push({ test: 'query anon key', error: error?.message, count, data })
-  } catch (e: any) { results.push({ test: 'query anon key', error: e.message }) }
+  // Direct REST call to bypass supabase-js
+  const headers = {
+    apikey: anonKey,
+    Authorization: `Bearer ${anonKey}`,
+    'Content-Type': 'application/json',
+  }
+  const baseUrl = url.replace(/\/$/, '')
 
-  // Test with anon key - insert
+  // Test 1: GET backtest_bias
   try {
-    const client = createClient(url, anonKey)
-    const { data, error } = await client
-      .from('backtest_bias' as any)
-      .insert({ slug: 'debug-test', mes: 6, bias: 0.5, mae: 1.0, muestras: 5 })
-    results.push({ test: 'insert anon key', error: error?.message, data })
-  } catch (e: any) { results.push({ test: 'insert anon key', error: e.message }) }
+    const r = await fetch(`${baseUrl}/rest/v1/backtest_bias?limit=1`, { headers })
+    const text = await r.text()
+    results.push({ test: 'GET /backtest_bias', status: r.status, body: text.slice(0, 100) })
+  } catch (e: any) { results.push({ test: 'GET /backtest_bias', error: e.message }) }
 
-  // Test with service key - query
+  // Test 2: POST to backtest_bias
   try {
-    const client = createClient(url, serviceKey)
-    const { data, error } = await client
-      .from('backtest_bias' as any)
-      .select('*')
-      .limit(3)
-    results.push({ test: 'query service key', error: error?.message, count: (data as any)?.length })
-  } catch (e: any) { results.push({ test: 'query service key', error: e.message }) }
+    const r = await fetch(`${baseUrl}/rest/v1/backtest_bias`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ slug: 'debug-curl', mes: 6, bias: 0.5, mae: 1.0, muestras: 5 }),
+    })
+    const text = await r.text()
+    results.push({ test: 'POST /backtest_bias', status: r.status, body: text.slice(0, 100) })
+  } catch (e: any) { results.push({ test: 'POST /backtest_bias', error: e.message }) }
 
-  // Test with service key - upsert
+  // Test 3: GET forecast_history (known working table)
   try {
-    const client = createClient(url, serviceKey)
-    const { data, error } = await client
-      .from('backtest_bias' as any)
-      .upsert({ slug: 'debug-test', mes: 6, bias: 0.5, mae: 1.0, muestras: 5 }, { onConflict: 'slug,mes' })
-    results.push({ test: 'upsert service key', error: error?.message, data })
-  } catch (e: any) { results.push({ test: 'upsert service key', error: e.message }) }
+    const r = await fetch(`${baseUrl}/rest/v1/forecast_history?limit=1`, { headers })
+    const text = await r.text()
+    results.push({ test: 'GET /forecast_history', status: r.status, body: text.slice(0, 100) })
+  } catch (e: any) { results.push({ test: 'GET /forecast_history', error: e.message }) }
 
   // Cleanup
   try {
-    const client = createClient(url, serviceKey)
-    await client.from('backtest_bias' as any).delete().eq('slug', 'debug-test')
+    await fetch(`${baseUrl}/rest/v1/backtest_bias?slug=eq.debug-curl`, { method: 'DELETE', headers })
   } catch {}
 
-  // Also check if forecast_history table works
-  try {
-    const client = createClient(url, anonKey)
-    const { data, error } = await client
-      .from('forecast_history' as any)
-      .select('id')
-      .limit(1)
-    results.push({ test: 'forecast_history query', error: error?.message, hasData: (data as any)?.length > 0 })
-  } catch (e: any) { results.push({ test: 'forecast_history query', error: e.message }) }
-
-  return res.status(200).json({ results })
+  return res.status(200).json({ url: url.slice(0, 30) + '...', results })
 }
