@@ -121,6 +121,17 @@ export interface GlobalMetrics {
   accuracy_pct: number
   por_ciudad: AccuracyMetrics[]
   evolucion_diaria: { fecha: string; mae: number; rmse: number }[]
+  /** Backtest-derived metrics for comparison (more samples) */
+  backtest?: {
+    total_muestras: number
+    overall_mae: number
+    overall_rmse: number
+    overall_bias: number
+    accuracy_2c: number
+    accuracy_1c: number
+    total_dias: number
+    por_ciudad: AccuracyMetrics[]
+  }
 }
 
 export interface DailyAnalysis {
