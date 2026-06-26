@@ -22,22 +22,27 @@ export default function ComparisonPanel() {
   const [cities, setCities] = useState<CityComparison[]>([])
   const [loading, setLoading] = useState(true)
 
+  async function load() {
+    setLoading(true)
+    try {
+      const resp = await fetch('/api/metrics/comparison')
+      if (resp.ok) {
+        const json = await resp.json()
+        if (json.cities?.length) { setCities(json.cities); setLoading(false); return true }
+      }
+    } catch { /* silent */ }
+    setLoading(false)
+    return false
+  }
+
   useEffect(() => {
     let cancelled = false
     let retries = 0
-    async function load() {
-      try {
-        const resp = await fetch('/api/metrics/comparison')
-        if (cancelled) return
-        if (resp.ok) {
-          const json = await resp.json()
-          if (json.cities?.length) { setCities(json.cities); setLoading(false); return }
-        }
-      } catch { /* silent */ }
-      if (!cancelled && retries++ < 8) { setTimeout(load, 2000); return }
-      setLoading(false)
+    async function tryLoad() {
+      const ok = await load()
+      if (!cancelled && !ok && retries++ < 8) { setTimeout(tryLoad, 2000) }
     }
-    load()
+    tryLoad()
     return () => { cancelled = true }
   }, [])
 
