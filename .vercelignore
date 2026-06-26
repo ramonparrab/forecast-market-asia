@@ -1,0 +1,15 @@
+# Ignore Python backend files — Vercel only runs the Next.js app
+.python-version
+*.py
+uv.lock
+pyproject.toml
+**/__pycache__/
+signals/
+api/
+mcp/
+scripts/
+tests/
+docs/
+config/
+storage/
+
