@@ -111,6 +111,26 @@ export async function getRecentModelErrors(
   return grouped
 }
 
+export async function getLastDaysRecords(
+  days = 30
+): Promise<HistoricalRecord[]> {
+  const client = getClient()
+  if (!client) return []
+
+  const since = new Date()
+  since.setDate(since.getDate() - days)
+  const sinceStr = since.toISOString()
+
+  const { data, error } = await client
+    .from('forecast_history' as any)
+    .select('*')
+    .gte('fecha_ejecucion', sinceStr)
+    .order('fecha_ejecucion', { ascending: false } as any)
+
+  if (error || !data) return []
+  return (data as any) as HistoricalRecord[]
+}
+
 export async function getHistoricalRecords(
   limit = 100
 ): Promise<HistoricalRecord[]> {
@@ -205,19 +225,24 @@ export async function getRecordsWithoutActuals(
   })
 }
 
+const ULTIMOS_DIAS = 30
+
 export async function getForecastVsActual(
-  slug?: string,
-  limit = 100
+  slug?: string
 ): Promise<{ fecha_objetivo: string; ciudad: string; slug: string; temp_pronosticada: number; temp_corregida: number; temp_real: number; error: number }[]> {
   const client = getClient()
   if (!client) return []
+
+  const since = new Date()
+  since.setDate(since.getDate() - ULTIMOS_DIAS)
+  const sinceStr = since.toISOString()
 
   let q = client
     .from('forecast_history' as any)
     .select('fecha_objetivo, ciudad, slug, temp_pronosticada, temp_corregida, temp_real, error')
     .not('temp_real', 'is', null)
+    .gte('fecha_ejecucion', sinceStr)
     .order('fecha_objetivo', { ascending: false } as any)
-    .limit(limit)
 
   if (slug) {
     q = q.eq('slug', slug)
@@ -388,7 +413,7 @@ export async function getCityMetrics(slug: string): Promise<{
   improvement: { mejora_mae_pct: number; accuracy_pct: number; tendencia: string; impacto_proximo_pct: number; descripcion_impacto: string; ultima_mejora_fecha: string; ultima_mejora_desc: string } | null
   evolucion: { fecha: string; mae: number; rmse: number }[]
 }> {
-  const history = await getHistoricalRecords(500)
+  const history = await getLastDaysRecords(ULTIMOS_DIAS)
   const withActuals = history.filter(r => r.slug === slug && r.temp_real !== null && r.error !== null)
   if (withActuals.length < 2) return { metrics: null, improvement: null, evolucion: [] }
   const errors = withActuals.map(r => r.error!)
@@ -432,7 +457,7 @@ export async function getCityMetrics(slug: string): Promise<{
 }
 
 export async function computeGlobalMetrics(): Promise<GlobalMetrics | null> {
-  const history = await getHistoricalRecords(1000)
+  const history = await getLastDaysRecords(ULTIMOS_DIAS)
   const withActuals = history.filter(r => r.temp_real !== null && r.error !== null)
 
   if (withActuals.length < 3) return null

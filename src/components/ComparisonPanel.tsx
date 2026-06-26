@@ -41,7 +41,7 @@ export default function ComparisonPanel() {
   }
 
   if (!cities.length) {
-    return <div className="card text-center py-8 text-gray-500">No hay datos de comparación disponibles</div>
+    return <div className="card text-center py-8 text-gray-500">No hay datos de comparación en los últimos 30 días</div>
   }
 
   return (
@@ -49,8 +49,8 @@ export default function ComparisonPanel() {
       <div className="card">
         <div className="flex items-center justify-between mb-3">
           <div>
-            <h2 className="text-lg font-semibold text-white">📊 Comparación: Pronóstico vs Cierre (por ciudad)</h2>
-            <p className="text-xs text-gray-500 mt-0.5">Línea azul = pronóstico corregido 10PM Caracas, naranja = temperatura real</p>
+            <h2 className="text-lg font-semibold text-white">📊 Comparación: Pronóstico 10PM Caracas vs Cierre</h2>
+            <p className="text-xs text-gray-500 mt-0.5">Últimos 30 días · Azul = pronóstico corregido (10PM Caracas), naranja = temperatura real al cierre</p>
           </div>
           <button onClick={loadComparison} className="text-xs text-blue-400 hover:text-blue-300 px-2 py-1">🔄</button>
         </div>
@@ -102,9 +102,10 @@ export default function ComparisonPanel() {
       <div className="rounded-xl bg-slate-800/30 border border-gray-700/30 p-3 text-xs text-gray-500">
         <p className="font-medium text-gray-400 mb-1">📖 Leyenda</p>
         <ul className="space-y-0.5">
-          <li><span className="text-blue-400">Pronóstico 10PM Caracas</span>: Temperatura corregida del pronóstico de las 10PM hora Caracas</li>
-          <li><span className="text-amber-400">Temp. Real</span>: Temperatura real registrada al cierre del mercado</li>
-          <li>Cada ciudad tiene su propio gráfico independiente para comparar evolución temporal</li>
+          <li><span className="text-blue-400">Pronóstico 10PM Caracas</span>: Temperatura corregida del ensemble a las 10PM hora Caracas</li>
+          <li><span className="text-amber-400">Temp. Real</span>: Temperatura máxima real del día objetivo (cierre del mercado)</li>
+          <li><span className="text-gray-400">Ventana 30 días</span>: Datos de <code className="text-blue-300">forecast_history</code> — auto-renovable, sin backtesting manual</li>
+          <li>Cada ciudad tiene su propio gráfico independiente</li>
         </ul>
       </div>
     </div>

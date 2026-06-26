@@ -1,4 +1,4 @@
-import { getBacktestBias, getHistoricalRecords, getAccumulatedBacktest, saveBacktestBias, BacktestBiasEntry } from './supabase'
+import { getBacktestBias, getLastDaysRecords, getAccumulatedBacktest, saveBacktestBias, BacktestBiasEntry } from './supabase'
 import { BacktestDayResult } from './backtest-engine'
 
 // In-memory cache for bias (persists across requests within same serverless instance)
@@ -25,7 +25,7 @@ export async function loadBacktestBias(): Promise<Record<string, number>> {
   // 2. Fall back to forecast_history if no backtest_bias entries
   if (!entries || entries.length === 0) {
     try {
-      const history = await getHistoricalRecords(500)
+      const history = await getLastDaysRecords(30)
       const withActuals = history.filter(r => r.temp_real !== null && r.error !== null)
       if (withActuals.length >= 5) {
         const mapped = withActuals.map(r => ({

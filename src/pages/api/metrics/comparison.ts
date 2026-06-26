@@ -9,17 +9,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   try {
     const slug = req.query.slug as string
-    const limit = parseInt(req.query.limit as string) || 60
 
     if (slug) {
-      const records = await getForecastVsActual(slug, limit)
+      const records = await getForecastVsActual(slug)
       return res.status(200).json({ slug, records })
     }
 
-    // Return ALL cities
     const all = await Promise.all(
       CIUDADES_ASIA.map(async (city) => {
-        const records = await getForecastVsActual(city.slug, limit)
+        const records = await getForecastVsActual(city.slug)
         return { slug: city.slug, records }
       })
     )
