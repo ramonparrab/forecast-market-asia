@@ -110,17 +110,23 @@ export default function CityCard({ data }: CityCardProps) {
       {/* Temperatures */}
       <div className="mb-3 grid grid-cols-3 gap-2 rounded-lg bg-slate-900/50 p-3">
         <div className="text-center">
-          <div className="text-xs text-gray-500">Ensemble</div>
+          <div className="text-xs text-gray-500">Ensemble crudo</div>
           <div className="text-xl font-bold text-white">{forecast.temp_ponderada.toFixed(1)}°</div>
+          <div className="text-[9px] text-gray-600">{modelosCount} modelos</div>
         </div>
         <div className="text-center">
-          <div className="text-xs text-gray-500">Corregida</div>
+          <div className="text-xs text-gray-500">Corregida 10PM Caracas</div>
           <div className="text-xl font-bold text-emerald-400">{forecast.temp_corregida.toFixed(1)}°</div>
+          <div className="text-[9px] text-gray-600">valor pronosticado</div>
         </div>
         <div className="text-center">
-          <div className="text-xs text-gray-500">Sesgo</div>
+          <div className="text-xs text-amber-400 font-semibold">Corrección histórica</div>
           <div className="text-xl font-bold text-amber-400">{forecast.sesgo_aplicado > 0 ? '+' : ''}{forecast.sesgo_aplicado.toFixed(2)}°</div>
+          <div className="text-[9px] text-amber-600">ajuste por bias histórico</div>
         </div>
+      </div>
+      <div className="mb-3 rounded-lg bg-amber-500/5 border border-amber-500/10 p-2 text-[10px] text-gray-400 leading-relaxed">
+        ⚡ <span className="text-amber-300">Corrección aplicada:</span> El ensemble crudo de {modelosCount} modelos se ajustó <strong className="text-white">{forecast.sesgo_aplicado > 0 ? '+' : ''}{forecast.sesgo_aplicado.toFixed(2)}°C</strong> basado en el error histórico (últimos 30 días). Próximo pronóstico se beneficiará del nuevo dato de cierre.
       </div>
 
       {/* Models */}

@@ -14,7 +14,7 @@ export async function getServerSideProps() {
   const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
 
   if (!supabaseUrl || !supabaseKey) {
-    return { props: { initialAnalysis: null, initialMetrics: null, initialAvailableDates: [] } }
+    return { props: { initialAnalysis: null, initialMetrics: null, initialAvailableDates: [], hindcastDays: 0 } }
   }
 
   try {
@@ -26,6 +26,7 @@ export async function getServerSideProps() {
     nowCaracas.setDate(nowCaracas.getDate() + 1)
     const fecha = nowCaracas.toISOString().slice(0, 10)
 
+    // ===== STEP 1: Asegurar pronóstico del día =====
     const { data: runs } = await client.from('daily_runs' as any).select('*').eq('fecha_objetivo', fecha).order('fecha_ejecucion', { ascending: false } as any).limit(1)
 
     let analysis: DailyAnalysis | null = null
@@ -72,6 +73,55 @@ export async function getServerSideProps() {
       analysis = result
     }
 
+    // ===== STEP 2: Hindcast 30 días (si no existe data histórica) =====
+    const HINDCAST_DAYS = 30
+    const { data: existingActuals } = await client
+      .from('forecast_history' as any)
+      .select('fecha_objetivo')
+      .not('temp_real', 'is', null)
+      .order('fecha_objetivo', { ascending: false } as any)
+      .limit(1)
+
+    const needsHindcast = !(existingActuals as any[] | undefined)?.length
+    let hindcastDays = 0
+
+    if (needsHindcast) {
+      console.log('[HINDCAST] No hay datos históricos con temp_real. Ejecutando backtest 30 días...')
+      const { runBacktest } = await import('@/lib/backtest-engine')
+      const { saveForecastRecords } = await import('@/lib/supabase')
+
+      // Calcular fechas del rango a backfill
+      const hoy = new Date()
+      const hace30 = new Date(hoy)
+      hace30.setDate(hace30.getDate() - HINDCAST_DAYS)
+      const startStr = hace30.toISOString().slice(0, 10)
+
+      // Eliminar registros existentes en el rango para evitar duplicados
+      await client.from('forecast_history' as any).delete().gte('fecha_objetivo', startStr).lt('fecha_objetivo', fecha)
+
+      const backtest = await runBacktest(HINDCAST_DAYS)
+      const hindcastRecords = backtest.resultados.map(r => ({
+        fecha_ejecucion: r.fecha + 'T22:00:00',
+        fecha_objetivo: r.fecha,
+        ciudad: r.ciudad,
+        slug: r.slug,
+        temp_pronosticada: r.temp_pronosticada,
+        temp_corregida: r.temp_corregida,
+        temp_real: r.temp_real,
+        error: r.error,
+        modelos_usados: r.modelos_usados,
+        consenso: r.consenso,
+      }))
+
+      // Guardar en lotes de 50
+      for (let i = 0; i < hindcastRecords.length; i += 50) {
+        await saveForecastRecords(hindcastRecords.slice(i, i + 50))
+      }
+      hindcastDays = HINDCAST_DAYS
+      console.log(`[HINDCAST] Guardados ${hindcastRecords.length} registros (${HINDCAST_DAYS} días x ${backtest.total_ciudades} ciudades)`)
+    }
+
+    // ===== STEP 3: Obtener fechas disponibles y métricas =====
     const { data: datesData } = await client.from('daily_runs' as any).select('fecha_objetivo').order('fecha_objetivo', { ascending: false } as any).limit(90)
     const raw = ((datesData as any[] | undefined)?.map(r => r.fecha_objetivo) ?? [])
     const availableDates = Array.from(new Set<string>(raw))
@@ -84,11 +134,12 @@ export async function getServerSideProps() {
         initialAnalysis: JSON.parse(JSON.stringify(analysis)),
         initialMetrics: metrics ? JSON.parse(JSON.stringify(metrics)) : null,
         initialAvailableDates: availableDates,
+        hindcastDays,
       }
     }
   } catch (e) {
     console.error('[getServerSideProps]', e)
-    return { props: { initialAnalysis: null, initialMetrics: null, initialAvailableDates: [] } }
+    return { props: { initialAnalysis: null, initialMetrics: null, initialAvailableDates: [], hindcastDays: 0 } }
   }
 }
 
@@ -199,9 +250,10 @@ interface HomeProps {
   initialAnalysis: DailyAnalysis | null
   initialMetrics: GlobalMetrics | null
   initialAvailableDates: string[]
+  hindcastDays: number
 }
 
-export default function Home({ initialAnalysis, initialMetrics, initialAvailableDates }: HomeProps) {
+export default function Home({ initialAnalysis, initialMetrics, initialAvailableDates, hindcastDays }: HomeProps) {
   const [analysis, setAnalysis] = useState<DailyAnalysis | null>(initialAnalysis)
   const [metrics, setMetrics] = useState<GlobalMetrics | null>(initialMetrics)
   const [loading, setLoading] = useState(false)
@@ -462,9 +514,16 @@ export default function Home({ initialAnalysis, initialMetrics, initialAvailable
                     <p className="text-[10px] text-gray-500 truncate">{city.ciudad.split(',')[0]}</p>
                     <p className="text-lg sm:text-xl font-bold text-emerald-400">{city.forecast.temp_corregida.toFixed(1)}°C</p>
                     <p className="text-[9px] text-gray-600">{city.exito_pct}% acierto</p>
+                    <p className="text-[8px] text-blue-400 mt-0.5">corrección: {city.forecast.sesgo_aplicado > 0 ? '+' : ''}{city.forecast.sesgo_aplicado.toFixed(1)}°C</p>
+                    <p className="text-[7px] text-gray-600">{Object.keys(city.forecast.ensemble_raw).length} modelos · {city.forecast.consenso}</p>
                   </div>
                 ))}
               </div>
+              {hindcastDays > 0 && (
+                <div className="px-4 py-2 text-[10px] text-emerald-400 border-t border-blue-500/10 text-center">
+                  ✅ {hindcastDays} días de hindcast cargados automáticamente para precisión y comparación
+                </div>
+              )}
             </div>
           )}
 
