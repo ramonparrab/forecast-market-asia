@@ -72,7 +72,7 @@ export async function getRecentErrors(
   const q = client
     .from('forecast_history' as any)
     .select('error')
-    .is('error', 'not.null' as any)
+    .not('error', 'is', null)
     .order('fecha_ejecucion', { ascending: false } as any)
     .limit(limit)
 
@@ -95,7 +95,7 @@ export async function getRecentModelErrors(
   const { data, error } = await client
     .from('forecast_history' as any)
     .select('slug, error')
-    .is('error', 'not.null' as any)
+    .not('error', 'is', null)
     .order('fecha_ejecucion', { ascending: false } as any)
     .limit(limit * 9)
 
@@ -130,8 +130,8 @@ export async function getCityAccuracy(
     .from('forecast_history' as any)
     .select('temp_corregida, temp_real, error')
     .eq('slug', slug)
-    .is('temp_real', 'not.null' as any)
-    .is('error', 'not.null' as any)
+    .not('temp_real', 'is', null)
+    .not('error', 'is', null)
     .gte('fecha_ejecucion', sinceStr)
     .order('fecha_ejecucion', { ascending: false } as any)
     .limit(30)
@@ -174,8 +174,8 @@ export async function getAllCitiesAccuracy(
   const { data, error } = await client
     .from('forecast_history' as any)
     .select('slug, temp_corregida, temp_real, error')
-    .is('temp_real', 'not.null' as any)
-    .is('error', 'not.null' as any)
+    .not('temp_real', 'is', null)
+    .not('error', 'is', null)
     .gte('fecha_ejecucion', sinceStr)
     .order('fecha_ejecucion', { ascending: false } as any)
 
