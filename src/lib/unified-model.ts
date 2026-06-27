@@ -281,8 +281,8 @@ export function computeExecutiveSummary(
 
   const mejorasPorCiudad: DailyImprovement[] = citiesToday.map(city => {
     const cityY = cityMapYesterday.get(city.slug)
-    const accuracyHoy = city.exito_pct
-    const accuracyAyer = cityY?.exito_pct ?? accuracyHoy
+    const accuracyHoy = city.exito_pct_1c ?? city.exito_pct
+    const accuracyAyer = cityY ? (cityY.exito_pct_1c ?? cityY.exito_pct) : accuracyHoy
     const accuracyDelta = accuracyHoy - accuracyAyer
 
     // Best contract today

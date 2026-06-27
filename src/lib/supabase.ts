@@ -113,14 +113,14 @@ export async function getRecentModelErrors(
 
 /**
  * Calculate REAL accuracy per city based on historical forecast vs actual.
- * Returns percentage of forecasts that were within ±2°C of actual temperature.
+ * Returns percentage of forecasts within ±1°C and ±2°C of actual temperature.
  */
 export async function getCityAccuracy(
   slug: string,
   days: number = 30
-): Promise<{ accuracy: number; totalRecords: number; avgError: number }> {
+): Promise<{ accuracy_1c: number; accuracy_2c: number; totalRecords: number; avgError: number }> {
   const client = getClient()
-  if (!client) return { accuracy: 0, totalRecords: 0, avgError: 0 }
+  if (!client) return { accuracy_1c: 0, accuracy_2c: 0, totalRecords: 0, avgError: 0 }
 
   const since = new Date()
   since.setDate(since.getDate() - days)
@@ -137,33 +137,33 @@ export async function getCityAccuracy(
     .limit(30)
 
   if (error || !data || (data as any[]).length === 0) {
-    return { accuracy: 0, totalRecords: 0, avgError: 0 }
+    return { accuracy_1c: 0, accuracy_2c: 0, totalRecords: 0, avgError: 0 }
   }
 
   const records = data as any[]
   const totalRecords = records.length
 
-  // Calculate accuracy: % of forecasts within ±2°C of actual
-  let correctCount = 0
+  let correctCount1c = 0
+  let correctCount2c = 0
   let totalError = 0
 
   for (const record of records) {
     const error = Math.abs(record.error)
     totalError += error
-    if (error <= 2.0) {
-      correctCount++
-    }
+    if (error <= 1.0) correctCount1c++
+    if (error <= 2.0) correctCount2c++
   }
 
-  const accuracy = Math.round((correctCount / totalRecords) * 100)
+  const accuracy_1c = Math.round((correctCount1c / totalRecords) * 100)
+  const accuracy_2c = Math.round((correctCount2c / totalRecords) * 100)
   const avgError = Math.round((totalError / totalRecords) * 100) / 100
 
-  return { accuracy, totalRecords, avgError }
+  return { accuracy_1c, accuracy_2c, totalRecords, avgError }
 }
 
 export async function getAllCitiesAccuracy(
   days = 30
-): Promise<Record<string, { accuracy: number; totalRecords: number; avgError: number }>> {
+): Promise<Record<string, { accuracy_1c: number; accuracy_2c: number; totalRecords: number; avgError: number }>> {
   const client = getClient()
   if (!client) return {}
 
@@ -190,27 +190,27 @@ export async function getAllCitiesAccuracy(
     }
   }
 
-  // Calculate accuracy per city
-  const result: Record<string, { accuracy: number; totalRecords: number; avgError: number }> = {}
+  const result: Record<string, { accuracy_1c: number; accuracy_2c: number; totalRecords: number; avgError: number }> = {}
 
   for (const [slug, records] of Object.entries(grouped)) {
     if (records.length === 0) continue
 
-    let correctCount = 0
+    let correctCount1c = 0
+    let correctCount2c = 0
     let totalError = 0
 
     for (const record of records) {
       const error = Math.abs(record.error)
       totalError += error
-      if (error <= 2.0) {
-        correctCount++
-      }
+      if (error <= 1.0) correctCount1c++
+      if (error <= 2.0) correctCount2c++
     }
 
-    const accuracy = Math.round((correctCount / records.length) * 100)
+    const accuracy_1c = Math.round((correctCount1c / records.length) * 100)
+    const accuracy_2c = Math.round((correctCount2c / records.length) * 100)
     const avgError = Math.round((totalError / records.length) * 100) / 100
 
-    result[slug] = { accuracy, totalRecords: records.length, avgError }
+    result[slug] = { accuracy_1c, accuracy_2c, totalRecords: records.length, avgError }
   }
 
   return result

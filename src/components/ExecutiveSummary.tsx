@@ -235,7 +235,7 @@ export default function ExecutiveSummaryPanel({ analysis, metrics, previousAnaly
                 <p className="text-2xl font-extrabold text-white">{bestRec.mkt_pct}%</p>
               </div>
               <div className="rounded-xl bg-black/20 p-3 text-center">
-                <p className="text-[10px] text-gray-400 mb-1">Precisión</p>
+                <p className="text-[10px] text-gray-400 mb-1">Precisión ±1°C</p>
                 <p className="text-2xl font-extrabold text-purple-400">{bestRec.exito_pct ?? 50}%</p>
               </div>
             </div>
@@ -470,7 +470,7 @@ export default function ExecutiveSummaryPanel({ analysis, metrics, previousAnaly
               </div>
               <div className="grid grid-cols-2 gap-2 text-xs">
                 <div>
-                  <p className="text-gray-500">Precisión</p>
+                  <p className="text-gray-500">Precisión ±1°C</p>
                   <div className="flex items-center gap-1">
                     <span className="text-white font-bold">{m.accuracy_hoy.toFixed(1)}%</span>
                     <DeltaBadge delta={m.accuracy_delta} />

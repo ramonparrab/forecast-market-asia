@@ -50,8 +50,10 @@ export interface CityAnalysis {
   forecast: ForecastResult
   arbitraje: { desvio: number; nivel: string }
   nowcast: NowcastInfo
-  // Probabilidad de que el pronóstico acierte el bucket correcto (±2°C)
+  // Probability of forecast being within ±1°C (primary) and ±2°C (secondary)
   exito_pct: number
+  exito_pct_1c: number
+  exito_pct_2c: number
   explicacion: string
   // Liquidity summary
   liquidity_avg?: 'ALTA' | 'MEDIA' | 'BAJA'
