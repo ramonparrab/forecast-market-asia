@@ -134,71 +134,33 @@ function EvIndicator({ ev }: { ev?: number }) {
   )
 }
 
-function ExitoPctBadge({ pct }: { pct: number }) {
-  if (pct >= 80) return (
-    <span className="text-emerald-400 font-bold relative group cursor-help">
+function ExitoPctBadge({ pct, isReal }: { pct: number; isReal?: boolean }) {
+  const badgeContent = (
+    <>
       {pct}%
-      <div className="absolute z-50 bottom-full left-1/2 -translate-x-1/2 mb-2 w-72 p-2 text-xs text-white bg-gray-900 border border-gray-700 rounded-lg shadow-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
-        <p className="font-bold mb-1">Precisión Estimada: {pct}%</p>
-        <p className="text-gray-300 mb-2">Estimación basada en:</p>
-        <ul className="text-gray-400 text-[10px] space-y-1">
-          <li>• Cantidad de modelos meteorológicos</li>
-          <li>• Dispersión entre pronósticos</li>
-          <li>• Nivel de consenso</li>
-          <li>• Actividad de nowcasting (METAR)</li>
-        </ul>
-        <p className="text-amber-300 text-[10px] mt-2">⚠️ NO es validado contra aciertos reales</p>
+      <div className="absolute z-50 bottom-full left-1/2 -translate-x-1/2 mb-2 w-80 p-3 text-xs text-white bg-gray-900 border border-gray-700 rounded-lg shadow-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+        <p className="font-bold mb-2">Precisión: {pct}%</p>
+        {isReal ? (
+          <>
+            <p className="text-emerald-300 mb-2">✅ Basado en pronósticos REALES vs temperatura real en Polymarket</p>
+            <p className="text-gray-400 text-[10px]">Se calcula: % de pronósticos que estuvieron dentro de ±2°C de la temperatura real del cierre.</p>
+            <p className="text-blue-300 text-[10px] mt-2">Con cada historial adicional, esta precisión MEJORA.</p>
+          </>
+        ) : (
+          <>
+            <p className="text-amber-300 mb-2">⚠️ Estimación teórica (sin datos suficientes)</p>
+            <p className="text-gray-400 text-[10px]">Basado en: modelos, spread, consenso, nowcast.</p>
+            <p className="text-gray-400 text-[10px] mt-2">Se volverá REAL cuando haya 5+ pronósticos verificados.</p>
+          </>
+        )}
       </div>
-    </span>
+    </>
   )
-  if (pct >= 65) return (
-    <span className="text-green-400 font-bold relative group cursor-help">
-      {pct}%
-      <div className="absolute z-50 bottom-full left-1/2 -translate-x-1/2 mb-2 w-72 p-2 text-xs text-white bg-gray-900 border border-gray-700 rounded-lg shadow-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
-        <p className="font-bold mb-1">Precisión Estimada: {pct}%</p>
-        <p className="text-gray-300 mb-2">Estimación basada en:</p>
-        <ul className="text-gray-400 text-[10px] space-y-1">
-          <li>• Cantidad de modelos meteorológicos</li>
-          <li>• Dispersión entre pronósticos</li>
-          <li>• Nivel de consenso</li>
-          <li>• Actividad de nowcasting (METAR)</li>
-        </ul>
-        <p className="text-amber-300 text-[10px] mt-2">⚠️ NO es validado contra aciertos reales</p>
-      </div>
-    </span>
-  )
-  if (pct >= 50) return (
-    <span className="text-amber-400 font-bold relative group cursor-help">
-      {pct}%
-      <div className="absolute z-50 bottom-full left-1/2 -translate-x-1/2 mb-2 w-72 p-2 text-xs text-white bg-gray-900 border border-gray-700 rounded-lg shadow-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
-        <p className="font-bold mb-1">Precisión Estimada: {pct}%</p>
-        <p className="text-gray-300 mb-2">Estimación basada en:</p>
-        <ul className="text-gray-400 text-[10px] space-y-1">
-          <li>• Cantidad de modelos meteorológicos</li>
-          <li>• Dispersión entre pronósticos</li>
-          <li>• Nivel de consenso</li>
-          <li>• Actividad de nowcasting (METAR)</li>
-        </ul>
-        <p className="text-amber-300 text-[10px] mt-2">⚠️ NO es validado contra aciertos reales</p>
-      </div>
-    </span>
-  )
-  return (
-    <span className="text-red-400 font-bold relative group cursor-help">
-      {pct}%
-      <div className="absolute z-50 bottom-full left-1/2 -translate-x-1/2 mb-2 w-72 p-2 text-xs text-white bg-gray-900 border border-gray-700 rounded-lg shadow-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
-        <p className="font-bold mb-1">Precisión Estimada: {pct}%</p>
-        <p className="text-gray-300 mb-2">Estimación basada en:</p>
-        <ul className="text-gray-400 text-[10px] space-y-1">
-          <li>• Cantidad de modelos meteorológicos</li>
-          <li>• Dispersión entre pronósticos</li>
-          <li>• Nivel de consenso</li>
-          <li>• Actividad de nowcasting (METAR)</li>
-        </ul>
-        <p className="text-amber-300 text-[10px] mt-2">⚠️ NO es validado contra aciertos reales</p>
-      </div>
-    </span>
-  )
+
+  if (pct >= 80) return <span className="text-emerald-400 font-bold relative group cursor-help">{badgeContent}</span>
+  if (pct >= 65) return <span className="text-green-400 font-bold relative group cursor-help">{badgeContent}</span>
+  if (pct >= 50) return <span className="text-amber-400 font-bold relative group cursor-help">{badgeContent}</span>
+  return <span className="text-red-400 font-bold relative group cursor-help">{badgeContent}</span>
 }
 
 function NowcastIndicator({ data }: { data: CityAnalysis }) {
@@ -288,7 +250,7 @@ export default function CityCard({ data }: CityCardProps) {
       }`}>
         <div className="flex items-center justify-between mb-1">
           <span className="text-gray-500">Precisión estimada</span>
-          <ExitoPctBadge pct={data.exito_pct} />
+          <ExitoPctBadge pct={data.exito_pct} isReal={data.totalRecords !== undefined && data.totalRecords >= 5} />
         </div>
         <p className="text-gray-400 leading-relaxed">{data.explicacion}</p>
       </div>

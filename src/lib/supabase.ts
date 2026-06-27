@@ -111,6 +111,111 @@ export async function getRecentModelErrors(
   return grouped
 }
 
+/**
+ * Calculate REAL accuracy per city based on historical forecast vs actual.
+ * Returns percentage of forecasts that were within ±2°C of actual temperature.
+ */
+export async function getCityAccuracy(
+  slug: string,
+  days: number = 30
+): Promise<{ accuracy: number; totalRecords: number; avgError: number }> {
+  const client = getClient()
+  if (!client) return { accuracy: 0, totalRecords: 0, avgError: 0 }
+
+  const since = new Date()
+  since.setDate(since.getDate() - days)
+  const sinceStr = since.toISOString()
+
+  const { data, error } = await client
+    .from('forecast_history' as any)
+    .select('temp_corregida, temp_real, error')
+    .eq('slug', slug)
+    .is('temp_real', 'not.null' as any)
+    .is('error', 'not.null' as any)
+    .gte('fecha_ejecucion', sinceStr)
+    .order('fecha_ejecucion', { ascending: false } as any)
+    .limit(30)
+
+  if (error || !data || (data as any[]).length === 0) {
+    return { accuracy: 0, totalRecords: 0, avgError: 0 }
+  }
+
+  const records = data as any[]
+  const totalRecords = records.length
+
+  // Calculate accuracy: % of forecasts within ±2°C of actual
+  let correctCount = 0
+  let totalError = 0
+
+  for (const record of records) {
+    const error = Math.abs(record.error)
+    totalError += error
+    if (error <= 2.0) {
+      correctCount++
+    }
+  }
+
+  const accuracy = Math.round((correctCount / totalRecords) * 100)
+  const avgError = Math.round((totalError / totalRecords) * 100) / 100
+
+  return { accuracy, totalRecords, avgError }
+}
+
+export async function getAllCitiesAccuracy(
+  days = 30
+): Promise<Record<string, { accuracy: number; totalRecords: number; avgError: number }>> {
+  const client = getClient()
+  if (!client) return {}
+
+  const since = new Date()
+  since.setDate(since.getDate() - days)
+  const sinceStr = since.toISOString()
+
+  const { data, error } = await client
+    .from('forecast_history' as any)
+    .select('slug, temp_corregida, temp_real, error')
+    .is('temp_real', 'not.null' as any)
+    .is('error', 'not.null' as any)
+    .gte('fecha_ejecucion', sinceStr)
+    .order('fecha_ejecucion', { ascending: false } as any)
+
+  if (error || !data) return {}
+
+  // Group by slug
+  const grouped: Record<string, any[]> = {}
+  for (const row of (data as any[])) {
+    if (!grouped[row.slug]) grouped[row.slug] = []
+    if (grouped[row.slug].length < 30) {
+      grouped[row.slug].push(row)
+    }
+  }
+
+  // Calculate accuracy per city
+  const result: Record<string, { accuracy: number; totalRecords: number; avgError: number }> = {}
+
+  for (const [slug, records] of Object.entries(grouped)) {
+    if (records.length === 0) continue
+
+    let correctCount = 0
+    let totalError = 0
+
+    for (const record of records) {
+      const error = Math.abs(record.error)
+      totalError += error
+      if (error <= 2.0) {
+        correctCount++
+      }
+    }
+
+    const accuracy = Math.round((correctCount / records.length) * 100)
+    const avgError = Math.round((totalError / records.length) * 100) / 100
+
+    result[slug] = { accuracy, totalRecords: records.length, avgError }
+  }
+
+  return result
+}
+
 export async function getLastDaysRecords(
   days = 30
 ): Promise<HistoricalRecord[]> {

@@ -6,7 +6,7 @@ import { monteCarloProbability, normalizeProbabilidades } from './montecarlo'
 import { fetchPolymarketPrices, parseContract, calculateLiquidity, calculateEV } from './polymarket'
 import { calibrateProbabilities } from './calibration'
 import { calculateAllocation } from './kelly'
-import { getRecentErrors, getRecentModelErrors, computeGlobalMetrics } from './supabase'
+import { getRecentErrors, getRecentModelErrors, computeGlobalMetrics, getAllCitiesAccuracy } from './supabase'
 import { nowcastTemperature } from './nowcaster'
 import { loadBacktestBias } from './backtest-bias'
 
@@ -48,7 +48,8 @@ async function analyzeCity(
   targetMonth: number,
   recentModelErrors: Record<string, number[]>,
   fetchPrices: boolean,
-  backtestBiasCorrection?: number
+  backtestBiasCorrection?: number,
+  realAccuracy?: { accuracy: number; totalRecords: number; avgError: number }
 ): Promise<{ cityAnalysis: CityAnalysis | null; recommendations: BetRecommendation[] }> {
   // 1. Weather models (includes ECMWF ENS 51 members)
   const { models: ensembleRaw, ensembleMembers } = await fetchWeatherModels(city.lat, city.lon, fechaISO)
@@ -89,23 +90,36 @@ async function analyzeCity(
     contracts = getMockContracts(city.slug)
   }
 
-  // Calculate success probability: how likely is the forecast to be within ±2°C of actual
+  // Calculate success probability: based on REAL historical accuracy
   const modelosTemps = Object.values(forecast.ensemble_raw)
   const spread = modelosTemps.length > 0 ? Math.max(...modelosTemps) - Math.min(...modelosTemps) : 3
   const numModelos = modelosTemps.length
-  // Success factors: narrow spread, strong consensus, many models, nowcast active
-  let exitoPct = 50
-  if (numModelos >= 5) exitoPct += 8
-  else if (numModelos >= 3) exitoPct += 4
-  if (spread <= 1.5) exitoPct += 15
-  else if (spread <= 2.5) exitoPct += 8
-  else if (spread <= 3.5) exitoPct += 3
-  else exitoPct -= 5
-  if (forecast.consenso === 'MUY FUERTE') exitoPct += 10
-  else if (forecast.consenso === 'FUERTE') exitoPct += 5
-  if (nowcastResult.obsWeight > 0.3) exitoPct += 8
-  if (nowcastResult.observedTemp !== null) exitoPct += 5
-  exitoPct = Math.max(10, Math.min(95, exitoPct))
+
+  // Use REAL accuracy if available, otherwise fallback to theoretical estimate
+  let exitoPct: number
+  let accuracySource: string
+
+  if (realAccuracy && realAccuracy.totalRecords >= 5) {
+    // REAL ACCURACY: based on historical forecast vs actual
+    exitoPct = realAccuracy.accuracy
+    accuracySource = `Basado en ${realAccuracy.totalRecords} pronósticos reales (±2°C). Error promedio: ${realAccuracy.avgError}°C`
+  } else {
+    // THEORETICAL ESTIMATE: when no historical data available
+    exitoPct = 50
+    if (numModelos >= 5) exitoPct += 8
+    else if (numModelos >= 3) exitoPct += 4
+    if (spread <= 1.5) exitoPct += 15
+    else if (spread <= 2.5) exitoPct += 8
+    else if (spread <= 3.5) exitoPct += 3
+    else exitoPct -= 5
+    if (forecast.consenso === 'MUY FUERTE') exitoPct += 10
+    else if (forecast.consenso === 'FUERTE') exitoPct += 5
+    if (nowcastResult.obsWeight > 0.3) exitoPct += 8
+    if (nowcastResult.observedTemp !== null) exitoPct += 5
+    exitoPct = Math.max(10, Math.min(95, exitoPct))
+    accuracySource = 'Estimación teórica (sin datos históricos suficientes)'
+  }
+
   // Build explanation
   const parts: string[] = []
   parts.push(`${numModelos} modelos meteorológicos`)
@@ -114,7 +128,7 @@ async function analyzeCity(
   }
   parts.push(`consenso ${forecast.consenso.toLowerCase()}`)
   parts.push(`spread ${spread.toFixed(1)}°C entre modelos`)
-  const explicacion = `Pronóstico basado en ${parts.join(', ')}. Precisión histórica estimada: ±${(spread * 0.5).toFixed(1)}°C.`
+  const explicacion = `Pronóstico basado en ${parts.join(', ')}. ${accuracySource}.`
 
   // 5. Probability: empirical CDF (ECMWF ENS 51) or Monte Carlo
   const useEmpirical = forecast.ensemble_members && forecast.ensemble_members.length >= 20
@@ -219,6 +233,8 @@ async function analyzeCity(
       liquidity_avg: cityLiquidity,
       volume_total: avgVolume,
       avg_spread: avgSpread,
+      totalRecords: realAccuracy?.totalRecords,
+      avgError: realAccuracy?.avgError,
     },
     recommendations: recs,
   }
@@ -237,17 +253,18 @@ export async function runDailyAnalysis(
 
   const targetMonth = new Date(fechaObjetivo).getMonth() + 1
 
-  // Pre-load history (parallel)
-  const [recentModelErrors, globalMetrics, backtestBias] = await Promise.all([
+  // Pre-load history (parallel) - include accuracy data
+  const [recentModelErrors, globalMetrics, backtestBias, cityAccuracy] = await Promise.all([
     getRecentModelErrors(30),
     computeGlobalMetrics(),
     loadBacktestBias(),
+    getAllCitiesAccuracy(30),
   ])
 
   // Analyze all cities in parallel — use fechaObjetivo for Open-Meteo API calls
   const results = await Promise.all(
     CIUDADES_ASIA.map(city =>
-      analyzeCity(city, fechaObjetivo, fechaObjetivo, targetMonth, recentModelErrors, fetchPrices, backtestBias[city.slug])
+      analyzeCity(city, fechaObjetivo, fechaObjetivo, targetMonth, recentModelErrors, fetchPrices, backtestBias[city.slug], cityAccuracy[city.slug])
     )
   )
 

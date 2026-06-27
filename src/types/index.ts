@@ -57,6 +57,9 @@ export interface CityAnalysis {
   liquidity_avg?: 'ALTA' | 'MEDIA' | 'BAJA'
   volume_total?: number
   avg_spread?: number
+  // Real accuracy data
+  totalRecords?: number
+  avgError?: number
 }
 
 export interface BetRecommendation {
