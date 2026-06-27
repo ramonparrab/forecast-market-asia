@@ -28,7 +28,7 @@ function ConsensoBadge({ consenso }: { consenso: string }) {
       {consenso}
       <div className="absolute z-50 bottom-full left-1/2 -translate-x-1/2 mb-2 w-64 p-2 text-xs text-white bg-gray-900 border border-gray-700 rounded-lg shadow-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
         <p className="font-bold mb-1">Consenso ACEPTABLE</p>
-        <p className="text-gray-300">4 de 6 modelos coinciden. Confianza moderada, considerar其他 opciones.</p>
+        <p className="text-gray-300">4 de 6 modelos coinciden. Confianza moderada, considerar otras opciones.</p>
       </div>
     </span>
   )
@@ -49,7 +49,7 @@ function ArbBadge({ nivel }: { nivel: string }) {
       {nivel}
       <div className="absolute z-50 bottom-full left-1/2 -translate-x-1/2 mb-2 w-64 p-2 text-xs text-white bg-gray-900 border border-gray-700 rounded-lg shadow-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
         <p className="font-bold mb-1">Arbitraje ALTO</p>
-        <p className="text-gray-300">Las probabilidades suman más de 100%. El mercado está mal定价, posibilidad de ganar sin riesgo.</p>
+        <p className="text-gray-300">Las probabilidades suman más de 100%. El mercado está mal preciado, posibilidad de ganar sin riesgo.</p>
       </div>
     </span>
   )
@@ -67,7 +67,7 @@ function ArbBadge({ nivel }: { nivel: string }) {
       {nivel}
       <div className="absolute z-50 bottom-full left-1/2 -translate-x-1/2 mb-2 w-64 p-2 text-xs text-white bg-gray-900 border border-gray-700 rounded-lg shadow-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
         <p className="font-bold mb-1">Sin Arbitraje</p>
-        <p className="text-gray-300">Precios coherentes entre contratos. Mercado bien定价.</p>
+        <p className="text-gray-300">Precios coherentes entre contratos. Mercado bien preciado.</p>
       </div>
     </span>
   )

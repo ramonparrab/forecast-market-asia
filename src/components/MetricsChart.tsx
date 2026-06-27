@@ -303,13 +303,13 @@ export default function MetricsChart({ metrics }: MetricsChartProps) {
           </div>
           {hasBt && !hasLive && (
             <p className="mt-3 text-[10px] text-gray-600">
-              🔵 BT = Backtest. Datos generados mediante simulaci├│n hist├│rica de 30 d├¡as con 6 modelos meteorol├│gicos.
-              Correcciones activas se aplican autom├íticamente al pr├│ximo pron├│stico.
+              🔵 BT = Backtest. Datos generados mediante simulación histórica de 30 días con 6 modelos meteorológicos.
+              Correcciones activas se aplican automáticamente al próximo pronóstico.
             </p>
           )}
           {hasLive && (
             <p className="mt-3 text-[10px] text-gray-600">
-              🟢 Live = Temperatura real registrada despu├®s del pron├│stico. Fuente: Open-Meteo Archive API.
+              🟢 Live = Temperatura real registrada después del pronóstico. Fuente: Open-Meteo Archive API.
             </p>
           )}
         </div>
