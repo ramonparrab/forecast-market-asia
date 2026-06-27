@@ -7,6 +7,9 @@ interface GammaMarket {
   outcomes: string[]
   outcomePrices?: string[]
   volume?: string
+  volumeNum?: number
+  bestBid?: string
+  bestAsk?: string
 }
 
 interface GammaPrice {
@@ -92,6 +95,8 @@ export async function fetchPolymarketPrices(
         tipo,
         valor,
         prob_mkt: probMkt,
+        volume_24h: market.volumeNum || parseFloat(market.volume || '0'),
+        spread: yesPrice && noPrice ? Math.round((yesPrice - noPrice) * 10000) / 10000 : undefined,
       })
     }
 
@@ -128,4 +133,38 @@ export function parseContract(texto: string): { tipo: 'exacto' | 'superior' | 'i
     return { tipo: 'rango', valor: v }
   }
   return { tipo: 'exacto', valor: defaultVal }
+}
+
+/**
+ * Calculate liquidity level based on volume and spread.
+ * ALTA: Volume > $5000 AND spread < $0.03
+ * MEDIA: Volume > $1000 OR spread < $0.05
+ * BAJA: Everything else
+ */
+export function calculateLiquidity(
+  volume24h: number | undefined,
+  spread: number | undefined
+): 'ALTA' | 'MEDIA' | 'BAJA' {
+  const vol = volume24h ?? 0
+  const spr = spread ?? 0.10
+
+  if (vol >= 5000 && spr <= 0.03) return 'ALTA'
+  if (vol >= 1000 || spr <= 0.05) return 'MEDIA'
+  return 'BAJA'
+}
+
+/**
+ * Calculate Expected Value (EV) for a bet.
+ * EV = (prob_win × profit) - (prob_lose × loss)
+ * Positive EV = profitable long-term
+ */
+export function calculateEV(
+  modelProbability: number,
+  marketPrice: number,
+  potentialProfit: number = 1.0
+): number {
+  if (marketPrice <= 0 || marketPrice >= 1) return 0
+  const edge = modelProbability - marketPrice
+  const ev = (modelProbability * potentialProfit) - ((1 - modelProbability) * marketPrice)
+  return Math.round(ev * 100) / 100
 }

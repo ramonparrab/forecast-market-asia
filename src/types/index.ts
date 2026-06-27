@@ -28,6 +28,11 @@ export interface PolymarketContract {
   prob_mkt: number
   prob_ia_raw?: number
   prob_ia_norm?: number
+  // Liquidity fields
+  volume_24h?: number
+  spread?: number
+  liquidity?: 'ALTA' | 'MEDIA' | 'BAJA'
+  ev?: number
 }
 
 export interface NowcastInfo {
@@ -48,6 +53,10 @@ export interface CityAnalysis {
   // Probabilidad de que el pronóstico acierte el bucket correcto (±2°C)
   exito_pct: number
   explicacion: string
+  // Liquidity summary
+  liquidity_avg?: 'ALTA' | 'MEDIA' | 'BAJA'
+  volume_total?: number
+  avg_spread?: number
 }
 
 export interface BetRecommendation {

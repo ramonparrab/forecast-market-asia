@@ -17,6 +17,19 @@ function ArbBadge({ nivel }: { nivel: string }) {
   return <span className="badge-green">{nivel}</span>
 }
 
+function LiquidityBadge({ liquidity }: { liquidity?: 'ALTA' | 'MEDIA' | 'BAJA' }) {
+  if (!liquidity || liquidity === 'BAJA') return <span className="badge-red">🔴 BAJA</span>
+  if (liquidity === 'MEDIA') return <span className="badge-yellow">🟡 MEDIA</span>
+  return <span className="badge-green">🟢 ALTA</span>
+}
+
+function EvIndicator({ ev }: { ev?: number }) {
+  if (ev === undefined || ev === null) return <span className="text-gray-500">N/A</span>
+  if (ev > 0.05) return <span className="text-emerald-400 font-bold">+${ev.toFixed(2)} ✅</span>
+  if (ev > 0) return <span className="text-amber-400">+${ev.toFixed(2)} ⚠️</span>
+  return <span className="text-red-400 font-bold">${ev.toFixed(2)} ❌</span>
+}
+
 function ExitoPctBadge({ pct }: { pct: number }) {
   if (pct >= 80) return <span className="text-emerald-400 font-bold">{pct}%</span>
   if (pct >= 65) return <span className="text-green-400 font-bold">{pct}%</span>
@@ -50,12 +63,14 @@ function ContractRow({ contract }: { contract: PolymarketContract }) {
   return (
     <div className="flex items-center justify-between border-b border-gray-700/30 py-2 last:border-0">
       <span className="text-sm text-gray-300">{contract.texto}</span>
-      <div className="flex items-center gap-4 text-sm">
+      <div className="flex items-center gap-3 text-xs">
         <span className="text-gray-500">Mkt: <span className="text-gray-300">{contract.prob_mkt}%</span></span>
         <span className="text-gray-500">IA: <span className="text-blue-300">{probIAPct}%</span></span>
         <span className={`font-mono font-semibold ${edgeColor}`}>
           {edge > 0 ? '+' : ''}{edge}%
         </span>
+        <LiquidityBadge liquidity={contract.liquidity} />
+        <EvIndicator ev={contract.ev} />
       </div>
     </div>
   )
@@ -90,6 +105,7 @@ export default function CityCard({ data }: CityCardProps) {
         </div>
         <div className="flex items-center gap-2">
           <NowcastIndicator data={data} />
+          <LiquidityBadge liquidity={data.liquidity_avg} />
           <ConsensoBadge consenso={forecast.consenso} />
         </div>
       </div>
@@ -163,6 +179,18 @@ export default function CityCard({ data }: CityCardProps) {
         <span>Vol: {forecast.volatilidad.toFixed(2)}</span>
         <span>·</span>
         <span>Spread: {spread.toFixed(1)}°</span>
+        {data.volume_total !== undefined && data.volume_total > 0 && (
+          <>
+            <span>·</span>
+            <span className="text-blue-400">Volumen: ${data.volume_total.toFixed(0)}</span>
+          </>
+        )}
+        {data.avg_spread !== undefined && (
+          <>
+            <span>·</span>
+            <span className="text-amber-400">Mkt Spread: {(data.avg_spread * 100).toFixed(1)}¢</span>
+          </>
+        )}
         {data.nowcast?.activo && (
           <>
             <span>·</span>

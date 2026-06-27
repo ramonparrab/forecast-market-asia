@@ -3,7 +3,7 @@ import { CIUDADES_ASIA } from './cities'
 import { fetchWeatherModels } from './openmeteo'
 import { computeEnsemble } from './ensemble'
 import { monteCarloProbability, normalizeProbabilidades } from './montecarlo'
-import { fetchPolymarketPrices, parseContract } from './polymarket'
+import { fetchPolymarketPrices, parseContract, calculateLiquidity, calculateEV } from './polymarket'
 import { calibrateProbabilities } from './calibration'
 import { calculateAllocation } from './kelly'
 import { getRecentErrors, getRecentModelErrors, computeGlobalMetrics } from './supabase'
@@ -159,6 +159,11 @@ async function analyzeCity(
   const calibrated = calibrateProbabilities(normalized, 1.0, 0.0)
   for (let i = 0; i < contracts.length; i++) {
     contracts[i].prob_ia_norm = calibrated[i]
+    // Calculate liquidity for each contract
+    contracts[i].liquidity = calculateLiquidity(contracts[i].volume_24h, contracts[i].spread)
+    // Calculate EV for each contract
+    const iaPct = Math.round((calibrated[i] ?? 0) * 10000) / 100
+    contracts[i].ev = calculateEV(iaPct / 100, contracts[i].prob_mkt / 100)
   }
 
   // 7. Arbitrage
@@ -176,7 +181,7 @@ async function analyzeCity(
       mkt_pct: p.prob_mkt,
       ia_pct: iaPct,
       edge,
-      ev_dollar: Math.round(edge * 0.1 * 100) / 100,
+      ev_dollar: p.ev ?? Math.round(edge * 0.1 * 100) / 100,
       temp_corregida: forecast.temp_corregida,
       consenso: forecast.consenso,
       arbitraje: arb.nivel,
@@ -187,6 +192,13 @@ async function analyzeCity(
       explicacion,
     }
   })
+
+  // Calculate liquidity summary for city
+  const volumes = contracts.map(c => c.volume_24h ?? 0).filter(v => v > 0)
+  const spreads = contracts.map(c => c.spread ?? 0.10).filter(s => s > 0)
+  const avgVolume = volumes.length > 0 ? volumes.reduce((s, v) => s + v, 0) / volumes.length : 0
+  const avgSpread = spreads.length > 0 ? spreads.reduce((s, v) => s + v, 0) / spreads.length : 0.10
+  const cityLiquidity = calculateLiquidity(avgVolume, avgSpread)
 
   return {
     cityAnalysis: {
@@ -204,6 +216,9 @@ async function analyzeCity(
       },
       exito_pct: exitoPct,
       explicacion,
+      liquidity_avg: cityLiquidity,
+      volume_total: avgVolume,
+      avg_spread: avgSpread,
     },
     recommendations: recs,
   }
