@@ -118,10 +118,34 @@ function computeActionPlan(
       return scoreB - scoreA
     })
 
+  if (candidates.length === 0) {
+    return {
+      presupuesto_total: PRESUPUESTO,
+      total_asignado: 0,
+      total_restante: PRESUPUESTO,
+      num_apuestas: 0,
+      acciones: [],
+      resumen_plan: `Presupuesto: $${PRESUPUESTO} · Sin apuestas que cumplan filtros (edge > ${MIN_EDGE}%, consenso FUERTE)`,
+      escenario_caso_a: 'Sin apuestas',
+      escenario_caso_b: 'Sin apuestas',
+      escenario_caso_c: 'Sin apuestas',
+    }
+  }
+
+  // Step 1: Calculate raw scores for proportional allocation
+  const scores = candidates.map(r => {
+    const accuracy = (r.exito_pct ?? 50) / 100
+    const edgeScore = r.edge * accuracy
+    return { rec: r, score: edgeScore }
+  })
+
+  const totalScore = scores.reduce((s, x) => s + x.score, 0)
+
+  // Step 2: Allocate proportionally, then clamp
   const acciones: BetAction[] = []
   let totalAsignado = 0
 
-  for (const rec of candidates) {
+  for (const { rec, score } of scores) {
     if (totalAsignado >= PRESUPUESTO) break
 
     const cityData = cities.find(c => c.slug === rec.slug)
@@ -132,22 +156,20 @@ function computeActionPlan(
     const signal = getActionSignal(rec.edge, exitoPct, rec.consenso)
     const riesgo = getRiskLevel(exitoPct, rec.consenso, spread)
 
-    // Kelly-inspired sizing: edge * accuracy / (100 / mkt_price)
-    const p = (rec.ia_pct ?? 50) / 100
-    const q = 1 - p
-    const odds = 1 / (rec.mkt_pct / 100)
-    const kellyFraction = Math.max(0, Math.min((p * odds - q) / odds, 0.10))
-    const rawMonto = kellyFraction * 0.25 * PRESUPUESTO // 25% Kelly
+    // Proportional allocation based on score
+    const proporcion = totalScore > 0 ? score / totalScore : 1 / candidates.length
+    let monto = Math.round(proporcion * PRESUPUESTO * 100) / 100
 
-    let monto = Math.max(MIN_POR_APUESTA, Math.min(MAX_POR_APUESTA, rawMonto))
+    // Clamp
+    monto = Math.max(MIN_POR_APUESTA, Math.min(MAX_POR_APUESTA, monto))
     monto = Math.min(monto, PRESUPUESTO - totalAsignado)
     monto = Math.round(monto * 100) / 100
 
     if (monto < MIN_POR_APUESTA) continue
 
     const precioCompra = rec.mkt_pct / 100
-    const upside = monto * ((1 / precioCompra) - 1) // Ganancia neta si gana
-    const downside = monto // Pierde toda la apuesta si pierde
+    const upside = monto * ((1 / precioCompra) - 1)
+    const downside = monto
     const probGanar = (rec.ia_pct ?? 50) / 100
     const probPerder = 1 - probGanar
     const gananciaEsperada = probGanar * upside
@@ -160,18 +182,15 @@ function computeActionPlan(
     else if (rec.edge > 6) razones.push(`Edge fuerte (+${rec.edge.toFixed(1)}%)`)
     else razones.push(`Edge moderado (+${rec.edge.toFixed(1)}%)`)
 
-    if (exitoPct >= 70) razones.push(`模型精度 ${exitoPct}% (alta)`)
-    else if (exitoPct >= 55) razones.push(`模型精度 ${exitoPct}% (media)`)
-    else razones.push(`模型精度 ${exitoPct}% (baja)`)
+    if (exitoPct >= 70) razones.push(`Precisión ${exitoPct}% (alta)`)
+    else if (exitoPct >= 55) razones.push(`Precisión ${exitoPct}% (media)`)
+    else razones.push(`Precisión ${exitoPct}% (baja)`)
 
     if (rec.consenso === 'MUY FUERTE') razones.push('consenso muy fuerte entre modelos')
     else if (rec.consenso === 'FUERTE') razones.push('consenso fuerte entre modelos')
 
-    if (rec.temp_corregida) {
-      const tempDiff = Math.abs(rec.temp_corregida - (typeof rec.contrato === 'string' ? parseFloat(rec.contrato) : 0))
-      if (rec.contrato.includes(`${Math.round(rec.temp_corregida)}`)) {
-        razones.push(`contrato alineado con pronóstico ${rec.temp_corregida.toFixed(1)}°C`)
-      }
+    if (rec.temp_corregida && rec.contrato.includes(`${Math.round(rec.temp_corregida)}`)) {
+      razones.push(`contrato alineado con pronóstico ${rec.temp_corregida.toFixed(1)}°C`)
     }
 
     const razon = razones.join(' · ')
