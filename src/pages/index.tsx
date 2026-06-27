@@ -7,6 +7,7 @@ import ForecastVsActualChart from '@/components/ForecastVsActualChart'
 import ArbitragePanel from '@/components/ArbitragePanel'
 import ForecastTable from '@/components/ForecastTable'
 import BacktestChart from '@/components/BacktestChart'
+import ExecutiveSummaryPanel from '@/components/ExecutiveSummary'
 import { DailyAnalysis, GlobalMetrics, CityAnalysis } from '@/types'
 
 export async function getServerSideProps() {
@@ -143,7 +144,7 @@ export async function getServerSideProps() {
   }
 }
 
-type View = 'dashboard' | 'table' | 'metrics' | 'comparison' | 'backtest' | 'arbitrage' | 'architecture'
+type View = 'executive' | 'dashboard' | 'table' | 'metrics' | 'comparison' | 'backtest' | 'arbitrage' | 'architecture'
 
 /** Returns a friendly confidence label + color class */
 function getConfidence(city: CityAnalysis): { label: string; color: string; bg: string } {
@@ -258,11 +259,13 @@ export default function Home({ initialAnalysis, initialMetrics, initialAvailable
   const [metrics, setMetrics] = useState<GlobalMetrics | null>(initialMetrics)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [activeView, setActiveView] = useState<View>('dashboard')
+  const [activeView, setActiveView] = useState<View>('executive')
   const [lastUpdated, setLastUpdated] = useState<string>(initialAnalysis ? `Auto ${new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}` : '')
   const [selectedDate, setSelectedDate] = useState<string>('')
   const [availableDates, setAvailableDates] = useState<string[]>(initialAvailableDates)
   const [isHistorical, setIsHistorical] = useState(false)
+  const [previousAnalysis, setPreviousAnalysis] = useState<DailyAnalysis | null>(null)
+  const [previousMetrics, setPreviousMetrics] = useState<GlobalMetrics | null>(null)
 
   const getDefaultTargetDate = () => {
     const caracasOffset = -4 * 60 * 60000
@@ -297,6 +300,33 @@ export default function Home({ initialAnalysis, initialMetrics, initialAvailable
     } catch { /* silent */ }
   }
 
+  async function fetchPreviousDay(currentFecha: string) {
+    try {
+      // Get available dates and find the one before current
+      const resp = await fetch('/api/forecast-history?action=dates')
+      if (resp.ok) {
+        const data = await resp.json()
+        const dates: string[] = data.dates ?? []
+        const sortedDates = dates.sort().reverse()
+        const currentIdx = sortedDates.indexOf(currentFecha)
+        if (currentIdx >= 0 && currentIdx < sortedDates.length - 1) {
+          const prevDate = sortedDates[currentIdx + 1]
+          const prevResp = await fetch(`/api/forecast-history?fecha=${prevDate}`)
+          if (prevResp.ok) {
+            const prevData: DailyAnalysis = await prevResp.json()
+            setPreviousAnalysis(prevData)
+            // Try to get previous day metrics
+            const prevMetricsResp = await fetch(`/api/metrics?fecha=${prevDate}`)
+            if (prevMetricsResp.ok) {
+              const pm = await prevMetricsResp.json()
+              if (pm && pm.overall_mae !== undefined) setPreviousMetrics(pm)
+            }
+          }
+        }
+      }
+    } catch { /* silent */ }
+  }
+
   const runAnalysis = useCallback(async (fecha?: string) => {
     setLoading(true)
     setError(null)
@@ -311,6 +341,7 @@ export default function Home({ initialAnalysis, initialMetrics, initialAvailable
       setLastUpdated(new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit', second: '2-digit' }))
       await fetchMetrics()
       await fetchAvailableDates()
+      await fetchPreviousDay(data.fecha_objetivo)
     } catch (e) {
       setError((e as Error).message)
     } finally {
@@ -352,6 +383,7 @@ export default function Home({ initialAnalysis, initialMetrics, initialAvailable
   })
 
   const views: { key: View; label: string; icon: string; desc: string }[] = [
+    { key: 'executive', label: 'Resumen Ejecutivo', icon: '🎯', desc: 'Recomendaciones del día' },
     { key: 'dashboard', label: 'Dashboard', icon: '🏠', desc: 'Vista general' },
     { key: 'table', label: 'Tabla', icon: '📊', desc: 'Datos completos' },
     { key: 'metrics', label: 'Precisión', icon: '📈', desc: 'Métricas históricas' },
@@ -547,6 +579,16 @@ export default function Home({ initialAnalysis, initialMetrics, initialAvailable
 
       {/* Table View */}
       {activeView === 'table' && analysis && <ForecastTable data={analysis} />}
+
+      {/* Executive Summary View */}
+      {activeView === 'executive' && (
+        <ExecutiveSummaryPanel
+          analysis={analysis}
+          metrics={metrics}
+          previousAnalysis={previousAnalysis}
+          previousMetrics={previousMetrics}
+        />
+      )}
 
       {/* Metrics View - Per city with backtesting data */}
       {activeView === 'metrics' && <MetricsChart metrics={metrics} />}

@@ -1,0 +1,312 @@
+import { useState, useEffect } from 'react'
+import { DailyAnalysis, GlobalMetrics } from '@/types'
+import { computeExecutiveSummary, ExecutiveSummary, DailyImprovement } from '@/lib/unified-model'
+
+interface Props {
+  analysis: DailyAnalysis | null
+  metrics: GlobalMetrics | null
+  previousAnalysis: DailyAnalysis | null
+  previousMetrics: GlobalMetrics | null
+}
+
+function DeltaBadge({ delta, suffix = '%', invert = false }: { delta: number | null; suffix?: string; invert?: boolean }) {
+  if (delta === null) return <span className="text-gray-500 text-xs">—</span>
+  const isPositive = invert ? delta < 0 : delta > 0
+  const isNegative = invert ? delta > 0 : delta < 0
+  return (
+    <span className={`text-xs font-bold ${isPositive ? 'text-emerald-400' : isNegative ? 'text-red-400' : 'text-gray-400'}`}>
+      {delta > 0 ? '+' : ''}{delta.toFixed(1)}{suffix}
+    </span>
+  )
+}
+
+function SignalBadge({ signal }: { signal: DailyImprovement['signal'] }) {
+  const colors = {
+    FUERTE: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
+    MEDIA: 'bg-blue-500/20 text-blue-400 border-blue-500/30',
+    DEBIL: 'bg-amber-500/20 text-amber-400 border-amber-500/30',
+    EVITAR: 'bg-red-500/20 text-red-400 border-red-500/30',
+  }
+  return (
+    <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-bold ${colors[signal]}`}>
+      {signal}
+    </span>
+  )
+}
+
+function TrendIcon({ tendencia }: { tendencia: DailyImprovement['tendencia'] }) {
+  if (tendencia === 'mejorando') return <span className="text-emerald-400">↗</span>
+  if (tendencia === 'empeorando') return <span className="text-red-400">↘</span>
+  return <span className="text-gray-400">→</span>
+}
+
+export default function ExecutiveSummaryPanel({ analysis, metrics, previousAnalysis, previousMetrics }: Props) {
+  const [summary, setSummary] = useState<ExecutiveSummary | null>(null)
+
+  useEffect(() => {
+    if (!analysis) return
+
+    const fechaActual = analysis.fecha_objetivo
+    const citiesToday = analysis.cities
+    const recsToday = analysis.recommendations
+
+    // Find previous day's data
+    const citiesYesterday = previousAnalysis?.cities ?? null
+    const recsYesterday = previousAnalysis?.recommendations ?? null
+
+    const result = computeExecutiveSummary(
+      fechaActual,
+      citiesToday,
+      recsToday,
+      metrics,
+      citiesYesterday,
+      recsYesterday,
+      previousMetrics
+    )
+    setSummary(result)
+  }, [analysis, metrics, previousAnalysis, previousMetrics])
+
+  if (!summary) {
+    return (
+      <div className="rounded-2xl bg-slate-800/50 border border-gray-700/30 p-8 text-center">
+        <div className="text-4xl mb-4">📊</div>
+        <p className="text-gray-400">Ejecuta el análisis para ver el Resumen Ejecutivo</p>
+      </div>
+    )
+  }
+
+  const bestRec = summary.mejor_recomendacion
+  const fuertes = summary.mejoras_por_ciudad.filter(m => m.signal === 'FUERTE')
+  const oportunidades = summary.top_opportunities
+
+  return (
+    <div className="space-y-6">
+      {/* HERO: Recomendación del Día */}
+      {bestRec && (
+        <div className="rounded-2xl bg-gradient-to-br from-emerald-600/20 via-blue-600/10 to-purple-600/20 border border-emerald-500/30 p-6 sm:p-8 relative overflow-hidden">
+          <div className="absolute top-0 right-0 w-64 h-64 bg-emerald-500/5 rounded-full -translate-y-32 translate-x-32" />
+          <div className="relative z-10">
+            <div className="flex items-center gap-2 mb-3">
+              <span className="text-3xl">🎯</span>
+              <div>
+                <p className="text-xs text-emerald-300 font-semibold tracking-wider">RECOMENDACIÓN DEL DÍA</p>
+                <p className="text-[10px] text-gray-400">{summary.fecha}</p>
+              </div>
+            </div>
+            <div className="flex flex-col sm:flex-row sm:items-end gap-4 mb-4">
+              <div>
+                <h2 className="text-3xl sm:text-4xl font-extrabold text-white mb-1">
+                  {bestRec.ciudad} → {bestRec.contrato}
+                </h2>
+                <p className="text-sm text-gray-300">
+                  Temp pronosticada: <span className="text-emerald-400 font-bold">{bestRec.temp_corregida.toFixed(1)}°C</span>
+                  <span className="mx-2">·</span>
+                  Consenso: <span className="text-blue-400 font-bold">{bestRec.consenso}</span>
+                </p>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <div className="rounded-xl bg-black/20 p-3 text-center">
+                <p className="text-[10px] text-gray-400 mb-1">Edge</p>
+                <p className="text-2xl font-extrabold text-emerald-400">+{bestRec.edge.toFixed(1)}%</p>
+              </div>
+              <div className="rounded-xl bg-black/20 p-3 text-center">
+                <p className="text-[10px] text-gray-400 mb-1">Prob. IA</p>
+                <p className="text-2xl font-extrabold text-blue-400">{bestRec.ia_pct.toFixed(1)}%</p>
+              </div>
+              <div className="rounded-xl bg-black/20 p-3 text-center">
+                <p className="text-[10px] text-gray-400 mb-1">Mercado</p>
+                <p className="text-2xl font-extrabold text-white">{bestRec.mkt_pct}%</p>
+              </div>
+              <div className="rounded-xl bg-black/20 p-3 text-center">
+                <p className="text-[10px] text-gray-400 mb-1">Precisión</p>
+                <p className="text-2xl font-extrabold text-purple-400">{bestRec.exito_pct ?? 50}%</p>
+              </div>
+            </div>
+            <div className="mt-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20 p-2 text-xs text-emerald-300">
+              {bestRec.status === 'EXCELENTE' ? '🔥 Señal EXCELENTE — Alta confianza para apostar' :
+               bestRec.status === 'BUENA' ? '✅ Señal BUENA — Buena oportunidad' :
+               '⚠️ Señal moderada — Considerar con precaución'}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Global Accuracy Comparison */}
+      <div className="grid gap-4 sm:grid-cols-2">
+        <div className="rounded-xl bg-gradient-to-br from-blue-600/10 to-blue-500/5 border border-blue-500/20 p-5">
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-xs text-blue-300 font-semibold">PRECISIÓN GLOBAL</p>
+            <DeltaBadge delta={summary.precision_global_delta} />
+          </div>
+          <div className="flex items-baseline gap-3">
+            <span className="text-4xl font-extrabold text-white">{summary.precision_global_hoy.toFixed(1)}%</span>
+            {summary.precision_global_ayer !== null && (
+              <span className="text-sm text-gray-500">vs {summary.precision_global_ayer.toFixed(1)}% ayer</span>
+            )}
+          </div>
+          <div className="mt-2 h-2 rounded-full bg-slate-700 overflow-hidden">
+            <div
+              className="h-full rounded-full bg-gradient-to-r from-blue-500 to-emerald-500 transition-all duration-1000"
+              style={{ width: `${summary.precision_global_hoy}%` }}
+            />
+          </div>
+        </div>
+
+        <div className="rounded-xl bg-gradient-to-br from-purple-600/10 to-purple-500/5 border border-purple-500/20 p-5">
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-xs text-purple-300 font-semibold">OPORTUNIDADES CON EDGE</p>
+          </div>
+          <div className="flex items-baseline gap-3">
+            <span className="text-4xl font-extrabold text-white">{oportunidades.length}</span>
+            <span className="text-sm text-gray-500">contratos con ventaja</span>
+          </div>
+          <div className="mt-2 flex flex-wrap gap-1">
+            {oportunidades.slice(0, 3).map((o, i) => (
+              <span key={i} className="rounded-full bg-purple-500/10 px-2 py-0.5 text-[10px] text-purple-300">
+                {o.ciudad} +{o.edge.toFixed(1)}%
+              </span>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Highlights */}
+      {summary.highlights.length > 0 && (
+        <div className="rounded-xl bg-slate-800/50 border border-gray-700/30 p-4">
+          <h3 className="text-sm font-bold text-white mb-3 flex items-center gap-2">
+            <span className="text-lg">⚡</span>
+            Cambios vs Día Anterior
+          </h3>
+          <div className="space-y-2">
+            {summary.highlights.map((h, i) => (
+              <div key={i} className="flex items-start gap-2 text-xs">
+                <span className="text-blue-400 mt-0.5">•</span>
+                <span className="text-gray-300">{h}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Top Opportunities Table */}
+      {oportunidades.length > 0 && (
+        <div className="rounded-xl bg-slate-800/50 border border-gray-700/30 p-4">
+          <h3 className="text-sm font-bold text-white mb-3 flex items-center gap-2">
+            <span className="text-lg">💰</span>
+            TOP Oportunidades (Edge × Precisión)
+          </h3>
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="text-left text-gray-400 border-b border-gray-700/50">
+                  <th className="p-2 font-semibold">#</th>
+                  <th className="p-2 font-semibold">Ciudad</th>
+                  <th className="p-2 font-semibold">Contrato</th>
+                  <th className="p-2 font-semibold">Edge</th>
+                  <th className="p-2 font-semibold">Precisión</th>
+                  <th className="p-2 font-semibold">Consenso</th>
+                  <th className="p-2 font-semibold">Señal</th>
+                </tr>
+              </thead>
+              <tbody>
+                {oportunidades.map((o, i) => (
+                  <tr key={i} className="border-t border-gray-700/30 hover:bg-slate-800/50">
+                    <td className="p-2 text-gray-500">{i + 1}</td>
+                    <td className="p-2 text-white font-bold">{o.ciudad}</td>
+                    <td className="p-2 text-blue-300">{o.contrato}</td>
+                    <td className="p-2">
+                      <span className={`font-bold ${o.edge > 10 ? 'text-emerald-400' : o.edge > 5 ? 'text-blue-400' : 'text-amber-400'}`}>
+                        +{o.edge.toFixed(1)}%
+                      </span>
+                    </td>
+                    <td className="p-2">
+                      <span className={`font-bold ${o.accuracy >= 70 ? 'text-emerald-400' : o.accuracy >= 55 ? 'text-blue-400' : 'text-amber-400'}`}>
+                        {o.accuracy.toFixed(0)}%
+                      </span>
+                    </td>
+                    <td className="p-2 text-gray-300">{o.consenso}</td>
+                    <td className="p-2">
+                      <span className={`text-[10px] font-bold ${o.edge > 10 ? 'text-emerald-400' : o.edge > 5 ? 'text-blue-400' : 'text-amber-400'}`}>
+                        {o.razon}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* Per-City Summary */}
+      <div className="rounded-xl bg-slate-800/50 border border-gray-700/30 p-4">
+        <h3 className="text-sm font-bold text-white mb-3 flex items-center gap-2">
+          <span className="text-lg">🏙️</span>
+          Resumen por Ciudad
+        </h3>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {summary.mejoras_por_ciudad.map(m => (
+            <div key={m.slug} className="rounded-xl bg-slate-900/50 border border-gray-700/20 p-3">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-sm font-bold text-white">{m.ciudad}</span>
+                <div className="flex items-center gap-2">
+                  <TrendIcon tendencia={m.tendencia} />
+                  <SignalBadge signal={m.signal} />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-2 text-xs">
+                <div>
+                  <p className="text-gray-500">Precisión</p>
+                  <div className="flex items-center gap-1">
+                    <span className="text-white font-bold">{m.accuracy_hoy.toFixed(1)}%</span>
+                    <DeltaBadge delta={m.accuracy_delta} />
+                  </div>
+                </div>
+                <div>
+                  <p className="text-gray-500">Mejor Edge</p>
+                  <div className="flex items-center gap-1">
+                    <span className="text-emerald-400 font-bold">+{m.best_edge_hoy.toFixed(1)}%</span>
+                  </div>
+                </div>
+              </div>
+              <div className="mt-2 text-[10px] text-gray-500">
+                Mejor: {m.best_contract_hoy}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Resumen Text */}
+      <div className="rounded-xl bg-gradient-to-r from-blue-600/10 via-blue-500/5 to-blue-600/10 border border-blue-500/20 p-4">
+        <h3 className="text-sm font-bold text-blue-300 mb-2 flex items-center gap-2">
+          <span className="text-lg">📝</span>
+          Resumen del Día
+        </h3>
+        <p className="text-sm text-gray-300 leading-relaxed">{summary.resumen_texto}</p>
+      </div>
+
+      {/* Strong Signals Section */}
+      {fuertes.length > 0 && (
+        <div className="rounded-xl bg-gradient-to-br from-emerald-600/10 to-emerald-500/5 border border-emerald-500/20 p-4">
+          <h3 className="text-sm font-bold text-emerald-400 mb-3 flex items-center gap-2">
+            <span className="text-lg">🔥</span>
+            Señales FUERTES del Día
+          </h3>
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+            {fuertes.map(f => (
+              <div key={f.slug} className="rounded-lg bg-emerald-500/5 border border-emerald-500/10 p-3">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-sm font-bold text-white">{f.ciudad}</span>
+                  <span className="text-xs text-emerald-400 font-bold">{f.accuracy_hoy.toFixed(1)}%</span>
+                </div>
+                <p className="text-xs text-gray-400">Edge: +{f.best_edge_hoy.toFixed(1)}% · {f.best_contract_hoy}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
