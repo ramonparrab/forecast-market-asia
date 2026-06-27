@@ -358,6 +358,40 @@ export async function getForecastVsActual(
   return (data as any) as any[]
 }
 
+/**
+ * Fetch historical calibration data: (predicted_prob, actual_outcome) pairs.
+ * For each historical record, we compute what probability the system assigned
+ * to the bucket containing the actual temperature, and whether it occurred (1/0).
+ */
+export async function getCalibrationPairs(): Promise<{ predicted: number; outcome: number }[]> {
+  const client = getClient()
+  if (!client) return []
+
+  const records = await getForecastVsActual()
+  if (records.length === 0) return []
+
+  const pairs: { predicted: number; outcome: number }[] = []
+
+  for (const r of records) {
+    // Recompute what probability the system assigned to the actual temp's bucket
+    const sigma = Math.max(0.5, Math.abs(r.error) + 0.5)  // conservative estimate
+    const tempActual = r.temp_real
+    const tempForecast = r.temp_corregida
+
+    // Probability that temp falls in ±1°C of actual (the "exact" bucket)
+    const diff = Math.abs(tempActual - tempForecast)
+    const probExact = Math.exp(-0.5 * (diff / sigma) ** 2) * 0.4  // approximate normal CDF width
+    const clampedProb = Math.max(0.01, Math.min(0.95, probExact))
+
+    // Outcome: 1 if temp was within ±1°C of forecast (system was "right")
+    const outcome = diff <= 1.0 ? 1 : 0
+
+    pairs.push({ predicted: clampedProb, outcome })
+  }
+
+  return pairs
+}
+
 // ===== Backtest Bias =====
 
 export interface BacktestBiasEntry {

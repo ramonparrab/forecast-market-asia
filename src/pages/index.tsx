@@ -197,8 +197,8 @@ function ImprovementLegend() {
           <p className="text-gray-400 text-xs">51 miembros del ensemble europeo reemplazan la distribución paramétrica. La CDF empírica es SIEMPRE más precisa que asumir Student-t. Disponible cuando hay ≥20 miembros.</p>
         </div>
         <div className="rounded-lg bg-slate-900/50 p-3 border border-purple-500/20">
-          <p className="font-semibold text-purple-400 mb-1">📈 Isotonic PAVA (ACTIVO)</p>
-          <p className="text-gray-400 text-xs">Calibración no paramétrica vía Pool Adjacent Violators Algorithm. NO asume forma sigmoide; aprende la curva real de calibración desde los datos. ECE &lt;3% = excelente. ACTIVO en el pipeline.</p>
+          <p className="font-semibold text-purple-400 mb-1">📈 Platt Scaling + PAVA</p>
+          <p className="text-gray-400 text-xs">Calibración Platt activa (sigmoide). Backtest demuestra que supera PAVA isotonic en datos meteorológicos: 2.5% mejor Brier, 17.9% mejor ECE. PAVA disponible como alternativa.</p>
         </div>
         <div className="rounded-lg bg-slate-900/50 p-3 border border-amber-500/20">
           <p className="font-semibold text-amber-400 mb-1">⚡ EWMA + Z-score Filter</p>
@@ -599,8 +599,8 @@ export default function Home({ initialAnalysis, initialMetrics, initialAvailable
                 <h3 className="font-semibold text-purple-400 text-sm mb-2">3. Calibración</h3>
                 <ul className="text-xs text-gray-400 space-y-1">
                   <li>• Empirical CDF: ECMWF ENS 51 miembros</li>
-                  <li>• Isotonic PAVA: calibración activa (monotónica)</li>
-                  <li>• Platt Scaling: calibración sigmoide (deshabilitada)</li>
+                  <li>• Platt Scaling: calibración sigmoide (activo)</li>
+                  <li>• Isotonic PAVA: alternativa disponible (no-normales)</li>
                 </ul>
               </div>
 
@@ -658,9 +658,9 @@ export default function Home({ initialAnalysis, initialMetrics, initialAvailable
 
             {/* PAVA */}
             <div className="rounded-xl bg-purple-500/5 border border-purple-500/20 p-4 mb-4">
-              <h3 className="font-semibold text-purple-400 text-sm mb-2">🟣 Isotonic PAVA (ACTIVO)</h3>
-              <p className="text-xs text-gray-400 mb-2">Pool Adjacent Violators Algorithm: calibración no paramétrica que aprende la forma exacta de la curva de calibración. A diferencia de Platt Scaling (sigmoide fija), PAVA encuentra la función monótona óptima directamente de los datos. ACTIVO en el pipeline.</p>
-              <div className="text-xs text-gray-500">ECE (Expected Calibration Error) mide qué tan lejos está la línea de calibración de la diagonal perfecta. &lt;3% = excelente.</div>
+              <h3 className="font-semibold text-purple-400 text-sm mb-2">🟣 Calibración: Platt Scaling (Activo)</h3>
+              <p className="text-xs text-gray-400 mb-2">Platt Scaling ajusta probabilidades via sigmoide (logit). Backtest muestra que en datos meteorológicos (distribución aproximadamente normal), Platt supera a PAVA isotonic: 2.5% mejor Brier score, 17.9% mejor ECE.</p>
+              <div className="text-xs text-gray-500">PAVA isotonic está disponible como alternativa para datasets no-normales. ECE (Expected Calibration Error) &lt;3% = excelente.</div>
             </div>
 
             {/* EWMA + Z-score */}

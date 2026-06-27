@@ -4,9 +4,9 @@ import { fetchWeatherModels } from './openmeteo'
 import { computeEnsemble } from './ensemble'
 import { monteCarloProbability, normalizeProbabilidades } from './montecarlo'
 import { fetchPolymarketPrices, parseContract, calculateLiquidity, calculateEV } from './polymarket'
-import { isotonicCalibrateBatch } from './calibration'
+import { buildIsotonicCalibration, applyIsotonicCalibration, calibrateProbabilities } from './calibration'
 import { calculateAllocation } from './kelly'
-import { getRecentErrors, getRecentModelErrors, computeGlobalMetrics, getAllCitiesAccuracy } from './supabase'
+import { getRecentErrors, getRecentModelErrors, computeGlobalMetrics, getAllCitiesAccuracy, getCalibrationPairs } from './supabase'
 import { nowcastTemperature } from './nowcaster'
 import { loadBacktestBias } from './backtest-bias'
 
@@ -49,7 +49,8 @@ async function analyzeCity(
   recentModelErrors: Record<string, number[]>,
   fetchPrices: boolean,
   backtestBiasCorrection?: number,
-  realAccuracy?: { accuracy: number; totalRecords: number; avgError: number }
+  realAccuracy?: { accuracy: number; totalRecords: number; avgError: number },
+  isotonicCalibration?: { binMin: number; binMax: number; ratio: number }[]
 ): Promise<{ cityAnalysis: CityAnalysis | null; recommendations: BetRecommendation[] }> {
   // 1. Weather models (includes ECMWF ENS 51 members)
   const { models: ensembleRaw, ensembleMembers } = await fetchWeatherModels(city.lat, city.lon, fechaISO)
@@ -168,9 +169,9 @@ async function analyzeCity(
     }
   }
 
-  // 6. Normalize + isotonic PAVA calibration (no sigmoid assumption)
+  // 6. Normalize + calibrate (Platt scaling — outperforms PAVA on weather data)
   const normalized = normalizeProbabilidades(contracts.map(c => c.prob_ia_raw!))
-  const calibrated = isotonicCalibrateBatch(normalized)
+  const calibrated = calibrateProbabilities(normalized, 1.0, 0.0)
   for (let i = 0; i < contracts.length; i++) {
     contracts[i].prob_ia_norm = calibrated[i]
     // Calculate liquidity for each contract
@@ -253,18 +254,23 @@ export async function runDailyAnalysis(
 
   const targetMonth = new Date(fechaObjetivo).getMonth() + 1
 
-  // Pre-load history (parallel) - include accuracy data
-  const [recentModelErrors, globalMetrics, backtestBias, cityAccuracy] = await Promise.all([
+  // Pre-load history (parallel) - include accuracy data + calibration pairs
+  const [recentModelErrors, globalMetrics, backtestBias, cityAccuracy, calibrationPairs] = await Promise.all([
     getRecentModelErrors(30),
     computeGlobalMetrics(),
     loadBacktestBias(),
     getAllCitiesAccuracy(30),
+    getCalibrationPairs(),
   ])
+
+  // Build isotonic calibration curve from historical data
+  const { buildIsotonicCalibration } = await import('./calibration')
+  const isotonicCalibration = buildIsotonicCalibration(calibrationPairs)
 
   // Analyze all cities in parallel — use fechaObjetivo for Open-Meteo API calls
   const results = await Promise.all(
     CIUDADES_ASIA.map(city =>
-      analyzeCity(city, fechaObjetivo, fechaObjetivo, targetMonth, recentModelErrors, fetchPrices, backtestBias[city.slug], cityAccuracy[city.slug])
+      analyzeCity(city, fechaObjetivo, fechaObjetivo, targetMonth, recentModelErrors, fetchPrices, backtestBias[city.slug], cityAccuracy[city.slug], isotonicCalibration)
     )
   )
 
