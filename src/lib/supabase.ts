@@ -112,8 +112,24 @@ export async function getRecentModelErrors(
 }
 
 /**
+ * Deduplicate forecast records by fecha_objetivo, keeping only the latest
+ * fecha_ejecucion (most recent prediction) for each target date.
+ * This prevents counting the same forecast multiple times.
+ */
+function deduplicateByFechaObjetivo(records: any[]): any[] {
+  const byDate: Record<string, any> = {}
+  for (const r of records) {
+    const key = r.fecha_objetivo
+    if (!byDate[key] || r.fecha_ejecucion > byDate[key].fecha_ejecucion) {
+      byDate[key] = r
+    }
+  }
+  return Object.values(byDate)
+}
+
+/**
  * Calculate REAL accuracy per city based on historical forecast vs actual.
- * Returns percentage of forecasts within ±1°C and ±2°C of actual temperature.
+ * Uses 1 record per fecha_objetivo (latest execution) for fair calculation.
  */
 export async function getCityAccuracy(
   slug: string,
@@ -128,19 +144,19 @@ export async function getCityAccuracy(
 
   const { data, error } = await client
     .from('forecast_history' as any)
-    .select('temp_corregida, temp_real, error')
+    .select('fecha_objetivo, fecha_ejecucion, temp_corregida, temp_real, error')
     .eq('slug', slug)
     .not('temp_real', 'is', null)
     .not('error', 'is', null)
     .gte('fecha_ejecucion', sinceStr)
     .order('fecha_ejecucion', { ascending: false } as any)
-    .limit(30)
 
   if (error || !data || (data as any[]).length === 0) {
     return { accuracy_1c: 0, accuracy_2c: 0, totalRecords: 0, avgError: 0 }
   }
 
-  const records = data as any[]
+  // Deduplicate: keep 1 record per fecha_objetivo
+  const records = deduplicateByFechaObjetivo(data as any[])
   const totalRecords = records.length
 
   let correctCount1c = 0
@@ -173,7 +189,7 @@ export async function getAllCitiesAccuracy(
 
   const { data, error } = await client
     .from('forecast_history' as any)
-    .select('slug, temp_corregida, temp_real, error')
+    .select('slug, fecha_objetivo, fecha_ejecucion, temp_corregida, temp_real, error')
     .not('temp_real', 'is', null)
     .not('error', 'is', null)
     .gte('fecha_ejecucion', sinceStr)
@@ -185,9 +201,7 @@ export async function getAllCitiesAccuracy(
   const grouped: Record<string, any[]> = {}
   for (const row of (data as any[])) {
     if (!grouped[row.slug]) grouped[row.slug] = []
-    if (grouped[row.slug].length < 30) {
-      grouped[row.slug].push(row)
-    }
+    grouped[row.slug].push(row)
   }
 
   const result: Record<string, { accuracy_1c: number; accuracy_2c: number; totalRecords: number; avgError: number }> = {}
@@ -195,22 +209,25 @@ export async function getAllCitiesAccuracy(
   for (const [slug, records] of Object.entries(grouped)) {
     if (records.length === 0) continue
 
+    // Deduplicate: keep 1 record per fecha_objetivo
+    const deduped = deduplicateByFechaObjetivo(records)
+
     let correctCount1c = 0
     let correctCount2c = 0
     let totalError = 0
 
-    for (const record of records) {
+    for (const record of deduped) {
       const error = Math.abs(record.error)
       totalError += error
       if (error <= 1.0) correctCount1c++
       if (error <= 2.0) correctCount2c++
     }
 
-    const accuracy_1c = Math.round((correctCount1c / records.length) * 100)
-    const accuracy_2c = Math.round((correctCount2c / records.length) * 100)
-    const avgError = Math.round((totalError / records.length) * 100) / 100
+    const accuracy_1c = Math.round((correctCount1c / deduped.length) * 100)
+    const accuracy_2c = Math.round((correctCount2c / deduped.length) * 100)
+    const avgError = Math.round((totalError / deduped.length) * 100) / 100
 
-    result[slug] = { accuracy_1c, accuracy_2c, totalRecords: records.length, avgError }
+    result[slug] = { accuracy_1c, accuracy_2c, totalRecords: deduped.length, avgError }
   }
 
   return result
