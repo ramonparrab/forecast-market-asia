@@ -1,120 +1,90 @@
 'use client'
 
 import { useState, useRef, useEffect, ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 
 interface TooltipProps {
   children: ReactNode
   content: ReactNode
-  position?: 'top' | 'bottom' | 'left' | 'right'
+  position?: 'top' | 'bottom'
   width?: string
-  delay?: number
 }
 
-export default function Tooltip({ children, content, position = 'top', width = 'w-64', delay = 150 }: TooltipProps) {
-  const [isVisible, setIsVisible] = useState(false)
-  const [fixedStyle, setFixedStyle] = useState<React.CSSProperties>({})
+export default function Tooltip({ children, content, position = 'top', width = 'w-64' }: TooltipProps) {
+  const [show, setShow] = useState(false)
+  const [coords, setCoords] = useState({ top: 0, left: 0 })
   const triggerRef = useRef<HTMLSpanElement>(null)
-  const timeoutRef = useRef<NodeJS.Timeout | null>(null)
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  const updatePosition = () => {
+  const calcPos = () => {
     if (!triggerRef.current) return
-    const rect = triggerRef.current.getBoundingClientRect()
-    const scrollY = window.scrollY
-    const scrollX = window.scrollX
-
+    const r = triggerRef.current.getBoundingClientRect()
+    const cx = r.left + r.width / 2
     let top: number
-    let left: number
-
-    switch (position) {
-      case 'top':
-        top = rect.top + scrollY - 8
-        left = rect.left + scrollX + rect.width / 2
-        break
-      case 'bottom':
-        top = rect.top + scrollY + rect.height + 8
-        left = rect.left + scrollX + rect.width / 2
-        break
-      case 'left':
-        top = rect.top + scrollY + rect.height / 2
-        left = rect.left + scrollX - 8
-        break
-      case 'right':
-        top = rect.top + scrollY + rect.height / 2
-        left = rect.left + scrollX + rect.width + 8
-        break
+    if (position === 'top') {
+      top = r.top - 8
+    } else {
+      top = r.bottom + 8
     }
-
-    setFixedStyle({
-      position: 'absolute',
-      top: `${top}px`,
-      left: `${left}px`,
-      transform: position === 'top' || position === 'bottom'
-        ? 'translateX(-50%)'
-        : position === 'left'
-        ? 'translate(-100%, -50%)'
-        : 'translateY(-50%)',
-      zIndex: 9999,
-      animation: 'tooltipFadeIn 0.15s ease-out',
-    })
+    setCoords({ top, left: cx })
   }
 
-  const showTooltip = () => {
-    timeoutRef.current = setTimeout(() => {
-      updatePosition()
-      setIsVisible(true)
-    }, delay)
+  const open = () => {
+    timerRef.current = setTimeout(() => {
+      calcPos()
+      setShow(true)
+    }, 120)
   }
 
-  const hideTooltip = () => {
-    if (timeoutRef.current) clearTimeout(timeoutRef.current)
-    setIsVisible(false)
+  const close = () => {
+    if (timerRef.current) clearTimeout(timerRef.current)
+    setShow(false)
   }
 
   useEffect(() => {
-    return () => {
-      if (timeoutRef.current) clearTimeout(timeoutRef.current)
-    }
+    return () => { if (timerRef.current) clearTimeout(timerRef.current) }
   }, [])
 
   useEffect(() => {
-    if (isVisible) {
-      const handleScroll = () => updatePosition()
-      const handleResize = () => updatePosition()
-      window.addEventListener('scroll', handleScroll, { passive: true })
-      window.addEventListener('resize', handleResize)
-      return () => {
-        window.removeEventListener('scroll', handleScroll)
-        window.removeEventListener('resize', handleResize)
-      }
+    if (!show) return
+    const onScroll = () => calcPos()
+    const onResize = () => calcPos()
+    window.addEventListener('scroll', onScroll, true)
+    window.addEventListener('resize', onResize)
+    return () => {
+      window.removeEventListener('scroll', onScroll, true)
+      window.removeEventListener('resize', onResize)
     }
-  }, [isVisible])
+  }, [show])
+
+  const tooltip = show ? (
+    <div
+      className="pointer-events-none"
+      style={{
+        position: 'fixed',
+        top: coords.top,
+        left: coords.left,
+        transform: position === 'top' ? 'translate(-50%, -100%)' : 'translate(-50%, 0)',
+        zIndex: 2147483647,
+        maxWidth: '320px',
+        width: width === 'w-80' ? '320px' : width === 'w-72' ? '288px' : '256px',
+      }}
+    >
+      <div className="p-2.5 text-xs text-white bg-gray-900 border border-gray-600 rounded-xl shadow-2xl leading-relaxed">
+        {content}
+      </div>
+    </div>
+  ) : null
 
   return (
-    <>
-      <style>{`
-        @keyframes tooltipFadeIn {
-          from { opacity: 0; transform: translateX(-50%) translateY(4px); }
-          to { opacity: 1; transform: translateX(-50%) translateY(0); }
-        }
-      `}</style>
-      <span
-        ref={triggerRef}
-        className="relative inline-flex cursor-help"
-        onMouseEnter={showTooltip}
-        onMouseLeave={hideTooltip}
-        onFocus={showTooltip}
-        onBlur={hideTooltip}
-      >
-        {children}
-        {isVisible && (
-          <span
-            style={fixedStyle}
-            className={`${width} p-2.5 text-xs text-white bg-gray-900 border border-gray-600 rounded-xl shadow-2xl pointer-events-none`}
-          >
-            {content}
-          </span>
-        )}
-      </span>
-    </>
+    <span
+      ref={triggerRef}
+      className="inline-flex cursor-help"
+      onMouseEnter={open}
+      onMouseLeave={close}
+    >
+      {children}
+      {typeof document !== 'undefined' && createPortal(tooltip, document.body)}
+    </span>
   )
 }
