@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { DailyAnalysis, GlobalMetrics } from '@/types'
-import { computeExecutiveSummary, ExecutiveSummary, DailyImprovement } from '@/lib/unified-model'
+import { computeExecutiveSummary, ExecutiveSummary, DailyImprovement, BetAction } from '@/lib/unified-model'
 
 interface Props {
   analysis: DailyAnalysis | null
@@ -38,6 +38,122 @@ function TrendIcon({ tendencia }: { tendencia: DailyImprovement['tendencia'] }) 
   if (tendencia === 'mejorando') return <span className="text-emerald-400">↗</span>
   if (tendencia === 'empeorando') return <span className="text-red-400">↘</span>
   return <span className="text-gray-400">→</span>
+}
+
+function ActionBetCard({ accion, index }: { accion: BetAction; index: number }) {
+  const signalColors = {
+    EXCELENTE: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
+    BUENA: 'bg-blue-500/20 text-blue-400 border-blue-500/30',
+    NEUTRAL: 'bg-amber-500/20 text-amber-400 border-amber-500/30',
+    EVITAR: 'bg-red-500/20 text-red-400 border-red-500/30',
+  }
+  const riskColors = {
+    BAJO: 'text-emerald-400',
+    MEDIO: 'text-amber-400',
+    ALTO: 'text-red-400',
+  }
+  const colors = ['border-emerald-500/30', 'border-blue-500/30', 'border-purple-500/30', 'border-amber-500/30', 'border-pink-500/30']
+  const bgColors = ['from-emerald-500/5', 'from-blue-500/5', 'from-purple-500/5', 'from-amber-500/5', 'from-pink-500/5']
+
+  return (
+    <div className={`rounded-xl bg-gradient-to-br ${bgColors[index % bgColors.length]} to-transparent border ${colors[index % colors.length]} p-4`}>
+      {/* Header row */}
+      <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center gap-3">
+          <span className="text-2xl font-extrabold text-white bg-white/10 rounded-lg w-10 h-10 flex items-center justify-center">
+            {index + 1}
+          </span>
+          <div>
+            <h4 className="text-base font-extrabold text-white">{accion.ciudad}</h4>
+            <p className="text-xs text-gray-400">{accion.contrato}</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-bold ${signalColors[accion.signal]}`}>
+            {accion.signal}
+          </span>
+          <span className={`text-[10px] font-bold ${riskColors[accion.riesgo]}`}>
+            Riesgo: {accion.riesgo}
+          </span>
+        </div>
+      </div>
+
+      {/* Main numbers */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-3">
+        <div className="rounded-lg bg-black/20 p-2 text-center">
+          <p className="text-[10px] text-gray-400 mb-0.5">INVERTIR</p>
+          <p className="text-xl font-extrabold text-amber-400">${accion.montoinvertir}</p>
+        </div>
+        <div className="rounded-lg bg-black/20 p-2 text-center">
+          <p className="text-[10px] text-gray-400 mb-0.5">SI GANAS</p>
+          <p className="text-xl font-extrabold text-emerald-400">+${accion.upside}</p>
+        </div>
+        <div className="rounded-lg bg-black/20 p-2 text-center">
+          <p className="text-[10px] text-gray-400 mb-0.5">SI PIERDES</p>
+          <p className="text-xl font-extrabold text-red-400">-${accion.downside}</p>
+        </div>
+        <div className="rounded-lg bg-black/20 p-2 text-center">
+          <p className="text-[10px] text-gray-400 mb-0.5">EV</p>
+          <p className={`text-xl font-extrabold ${accion.ev > 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+            {accion.ev > 0 ? '+' : ''}{accion.ev}
+          </p>
+        </div>
+      </div>
+
+      {/* Edge explanation */}
+      <div className="rounded-lg bg-black/10 p-3 mb-3">
+        <div className="flex items-center gap-2 mb-2">
+          <span className="text-sm">🎯</span>
+          <span className="text-xs font-bold text-white">¿POR QUÉ ESTE CONTRATO?</span>
+        </div>
+        <div className="grid grid-cols-3 gap-2 text-xs mb-2">
+          <div>
+            <span className="text-gray-400">Tu modelo dice:</span>
+            <span className="ml-1 font-bold text-blue-400">{accion.prob_ia.toFixed(1)}%</span>
+          </div>
+          <div>
+            <span className="text-gray-400">Mercado dice:</span>
+            <span className="ml-1 font-bold text-white">{accion.prob_mercado}%</span>
+          </div>
+          <div>
+            <span className="text-gray-400">Edge:</span>
+            <span className="ml-1 font-bold text-emerald-400">+{accion.edge.toFixed(1)}%</span>
+          </div>
+        </div>
+        <p className="text-xs text-gray-300">{accion.razon}</p>
+      </div>
+
+      {/* Probability bar */}
+      <div className="rounded-lg bg-black/10 p-3">
+        <div className="flex items-center justify-between text-xs mb-1">
+          <span className="text-gray-400">Probabilidad de ganar esta apuesta</span>
+          <span className="font-bold text-white">{accion.prob_ia.toFixed(1)}%</span>
+        </div>
+        <div className="h-2 rounded-full bg-slate-700 overflow-hidden">
+          <div
+            className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-blue-500 transition-all duration-1000"
+            style={{ width: `${accion.prob_ia}%` }}
+          />
+        </div>
+        <div className="flex justify-between text-[10px] text-gray-500 mt-1">
+          <span>0%</span>
+          <span className="text-white">Precio compra: ${(accion.precio_compra * 100).toFixed(0)}¢</span>
+          <span>100%</span>
+        </div>
+      </div>
+
+      {/* Explanation text */}
+      <div className="mt-3 text-[11px] text-gray-400 leading-relaxed">
+        <strong className="text-gray-300">Resumen:</strong>{' '}
+        Compras <span className="text-white font-bold">{accion.contrato}</span> en {accion.ciudad} por{' '}
+        <span className="text-amber-400 font-bold">${accion.montoinvertir}</span>.
+        Si la temperatura cierra en ese rango, ganas <span className="text-emerald-400 font-bold">+${accion.upside}</span>.
+        Si no, pierdes <span className="text-red-400 font-bold">${accion.downside}</span>.
+        Tu modelo estima <span className="text-blue-400 font-bold">{accion.prob_ia.toFixed(1)}%</span> de probabilidad vs{' '}
+        <span className="text-white font-bold">{accion.prob_mercado}%</span> del mercado.
+      </div>
+    </div>
+  )
 }
 
 export default function ExecutiveSummaryPanel({ analysis, metrics, previousAnalysis, previousMetrics }: Props) {
@@ -127,6 +243,103 @@ export default function ExecutiveSummaryPanel({ analysis, metrics, previousAnaly
               {bestRec.status === 'EXCELENTE' ? '🔥 Señal EXCELENTE — Alta confianza para apostar' :
                bestRec.status === 'BUENA' ? '✅ Señal BUENA — Buena oportunidad' :
                '⚠️ Señal moderada — Considerar con precaución'}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* PLAN DE ACCIÓN: QUÉ COMPRAR */}
+      {summary.action_plan && summary.action_plan.acciones.length > 0 && (
+        <div className="rounded-2xl bg-gradient-to-br from-amber-600/15 via-orange-600/10 to-red-600/15 border border-amber-500/30 p-6 relative overflow-hidden">
+          <div className="absolute top-0 left-0 w-48 h-48 bg-amber-500/5 rounded-full -translate-y-24 -translate-x-24" />
+          <div className="relative z-10">
+            {/* Header */}
+            <div className="flex items-center gap-3 mb-5">
+              <span className="text-4xl">🎰</span>
+              <div>
+                <h2 className="text-xl font-extrabold text-white">PLAN DE ACCIÓN — QUÉ COMPRAR</h2>
+                <p className="text-xs text-amber-300/80">Presupuesto diario: ${summary.action_plan.presupuesto_total} · {summary.action_plan.num_apuestas} apuesta(s)</p>
+              </div>
+            </div>
+
+            {/* Budget bar */}
+            <div className="mb-5 rounded-xl bg-black/20 p-3">
+              <div className="flex justify-between text-xs mb-1">
+                <span className="text-gray-400">Distribución del presupuesto</span>
+                <span className="text-white font-bold">${summary.action_plan.total_asignado} / ${summary.action_plan.presupuesto_total}</span>
+              </div>
+              <div className="h-3 rounded-full bg-slate-700 overflow-hidden flex">
+                {summary.action_plan.acciones.map((a, i) => {
+                  const pct = (a.montoinvertir / summary.action_plan.presupuesto_total) * 100
+                  const colors = ['bg-emerald-500', 'bg-blue-500', 'bg-purple-500', 'bg-amber-500', 'bg-pink-500']
+                  return (
+                    <div
+                      key={i}
+                      className={`${colors[i % colors.length]} h-full transition-all duration-500`}
+                      style={{ width: `${pct}%` }}
+                      title={`${a.ciudad}: $${a.montoinvertir}`}
+                    />
+                  )
+                })}
+              </div>
+              <div className="flex flex-wrap gap-2 mt-2">
+                {summary.action_plan.acciones.map((a, i) => {
+                  const colors = ['text-emerald-400', 'text-blue-400', 'text-purple-400', 'text-amber-400', 'text-pink-400']
+                  return (
+                    <span key={i} className={`text-[10px] font-bold ${colors[i % colors.length]}`}>
+                      {a.ciudad} ${a.montoinvertir}
+                    </span>
+                  )
+                })}
+                {summary.action_plan.total_restante > 0 && (
+                  <span className="text-[10px] text-gray-500">+${summary.action_plan.total_restante} reserva</span>
+                )}
+              </div>
+            </div>
+
+            {/* Individual bets */}
+            <div className="space-y-3">
+              {summary.action_plan.acciones.map((accion, i) => (
+                <ActionBetCard key={i} accion={accion} index={i} />
+              ))}
+            </div>
+
+            {/* Scenarios */}
+            <div className="mt-5 rounded-xl bg-black/20 p-4">
+              <h4 className="text-xs font-bold text-white mb-3 flex items-center gap-2">
+                <span>📊</span> ESCENARIOS POSIBLES
+              </h4>
+              <div className="grid gap-2 sm:grid-cols-3">
+                <div className="rounded-lg bg-emerald-500/10 border border-emerald-500/20 p-3">
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="text-lg">🟢</span>
+                    <span className="text-xs font-bold text-emerald-400">CASO A: Ganas TODAS</span>
+                  </div>
+                  <p className="text-sm font-extrabold text-emerald-300">{summary.action_plan.escenario_caso_a}</p>
+                  <p className="text-[10px] text-gray-400 mt-1">Si cada apuesta acierta, ganas el upside de cada una</p>
+                </div>
+                <div className="rounded-lg bg-blue-500/10 border border-blue-500/20 p-3">
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="text-lg">🔵</span>
+                    <span className="text-xs font-bold text-blue-400">CASO B: Resultado esperado</span>
+                  </div>
+                  <p className="text-sm font-extrabold text-blue-300">{summary.action_plan.escenario_caso_b}</p>
+                  <p className="text-[10px] text-gray-400 mt-1">Promedio ponderado por probabilidades del modelo</p>
+                </div>
+                <div className="rounded-lg bg-red-500/10 border border-red-500/20 p-3">
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="text-lg">🔴</span>
+                    <span className="text-xs font-bold text-red-400">CASO C: Pierdes TODAS</span>
+                  </div>
+                  <p className="text-sm font-extrabold text-red-300">{summary.action_plan.escenario_caso_c}</p>
+                  <p className="text-[10px] text-gray-400 mt-1">Si ninguna apuesta acierta, pierdes lo invertido</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Warning */}
+            <div className="mt-4 rounded-lg bg-amber-500/10 border border-amber-500/20 p-3 text-xs text-amber-300/80">
+              <strong>⚠️ IMPORTANTE:</strong> Este plan es informativo. El edge positivo significa ventaja estadística a LARGO PLAZO. En el corto plazo puedes perder. Apuesta solo lo que puedas permitirte perder. No invertirás automáticamente — decides tú.
             </div>
           </div>
         </div>

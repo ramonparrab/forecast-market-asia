@@ -15,6 +15,40 @@ export interface DailyImprovement {
   signal: 'FUERTE' | 'MEDIA' | 'DEBIL' | 'EVITAR'
 }
 
+export interface BetAction {
+  ciudad: string
+  slug: string
+  contrato: string
+  temp_pronosticada: number
+  precio_compra: number
+  montoinvertir: number
+  upside: number
+  downside: number
+  edge: number
+  prob_ia: number
+  prob_mercado: number
+  consenso: string
+  exito_pct: number
+  signal: 'EXCELENTE' | 'BUENA' | 'NEUTRAL' | 'EVITAR'
+  razon: string
+  riesgo: 'BAJO' | 'MEDIO' | 'ALTO'
+  ganancia_esperada: number
+  perdida_esperada: number
+  ev: number
+}
+
+export interface BetActionPlan {
+  presupuesto_total: number
+  total_asignado: number
+  total_restante: number
+  num_apuestas: number
+  acciones: BetAction[]
+  resumen_plan: string
+  escenario_caso_a: string
+  escenario_caso_b: string
+  escenario_caso_c: string
+}
+
 export interface ExecutiveSummary {
   fecha: string
   fecha_anterior: string | null
@@ -35,6 +69,8 @@ export interface ExecutiveSummary {
     consenso: string
     razon: string
   }[]
+  // Action plan
+  action_plan: BetActionPlan
   // Daily highlights
   highlights: string[]
   // Summary text
@@ -46,6 +82,159 @@ function getConfidenceLabel(pct: number): 'FUERTE' | 'MEDIA' | 'DEBIL' | 'EVITAR
   if (pct >= 55) return 'MEDIA'
   if (pct >= 40) return 'DEBIL'
   return 'EVITAR'
+}
+
+function getActionSignal(edge: number, exitoPct: number, consenso: string): BetAction['signal'] {
+  if (edge > 10 && exitoPct >= 65 && (consenso === 'MUY FUERTE' || consenso === 'FUERTE')) return 'EXCELENTE'
+  if (edge > 6 && exitoPct >= 55) return 'BUENA'
+  if (edge > 3) return 'NEUTRAL'
+  return 'EVITAR'
+}
+
+function getRiskLevel(exitoPct: number, consenso: string, spread: number): BetAction['riesgo'] {
+  if (exitoPct >= 70 && (consenso === 'MUY FUERTE' || consenso === 'FUERTE') && spread <= 2.5) return 'BAJO'
+  if (exitoPct >= 55 || (consenso === 'FUERTE' && spread <= 3.0)) return 'MEDIO'
+  return 'ALTO'
+}
+
+function computeActionPlan(
+  recommendations: BetRecommendation[],
+  cities: CityAnalysis[],
+  presupuesto: number = 10
+): BetActionPlan {
+  const PRESUPUESTO = presupuesto
+  const MAX_POR_APUESTA = 5.0
+  const MIN_POR_APUESTA = 1.0
+  const MIN_EDGE = 4.0
+
+  // Filter actionable candidates
+  const candidates = recommendations
+    .filter(r => r.edge >= MIN_EDGE)
+    .filter(r => r.consenso === 'MUY FUERTE' || r.consenso === 'FUERTE' || r.consenso === 'ACEPTABLE')
+    .filter(r => r.arbitraje !== 'ALTO')
+    .sort((a, b) => {
+      const scoreA = a.edge * ((a.exito_pct ?? 50) / 100)
+      const scoreB = b.edge * ((b.exito_pct ?? 50) / 100)
+      return scoreB - scoreA
+    })
+
+  const acciones: BetAction[] = []
+  let totalAsignado = 0
+
+  for (const rec of candidates) {
+    if (totalAsignado >= PRESUPUESTO) break
+
+    const cityData = cities.find(c => c.slug === rec.slug)
+    const modeloTemps = cityData ? Object.values(cityData.forecast.ensemble_raw) : []
+    const spread = modeloTemps.length > 0 ? Math.max(...modeloTemps) - Math.min(...modeloTemps) : 3
+
+    const exitoPct = rec.exito_pct ?? 50
+    const signal = getActionSignal(rec.edge, exitoPct, rec.consenso)
+    const riesgo = getRiskLevel(exitoPct, rec.consenso, spread)
+
+    // Kelly-inspired sizing: edge * accuracy / (100 / mkt_price)
+    const p = (rec.ia_pct ?? 50) / 100
+    const q = 1 - p
+    const odds = 1 / (rec.mkt_pct / 100)
+    const kellyFraction = Math.max(0, Math.min((p * odds - q) / odds, 0.10))
+    const rawMonto = kellyFraction * 0.25 * PRESUPUESTO // 25% Kelly
+
+    let monto = Math.max(MIN_POR_APUESTA, Math.min(MAX_POR_APUESTA, rawMonto))
+    monto = Math.min(monto, PRESUPUESTO - totalAsignado)
+    monto = Math.round(monto * 100) / 100
+
+    if (monto < MIN_POR_APUESTA) continue
+
+    const precioCompra = rec.mkt_pct / 100
+    const upside = monto * ((1 / precioCompra) - 1) // Ganancia neta si gana
+    const downside = monto // Pierde toda la apuesta si pierde
+    const probGanar = (rec.ia_pct ?? 50) / 100
+    const probPerder = 1 - probGanar
+    const gananciaEsperada = probGanar * upside
+    const perdidaEsperada = probPerder * downside
+    const ev = gananciaEsperada - perdidaEsperada
+
+    // Build reasoning
+    const razones: string[] = []
+    if (rec.edge > 10) razones.push(`Edge MUY fuerte (+${rec.edge.toFixed(1)}%)`)
+    else if (rec.edge > 6) razones.push(`Edge fuerte (+${rec.edge.toFixed(1)}%)`)
+    else razones.push(`Edge moderado (+${rec.edge.toFixed(1)}%)`)
+
+    if (exitoPct >= 70) razones.push(`模型精度 ${exitoPct}% (alta)`)
+    else if (exitoPct >= 55) razones.push(`模型精度 ${exitoPct}% (media)`)
+    else razones.push(`模型精度 ${exitoPct}% (baja)`)
+
+    if (rec.consenso === 'MUY FUERTE') razones.push('consenso muy fuerte entre modelos')
+    else if (rec.consenso === 'FUERTE') razones.push('consenso fuerte entre modelos')
+
+    if (rec.temp_corregida) {
+      const tempDiff = Math.abs(rec.temp_corregida - (typeof rec.contrato === 'string' ? parseFloat(rec.contrato) : 0))
+      if (rec.contrato.includes(`${Math.round(rec.temp_corregida)}`)) {
+        razones.push(`contrato alineado con pronóstico ${rec.temp_corregida.toFixed(1)}°C`)
+      }
+    }
+
+    const razon = razones.join(' · ')
+
+    acciones.push({
+      ciudad: rec.ciudad,
+      slug: rec.slug,
+      contrato: rec.contrato,
+      temp_pronosticada: rec.temp_corregida,
+      precio_compra: precioCompra,
+      montoinvertir: monto,
+      upside: Math.round(upside * 100) / 100,
+      downside: Math.round(downside * 100) / 100,
+      edge: rec.edge,
+      prob_ia: rec.ia_pct,
+      prob_mercado: rec.mkt_pct,
+      consenso: rec.consenso,
+      exito_pct: exitoPct,
+      signal,
+      razon,
+      riesgo,
+      ganancia_esperada: Math.round(gananciaEsperada * 100) / 100,
+      perdida_esperada: Math.round(perdidaEsperada * 100) / 100,
+      ev: Math.round(ev * 100) / 100,
+    })
+
+    totalAsignado += monto
+  }
+
+  totalAsignado = Math.round(totalAsignado * 100) / 100
+  const totalRestante = Math.round((PRESUPUESTO - totalAsignado) * 100) / 100
+
+  // Build scenarios
+  let totalGananciaBest = 0
+  let totalGananciaWorst = 0
+  let totalPerdidaBest = 0
+  let totalPerdidaWorst = 0
+
+  for (const a of acciones) {
+    totalGananciaBest += a.ganancia_esperada
+    totalPerdidaBest += a.perdida_esperada
+  }
+
+  // Case A: All bets win
+  const caseA_ganancia = acciones.reduce((s, a) => s + a.upside, 0)
+  // Case B: Expected (some win, some lose based on probabilities)
+  const caseB_ganancia = totalGananciaBest
+  // Case C: All bets lose
+  const caseC_perdida = totalAsignado
+
+  const resumenPlan = `Presupuesto: $${PRESUPUESTO} · ${acciones.length} apuesta(s) · $${totalAsignado} asignados · $${totalRestante} sin usar`
+
+  return {
+    presupuesto_total: PRESUPUESTO,
+    total_asignado: totalAsignado,
+    total_restante: totalRestante,
+    num_apuestas: acciones.length,
+    acciones,
+    resumen_plan: resumenPlan,
+    escenario_caso_a: `Si GANAS todas: +$${caseA_ganancia.toFixed(2)} de ganancia neta`,
+    escenario_caso_b: `Resultado ESPERADO: +$${caseB_ganancia.toFixed(2)} ganancia neta (promedio ponderado)`,
+    escenario_caso_c: `Si PIERDES todas: -$${caseC_perdida.toFixed(2)} (pierdes lo invertido)`,
+  }
 }
 
 export function computeExecutiveSummary(
@@ -187,6 +376,9 @@ export function computeExecutiveSummary(
     parts.push(`Ciudades con señal fuerte: ${fuertes.map(m => m.ciudad).join(', ')}.`)
   }
 
+  // Compute action plan with $10 daily budget
+  const actionPlan = computeActionPlan(recommendationsToday, citiesToday, 10)
+
   return {
     fecha: fechaActual,
     fecha_anterior: citiesYesterday?.[0]?.forecast?.temp_corregida !== undefined ? 'ayer' : null,
@@ -196,6 +388,7 @@ export function computeExecutiveSummary(
     mejor_recomendacion: bestRec,
     mejoras_por_ciudad: mejorasPorCiudad,
     top_opportunities: topOpportunities,
+    action_plan: actionPlan,
     highlights,
     resumen_texto: parts.join(' '),
   }
