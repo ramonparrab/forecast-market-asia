@@ -34,6 +34,8 @@ export interface WeatherModelsResult {
  * 
  * ECMWF ENS provides 51 perturbed members + 1 control run, giving a real
  * probability distribution (empirical CDF) instead of assumed parametric.
+ * 
+ * Includes retry logic for transient API failures.
  */
 export async function fetchWeatherModels(
   lat: number,
@@ -46,33 +48,51 @@ export async function fetchWeatherModels(
   const ensembleMembers: number[] = []
 
   const modelsParam = toTry.join(',')
-  const url = `${OPENMETEO_BASE}?latitude=${lat}&longitude=${lon}&daily=temperature_2m_max&temperature_unit=celsius&start_date=${fechaISO}&end_date=${fechaISO}&models=${modelsParam}`
+  const baseUrl = `${OPENMETEO_BASE}?latitude=${lat}&longitude=${lon}&daily=temperature_2m_max&temperature_unit=celsius&start_date=${fechaISO}&end_date=${fechaISO}&models=${modelsParam}`
 
-  try {
-    const resp = await fetch(url, { signal: AbortSignal.timeout(15000) })
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
-    const data = await resp.json()
+  // Retry logic: try up to 3 times with exponential backoff
+  let lastError: Error | null = null
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      const resp = await fetch(baseUrl, { signal: AbortSignal.timeout(20000) })
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+      const data = await resp.json()
 
-    const daily = data.daily || {}
+      const daily = data.daily || {}
 
-    for (const model of toTry) {
-      const key = `temperature_2m_max_${model}`
-      const temps = daily[key]
-      if (temps && Array.isArray(temps) && temps.length > 0 && temps[0] !== null) {
-        results[model] = temps[0]
-      }
-    }
-
-    for (const key of Object.keys(daily)) {
-      if (key.startsWith('temperature_2m_max_member') && key.includes('ecmwf_ens')) {
-        const vals = daily[key]
-        if (vals && Array.isArray(vals) && vals.length > 0 && vals[0] !== null) {
-          ensembleMembers.push(vals[0])
+      for (const model of toTry) {
+        const key = `temperature_2m_max_${model}`
+        const temps = daily[key]
+        if (temps && Array.isArray(temps) && temps.length > 0 && temps[0] !== null) {
+          results[model] = temps[0]
         }
       }
+
+      for (const key of Object.keys(daily)) {
+        if (key.startsWith('temperature_2m_max_member') && key.includes('ecmwf_ens')) {
+          const vals = daily[key]
+          if (vals && Array.isArray(vals) && vals.length > 0 && vals[0] !== null) {
+            ensembleMembers.push(vals[0])
+          }
+        }
+      }
+
+      // Success - if we got at least 1 model, return
+      if (Object.keys(results).length > 0) {
+        return { models: results, ensembleMembers }
+      }
+    } catch (e) {
+      lastError = e as Error
+      console.warn(`Open-Meteo attempt ${attempt}/3 failed for lat=${lat} lon=${lon}:`, (e as Error).message)
+      if (attempt < 3) {
+        await new Promise(resolve => setTimeout(resolve, 1000 * attempt)) // backoff: 1s, 2s
+      }
     }
-  } catch (e) {
-    console.warn(`Open-Meteo error for lat=${lat} lon=${lon}:`, (e as Error).message)
+  }
+
+  // All attempts failed - return whatever we got (might be empty)
+  if (Object.keys(results).length === 0) {
+    console.error(`Open-Meteo FAILED for lat=${lat} lon=${lon} after 3 attempts:`, lastError?.message)
   }
 
   return { models: results, ensembleMembers }
