@@ -271,9 +271,10 @@ export function computeExecutiveSummary(
   const accuracyGlobalAyer = metricsYesterday?.accuracy_pct ?? null
   const precisionGlobalDelta = accuracyGlobalAyer !== null ? accuracyGlobalHoy - accuracyGlobalAyer : null
 
-  // Find best recommendation by edge
-  const bestRec = recommendationsToday.length > 0
-    ? [...recommendationsToday].sort((a, b) => b.edge - a.edge)[0]
+  // Find best recommendation by edge (only accuracy >= 55%)
+  const eligibleRecs = recommendationsToday.filter(r => (r.exito_pct ?? 50) >= 55)
+  const bestRec = eligibleRecs.length > 0
+    ? [...eligibleRecs].sort((a, b) => b.edge - a.edge)[0]
     : null
 
   // Per-city improvements
