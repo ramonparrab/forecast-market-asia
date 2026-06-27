@@ -98,16 +98,12 @@ async function analyzeCity(
 
   // Use REAL accuracy if available, otherwise fallback to theoretical estimate
   let exitoPct: number
-  let exitoPct1c: number
-  let exitoPct2c: number
   let accuracySource: string
 
   if (realAccuracy && realAccuracy.totalRecords >= 5) {
-    // REAL ACCURACY: based on historical forecast vs actual
-    exitoPct = realAccuracy.accuracy_1c  // Primary: ±1°C
-    exitoPct1c = realAccuracy.accuracy_1c
-    exitoPct2c = realAccuracy.accuracy_2c
-    accuracySource = `Basado en ${realAccuracy.totalRecords} pronósticos reales (±1°C: ${realAccuracy.accuracy_1c}%, ±2°C: ${realAccuracy.accuracy_2c}%). Error promedio: ${realAccuracy.avgError}°C`
+    // REAL ACCURACY: based on historical forecast vs actual (±1°C)
+    exitoPct = realAccuracy.accuracy_1c
+    accuracySource = `Basado en ${realAccuracy.totalRecords} pronósticos reales (±1°C: ${realAccuracy.accuracy_1c}%). Error promedio: ${realAccuracy.avgError}°C`
   } else {
     // THEORETICAL ESTIMATE: when no historical data available
     exitoPct = 50
@@ -122,8 +118,6 @@ async function analyzeCity(
     if (nowcastResult.obsWeight > 0.3) exitoPct += 8
     if (nowcastResult.observedTemp !== null) exitoPct += 5
     exitoPct = Math.max(10, Math.min(95, exitoPct))
-    exitoPct1c = Math.max(10, exitoPct - 15)  // ±1°C is ~15% harder
-    exitoPct2c = Math.min(95, exitoPct + 10)  // ±2°C is ~10% easier
     accuracySource = 'Estimación teórica (sin datos históricos suficientes)'
   }
 
@@ -236,8 +230,6 @@ async function analyzeCity(
         hora_local: new Date().getUTCHours() + Math.round(city.lon / 15),
       },
       exito_pct: exitoPct,
-      exito_pct_1c: exitoPct1c,
-      exito_pct_2c: exitoPct2c,
       explicacion,
       liquidity_avg: cityLiquidity,
       volume_total: avgVolume,

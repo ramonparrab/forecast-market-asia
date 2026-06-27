@@ -305,13 +305,8 @@ export default function CityCard({ data }: CityCardProps) {
         'bg-red-500/5 border border-red-500/10'
       }`}>
         <div className="flex items-center justify-between mb-1">
-          <span className="text-gray-500">Precisión estimada</span>
-          <div className="flex items-center gap-3">
-            <span className="text-[10px] text-gray-500">±1°C:</span>
-            <ExitoPctBadge pct={data.exito_pct_1c ?? data.exito_pct} isReal={data.totalRecords !== undefined && data.totalRecords >= 5} />
-            <span className="text-[10px] text-gray-500">±2°C:</span>
-            <ExitoPctBadge pct={data.exito_pct_2c ?? data.exito_pct} isReal={data.totalRecords !== undefined && data.totalRecords >= 5} />
-          </div>
+          <span className="text-gray-500">Precisión ±1°C</span>
+          <ExitoPctBadge pct={data.exito_pct} isReal={data.totalRecords !== undefined && data.totalRecords >= 5} />
         </div>
         <p className="text-gray-400 leading-relaxed">{data.explicacion}</p>
       </div>
