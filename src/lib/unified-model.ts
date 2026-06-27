@@ -107,9 +107,10 @@ function computeActionPlan(
   const MIN_POR_APUESTA = 1.0
   const MIN_EDGE = 4.0
 
-  // Filter actionable candidates
+  // Filter actionable candidates (min accuracy 55%)
   const candidates = recommendations
     .filter(r => r.edge >= MIN_EDGE)
+    .filter(r => (r.exito_pct ?? 50) >= 55)
     .filter(r => r.consenso === 'MUY FUERTE' || r.consenso === 'FUERTE' || r.consenso === 'ACEPTABLE')
     .filter(r => r.arbitraje !== 'ALTO')
     .sort((a, b) => {
