@@ -5,36 +5,200 @@ interface CityCardProps {
 }
 
 function ConsensoBadge({ consenso }: { consenso: string }) {
-  if (consenso === 'MUY FUERTE') return <span className="badge-green">{consenso}</span>
-  if (consenso === 'FUERTE') return <span className="badge-blue">{consenso}</span>
-  if (consenso === 'ACEPTABLE') return <span className="badge-yellow">{consenso}</span>
-  return <span className="badge-red">{consenso}</span>
+  if (consenso === 'MUY FUERTE') return (
+    <span className="badge-green relative group cursor-help">
+      {consenso}
+      <div className="absolute z-50 bottom-full left-1/2 -translate-x-1/2 mb-2 w-64 p-2 text-xs text-white bg-gray-900 border border-gray-700 rounded-lg shadow-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+        <p className="font-bold mb-1">Consenso MUY FUERTE</p>
+        <p className="text-gray-300">Todos los modelos (6/6) coinciden en el mismo rango de temperatura. Alta confianza en el pronóstico.</p>
+      </div>
+    </span>
+  )
+  if (consenso === 'FUERTE') return (
+    <span className="badge-blue relative group cursor-help">
+      {consenso}
+      <div className="absolute z-50 bottom-full left-1/2 -translate-x-1/2 mb-2 w-64 p-2 text-xs text-white bg-gray-900 border border-gray-700 rounded-lg shadow-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+        <p className="font-bold mb-1">Consenso FUERTE</p>
+        <p className="text-gray-300">5 de 6 modelos coinciden. Buena confianza, pero hay 1 modelo diferente.</p>
+      </div>
+    </span>
+  )
+  if (consenso === 'ACEPTABLE') return (
+    <span className="badge-yellow relative group cursor-help">
+      {consenso}
+      <div className="absolute z-50 bottom-full left-1/2 -translate-x-1/2 mb-2 w-64 p-2 text-xs text-white bg-gray-900 border border-gray-700 rounded-lg shadow-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+        <p className="font-bold mb-1">Consenso ACEPTABLE</p>
+        <p className="text-gray-300">4 de 6 modelos coinciden. Confianza moderada, considerar其他 opciones.</p>
+      </div>
+    </span>
+  )
+  return (
+    <span className="badge-red relative group cursor-help">
+      {consenso}
+      <div className="absolute z-50 bottom-full left-1/2 -translate-x-1/2 mb-2 w-64 p-2 text-xs text-white bg-gray-900 border border-gray-700 rounded-lg shadow-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+        <p className="font-bold mb-1">Consenso DÉBIL</p>
+        <p className="text-gray-300">3 o menos modelos coinciden. Alta incertidumbre, no recomendado apostar.</p>
+      </div>
+    </span>
+  )
 }
 
 function ArbBadge({ nivel }: { nivel: string }) {
-  if (nivel.includes('ALTO')) return <span className="badge-red">{nivel}</span>
-  if (nivel.includes('MEDIO')) return <span className="badge-yellow">{nivel}</span>
-  return <span className="badge-green">{nivel}</span>
+  if (nivel.includes('ALTO')) return (
+    <span className="badge-red relative group cursor-help">
+      {nivel}
+      <div className="absolute z-50 bottom-full left-1/2 -translate-x-1/2 mb-2 w-64 p-2 text-xs text-white bg-gray-900 border border-gray-700 rounded-lg shadow-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+        <p className="font-bold mb-1">Arbitraje ALTO</p>
+        <p className="text-gray-300">Las probabilidades suman más de 100%. El mercado está mal定价, posibilidad de ganar sin riesgo.</p>
+      </div>
+    </span>
+  )
+  if (nivel.includes('MEDIO')) return (
+    <span className="badge-yellow relative group cursor-help">
+      {nivel}
+      <div className="absolute z-50 bottom-full left-1/2 -translate-x-1/2 mb-2 w-64 p-2 text-xs text-white bg-gray-900 border border-gray-700 rounded-lg shadow-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+        <p className="font-bold mb-1">Arbitraje MEDIO</p>
+        <p className="text-gray-300">Pequeña discrepancia entre precios. Posible oportunidad pero con riesgo.</p>
+      </div>
+    </span>
+  )
+  return (
+    <span className="badge-green relative group cursor-help">
+      {nivel}
+      <div className="absolute z-50 bottom-full left-1/2 -translate-x-1/2 mb-2 w-64 p-2 text-xs text-white bg-gray-900 border border-gray-700 rounded-lg shadow-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+        <p className="font-bold mb-1">Sin Arbitraje</p>
+        <p className="text-gray-300">Precios coherentes entre contratos. Mercado bien定价.</p>
+      </div>
+    </span>
+  )
 }
 
 function LiquidityBadge({ liquidity }: { liquidity?: 'ALTA' | 'MEDIA' | 'BAJA' }) {
-  if (!liquidity || liquidity === 'BAJA') return <span className="badge-red">🔴 BAJA</span>
-  if (liquidity === 'MEDIA') return <span className="badge-yellow">🟡 MEDIA</span>
-  return <span className="badge-green">🟢 ALTA</span>
+  if (!liquidity || liquidity === 'BAJA') return (
+    <span className="badge-red relative group cursor-help">
+      🔴 BAJA
+      <div className="absolute z-50 bottom-full left-1/2 -translate-x-1/2 mb-2 w-64 p-2 text-xs text-white bg-gray-900 border border-gray-700 rounded-lg shadow-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+        <p className="font-bold mb-1">Liquidez BAJA</p>
+        <p className="text-gray-300">Poca gente comprando/vendiendo. Spread alto ({'>'}$0.05). Riesgo de no poder vender o precio poco confiable.</p>
+      </div>
+    </span>
+  )
+  if (liquidity === 'MEDIA') return (
+    <span className="badge-yellow relative group cursor-help">
+      🟡 MEDIA
+      <div className="absolute z-50 bottom-full left-1/2 -translate-x-1/2 mb-2 w-64 p-2 text-xs text-white bg-gray-900 border border-gray-700 rounded-lg shadow-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+        <p className="font-bold mb-1">Liquidez MEDIA</p>
+        <p className="text-gray-300">Volumen moderado. Spread aceptable ({'>'}$0.03). Se puede apostar pero con precaución.</p>
+      </div>
+    </span>
+  )
+  return (
+    <span className="badge-green relative group cursor-help">
+      🟢 ALTA
+      <div className="absolute z-50 bottom-full left-1/2 -translate-x-1/2 mb-2 w-64 p-2 text-xs text-white bg-gray-900 border border-gray-700 rounded-lg shadow-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+        <p className="font-bold mb-1">Liquidez ALTA</p>
+        <p className="text-gray-300">Mercado líquido. Volumen {'>'}$5,000/día, spread {'<'}.03. Precio confiable, fácil entrada/salida.</p>
+      </div>
+    </span>
+  )
 }
 
 function EvIndicator({ ev }: { ev?: number }) {
   if (ev === undefined || ev === null) return <span className="text-gray-500">N/A</span>
-  if (ev > 0.05) return <span className="text-emerald-400 font-bold">+${ev.toFixed(2)} ✅</span>
-  if (ev > 0) return <span className="text-amber-400">+${ev.toFixed(2)} ⚠️</span>
-  return <span className="text-red-400 font-bold">${ev.toFixed(2)} ❌</span>
+  if (ev > 0.05) return (
+    <span className="text-emerald-400 font-bold relative group cursor-help">
+      +${ev.toFixed(2)} ✅
+      <div className="absolute z-50 bottom-full left-1/2 -translate-x-1/2 mb-2 w-64 p-2 text-xs text-white bg-gray-900 border border-gray-700 rounded-lg shadow-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+        <p className="font-bold mb-1">EV Positivo: +${ev.toFixed(2)}</p>
+        <p className="text-gray-300">Cada $1 apostado, ganás ${ev.toFixed(2)} en promedio. Apuesta recomendada.</p>
+      </div>
+    </span>
+  )
+  if (ev > 0) return (
+    <span className="text-amber-400 relative group cursor-help">
+      +${ev.toFixed(2)} ⚠️
+      <div className="absolute z-50 bottom-full left-1/2 -translate-x-1/2 mb-2 w-64 p-2 text-xs text-white bg-gray-900 border border-gray-700 rounded-lg shadow-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+        <p className="font-bold mb-1">EV Bajo: +${ev.toFixed(2)}</p>
+        <p className="text-gray-300">Ganancia mínima. Considerar si vale la pena el riesgo.</p>
+      </div>
+    </span>
+  )
+  return (
+    <span className="text-red-400 font-bold relative group cursor-help">
+      ${ev.toFixed(2)} ❌
+      <div className="absolute z-50 bottom-full left-1/2 -translate-x-1/2 mb-2 w-64 p-2 text-xs text-white bg-gray-900 border border-gray-700 rounded-lg shadow-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+        <p className="font-bold mb-1">EV Negativo: ${ev.toFixed(2)}</p>
+        <p className="text-gray-300">Perdés ${Math.abs(ev).toFixed(2)} por cada $1 apostado a largo plazo. NO apostar.</p>
+      </div>
+    </span>
+  )
 }
 
 function ExitoPctBadge({ pct }: { pct: number }) {
-  if (pct >= 80) return <span className="text-emerald-400 font-bold">{pct}%</span>
-  if (pct >= 65) return <span className="text-green-400 font-bold">{pct}%</span>
-  if (pct >= 50) return <span className="text-amber-400 font-bold">{pct}%</span>
-  return <span className="text-red-400 font-bold">{pct}%</span>
+  if (pct >= 80) return (
+    <span className="text-emerald-400 font-bold relative group cursor-help">
+      {pct}%
+      <div className="absolute z-50 bottom-full left-1/2 -translate-x-1/2 mb-2 w-72 p-2 text-xs text-white bg-gray-900 border border-gray-700 rounded-lg shadow-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+        <p className="font-bold mb-1">Precisión Estimada: {pct}%</p>
+        <p className="text-gray-300 mb-2">Estimación basada en:</p>
+        <ul className="text-gray-400 text-[10px] space-y-1">
+          <li>• Cantidad de modelos meteorológicos</li>
+          <li>• Dispersión entre pronósticos</li>
+          <li>• Nivel de consenso</li>
+          <li>• Actividad de nowcasting (METAR)</li>
+        </ul>
+        <p className="text-amber-300 text-[10px] mt-2">⚠️ NO es validado contra aciertos reales</p>
+      </div>
+    </span>
+  )
+  if (pct >= 65) return (
+    <span className="text-green-400 font-bold relative group cursor-help">
+      {pct}%
+      <div className="absolute z-50 bottom-full left-1/2 -translate-x-1/2 mb-2 w-72 p-2 text-xs text-white bg-gray-900 border border-gray-700 rounded-lg shadow-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+        <p className="font-bold mb-1">Precisión Estimada: {pct}%</p>
+        <p className="text-gray-300 mb-2">Estimación basada en:</p>
+        <ul className="text-gray-400 text-[10px] space-y-1">
+          <li>• Cantidad de modelos meteorológicos</li>
+          <li>• Dispersión entre pronósticos</li>
+          <li>• Nivel de consenso</li>
+          <li>• Actividad de nowcasting (METAR)</li>
+        </ul>
+        <p className="text-amber-300 text-[10px] mt-2">⚠️ NO es validado contra aciertos reales</p>
+      </div>
+    </span>
+  )
+  if (pct >= 50) return (
+    <span className="text-amber-400 font-bold relative group cursor-help">
+      {pct}%
+      <div className="absolute z-50 bottom-full left-1/2 -translate-x-1/2 mb-2 w-72 p-2 text-xs text-white bg-gray-900 border border-gray-700 rounded-lg shadow-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+        <p className="font-bold mb-1">Precisión Estimada: {pct}%</p>
+        <p className="text-gray-300 mb-2">Estimación basada en:</p>
+        <ul className="text-gray-400 text-[10px] space-y-1">
+          <li>• Cantidad de modelos meteorológicos</li>
+          <li>• Dispersión entre pronósticos</li>
+          <li>• Nivel de consenso</li>
+          <li>• Actividad de nowcasting (METAR)</li>
+        </ul>
+        <p className="text-amber-300 text-[10px] mt-2">⚠️ NO es validado contra aciertos reales</p>
+      </div>
+    </span>
+  )
+  return (
+    <span className="text-red-400 font-bold relative group cursor-help">
+      {pct}%
+      <div className="absolute z-50 bottom-full left-1/2 -translate-x-1/2 mb-2 w-72 p-2 text-xs text-white bg-gray-900 border border-gray-700 rounded-lg shadow-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+        <p className="font-bold mb-1">Precisión Estimada: {pct}%</p>
+        <p className="text-gray-300 mb-2">Estimación basada en:</p>
+        <ul className="text-gray-400 text-[10px] space-y-1">
+          <li>• Cantidad de modelos meteorológicos</li>
+          <li>• Dispersión entre pronósticos</li>
+          <li>• Nivel de consenso</li>
+          <li>• Actividad de nowcasting (METAR)</li>
+        </ul>
+        <p className="text-amber-300 text-[10px] mt-2">⚠️ NO es validado contra aciertos reales</p>
+      </div>
+    </span>
+  )
 }
 
 function NowcastIndicator({ data }: { data: CityAnalysis }) {
@@ -42,10 +206,16 @@ function NowcastIndicator({ data }: { data: CityAnalysis }) {
   if (!n || !n.activo) return null
   const color = n.peso_observacion > 0.5 ? 'text-emerald-400' : 'text-blue-400'
   return (
-    <span className={`inline-flex items-center gap-1 text-xs ${color}`}>
+    <span className={`inline-flex items-center gap-1 text-xs ${color} relative group cursor-help`}>
       <span>📡</span>
       Nowcast {(n.peso_observacion * 100).toFixed(0)}%
       {n.temp_observada !== null && <span>({n.temp_observada.toFixed(1)}°C obs)</span>}
+      <div className="absolute z-50 bottom-full left-1/2 -translate-x-1/2 mb-2 w-72 p-2 text-xs text-white bg-gray-900 border border-gray-700 rounded-lg shadow-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+        <p className="font-bold mb-1">Nowcasting Activo</p>
+        <p className="text-gray-300 mb-2">Usa observaciones METAR del aeropuerto {n.estacion} en tiempo real.</p>
+        <p className="text-gray-400 text-[10px] mb-2">El peso de la observación sube de 0% a 80% durante el día, capturando la temperatura real.</p>
+        <p className="text-blue-300 text-[10px]">Temperatura observada: {n.temp_observada?.toFixed(1)}°C</p>
+      </div>
     </span>
   )
 }
