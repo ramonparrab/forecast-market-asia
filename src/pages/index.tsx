@@ -197,12 +197,12 @@ function ImprovementLegend() {
           <p className="text-gray-400 text-xs">51 miembros del ensemble europeo reemplazan la distribución paramétrica. La CDF empírica es SIEMPRE más precisa que asumir Student-t. Disponible cuando hay ≥20 miembros.</p>
         </div>
         <div className="rounded-lg bg-slate-900/50 p-3 border border-purple-500/20">
-          <p className="font-semibold text-purple-400 mb-1">📈 Isotonic PAVA</p>
-          <p className="text-gray-400 text-xs">Calibración no paramétrica vía Pool Adjacent Violators Algorithm. No asume forma sigmoide; aprende la curva real de calibración desde los datos. ECE &lt;3% = excelente.</p>
+          <p className="font-semibold text-purple-400 mb-1">📈 Isotonic PAVA (ACTIVO)</p>
+          <p className="text-gray-400 text-xs">Calibración no paramétrica vía Pool Adjacent Violators Algorithm. NO asume forma sigmoide; aprende la curva real de calibración desde los datos. ECE &lt;3% = excelente. ACTIVO en el pipeline.</p>
         </div>
         <div className="rounded-lg bg-slate-900/50 p-3 border border-amber-500/20">
           <p className="font-semibold text-amber-400 mb-1">⚡ EWMA + Z-score Filter</p>
-          <p className="text-gray-400 text-xs">Pesos dinámicos por fuente con decaimiento exponencial (EWMA) + exclusión de modelos outlier con |z| &gt; 3σ. GFS ya no puede arruinar el ensemble con valores extremos.</p>
+          <p className="text-gray-400 text-xs">Pesos dinámicos por modelo con decaimiento exponencial (EWMA, decay=0.15) + exclusión de modelos outlier con |z| &gt; 3σ. Modelos con errores recientes pesan más que errores antiguos.</p>
         </div>
       </div>
     </details>
@@ -599,8 +599,8 @@ export default function Home({ initialAnalysis, initialMetrics, initialAvailable
                 <h3 className="font-semibold text-purple-400 text-sm mb-2">3. Calibración</h3>
                 <ul className="text-xs text-gray-400 space-y-1">
                   <li>• Empirical CDF: ECMWF ENS 51 miembros</li>
-                  <li>• Isotonic PAVA: calibración no paramétrica</li>
-                  <li>• Platt Scaling: calibración sigmoide (fallback)</li>
+                  <li>• Isotonic PAVA: calibración activa (monotónica)</li>
+                  <li>• Platt Scaling: calibración sigmoide (deshabilitada)</li>
                 </ul>
               </div>
 
@@ -658,15 +658,15 @@ export default function Home({ initialAnalysis, initialMetrics, initialAvailable
 
             {/* PAVA */}
             <div className="rounded-xl bg-purple-500/5 border border-purple-500/20 p-4 mb-4">
-              <h3 className="font-semibold text-purple-400 text-sm mb-2">🟣 Isotonic PAVA</h3>
-              <p className="text-xs text-gray-400 mb-2">Pool Adjacent Violators Algorithm: calibración no paramétrica que aprende la forma exacta de la curva de calibración. A diferencia de Platt Scaling (que asume una sigmoide), PAVA encuentra la función monótona óptima directamente de los datos.</p>
+              <h3 className="font-semibold text-purple-400 text-sm mb-2">🟣 Isotonic PAVA (ACTIVO)</h3>
+              <p className="text-xs text-gray-400 mb-2">Pool Adjacent Violators Algorithm: calibración no paramétrica que aprende la forma exacta de la curva de calibración. A diferencia de Platt Scaling (sigmoide fija), PAVA encuentra la función monótona óptima directamente de los datos. ACTIVO en el pipeline.</p>
               <div className="text-xs text-gray-500">ECE (Expected Calibration Error) mide qué tan lejos está la línea de calibración de la diagonal perfecta. &lt;3% = excelente.</div>
             </div>
 
             {/* EWMA + Z-score */}
             <div className="rounded-xl bg-amber-500/5 border border-amber-500/20 p-4 mb-4">
               <h3 className="font-semibold text-amber-400 text-sm mb-2">🟠 EWMA + Z-score Filter</h3>
-              <p className="text-xs text-gray-400 mb-2">EWMA (Exponentially Weighted Moving Average) da más peso a errores recientes: decay=0.15. Z-score filter excluye modelos con |z| &gt; 3σ antes del promedio, eliminando outliers como GFS cuando produce valores extremos.</p>
+              <p className="text-xs text-gray-400 mb-2">EWMA (Exponentially Weighted Moving Average) aplica pesos dinámicos por modelo con decaimiento exponencial (decay=0.15). Z-score filter excluye modelos con |z| &gt; 3σ antes del promedio, eliminando outliers como GFS cuando produce valores extremos.</p>
             </div>
 
             {/* Walk-forward */}

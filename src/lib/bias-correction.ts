@@ -58,24 +58,33 @@ export function computeDynamicBias(
 
 /**
  * Compute adaptive model weights based on recent performance.
- * Models with lower MAE get higher weight.
+ * Uses EWMA (Exponentially Weighted Moving Average) to weight recent errors more heavily.
+ * Models with lower EWMA-weighted MAE get higher weight.
  */
 export function computeAdaptiveWeights(
   modelosDisponibles: string[],
   recentModelErrors: Record<string, number[]>
 ): Record<string, number> {
   if (!recentModelErrors || Object.keys(recentModelErrors).length === 0) {
-    // Default weights
     const w: Record<string, number> = {}
     modelosDisponibles.forEach(m => { w[m] = 1 / modelosDisponibles.length })
     return w
   }
 
-  // Compute MAE per model
+  // EWMA decay factor: higher = more weight on recent errors
+  const EWMA_ALPHA = 0.15
+
+  // Compute EWMA-weighted MAE per model
   const maes: Record<string, number> = {}
   for (const [model, errors] of Object.entries(recentModelErrors)) {
     if (errors.length > 0) {
-      maes[model] = errors.reduce((s, e) => s + Math.abs(e), 0) / errors.length
+      const absErrors = errors.map(e => Math.abs(e))
+      // EWMA: recent errors decay exponentially
+      let ewma = absErrors[0]
+      for (let i = 1; i < absErrors.length; i++) {
+        ewma = EWMA_ALPHA * absErrors[i] + (1 - EWMA_ALPHA) * ewma
+      }
+      maes[model] = ewma
     }
   }
 
@@ -91,7 +100,7 @@ export function computeAdaptiveWeights(
     if (maes[model] !== undefined) {
       weights[model] = 1 / (maes[model] + 0.1) // avoid division by zero
     } else {
-      weights[model] = 0.5 // unknown model gets low weight
+      weights[model] = 0.5
     }
   }
 

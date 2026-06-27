@@ -167,6 +167,28 @@ export function applyIsotonicAdjustment(
 }
 
 /**
+ * Apply isotonic PAVA to a batch of probabilities.
+ * Enforces monotonicity: if raw P(A) > raw P(B), then calibrated P(A) >= calibrated P(B).
+ * This is non-parametric and does NOT assume a sigmoid shape like Platt scaling.
+ */
+export function isotonicCalibrateBatch(probs: number[]): number[] {
+  if (probs.length === 0) return []
+
+  const indexed = probs.map((p, i) => ({ p: Math.max(0.001, Math.min(0.999, p)), i }))
+  const sorted = [...indexed].sort((a, b) => a.p - b.p)
+
+  const vals = sorted.map(s => s.p)
+  const { fitted } = isotonicRegressionPAVA(vals)
+
+  const result = new Array(probs.length)
+  for (let k = 0; k < sorted.length; k++) {
+    result[sorted[k].i] = Math.round(fitted[k] * 10000) / 10000
+  }
+
+  return result
+}
+
+/**
  * Platt scaling calibration using historical prediction errors.
  */
 export function calibrateProbabilities(

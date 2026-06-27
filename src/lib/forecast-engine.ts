@@ -4,7 +4,7 @@ import { fetchWeatherModels } from './openmeteo'
 import { computeEnsemble } from './ensemble'
 import { monteCarloProbability, normalizeProbabilidades } from './montecarlo'
 import { fetchPolymarketPrices, parseContract, calculateLiquidity, calculateEV } from './polymarket'
-import { calibrateProbabilities } from './calibration'
+import { isotonicCalibrateBatch } from './calibration'
 import { calculateAllocation } from './kelly'
 import { getRecentErrors, getRecentModelErrors, computeGlobalMetrics, getAllCitiesAccuracy } from './supabase'
 import { nowcastTemperature } from './nowcaster'
@@ -168,9 +168,9 @@ async function analyzeCity(
     }
   }
 
-  // 6. Normalize + calibrate
+  // 6. Normalize + isotonic PAVA calibration (no sigmoid assumption)
   const normalized = normalizeProbabilidades(contracts.map(c => c.prob_ia_raw!))
-  const calibrated = calibrateProbabilities(normalized, 1.0, 0.0)
+  const calibrated = isotonicCalibrateBatch(normalized)
   for (let i = 0; i < contracts.length; i++) {
     contracts[i].prob_ia_norm = calibrated[i]
     // Calculate liquidity for each contract
