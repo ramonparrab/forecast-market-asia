@@ -630,6 +630,8 @@ export async function getCityMetrics(slug: string): Promise<{
   const half = Math.floor(deduped.length / 2)
   const recent = deduped.slice(0, half)
   const older = deduped.slice(half)
+  const recentMae = recent.reduce((s: number, r: any) => s + Math.abs(r.error!), 0) / recent.length
+  const olderMae = older.reduce((s: number, r: any) => s + Math.abs(r.error!), 0) / older.length
   const mejoraMaePct = olderMae > 0 ? Math.round((olderMae - recentMae) / olderMae * 100) : 0
   const impactoPct = Math.round(Math.min(Math.max((2 - mae) / 2 * 100, -20), 30))
   const improvement = {
