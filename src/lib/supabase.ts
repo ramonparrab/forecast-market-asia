@@ -293,7 +293,7 @@ export async function getAllCalibrationPairs(): Promise<{ slug: string; predicti
   }
 
   const pairs: { slug: string; prediction: number; outcome: number }[] = []
-  for (const r of seen.values()) {
+  for (const r of Array.from(seen.values())) {
     const absErr = Math.abs(r.error)
     // Confidence proxy: inverse of error, clamped to [0.05, 0.95]
     const prediction = Math.max(0.05, Math.min(0.95, 1 - absErr / 5))
