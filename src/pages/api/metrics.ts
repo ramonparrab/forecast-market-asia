@@ -1,5 +1,5 @@
 import { NextApiRequest, NextApiResponse } from 'next'
-import { computeGlobalMetrics, getAccumulatedBacktest } from '@/lib/supabase'
+import { computeGlobalMetrics, runBacktestFromHistory } from '@/lib/supabase'
 import { AccuracyMetrics } from '@/types'
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
@@ -10,7 +10,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   try {
     const [liveMetrics, backtestSummary] = await Promise.all([
       computeGlobalMetrics(),
-      getAccumulatedBacktest(90).catch(() => null),
+      runBacktestFromHistory(90).catch(() => null),
     ])
 
     // Build result from live metrics, or create a skeleton if none exist
