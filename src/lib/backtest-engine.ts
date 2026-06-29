@@ -201,6 +201,7 @@ export async function runBacktest(days: number = 90, offsetDays: number = 0): Pr
     const mae = Math.round(absErrors.reduce((s, v) => s + v, 0) / errors.length * 100) / 100
     const rmse = Math.round(Math.sqrt(errors.reduce((s, v) => s + v * v, 0) / errors.length) * 100) / 100
     const bias = Math.round(errors.reduce((s, v) => s + v, 0) / errors.length * 100) / 100
+    const within2 = results.filter(r => Math.abs(r.error) <= 2).length
     const within1 = results.filter(r => Math.abs(r.error) <= 1).length
     const maxError = Math.round(Math.max(...absErrors) * 100) / 100
 
@@ -211,7 +212,7 @@ export async function runBacktest(days: number = 90, offsetDays: number = 0): Pr
       mae,
       rmse,
       bias,
-      accuracy_within_2c: Math.round(within1 / results.length * 10000) / 100,
+      accuracy_within_2c: Math.round(within2 / results.length * 10000) / 100,
       accuracy_within_1c: Math.round(within1 / results.length * 10000) / 100,
       max_error: maxError,
     }
@@ -223,6 +224,7 @@ export async function runBacktest(days: number = 90, offsetDays: number = 0): Pr
   const overallMae = Math.round(allAbsErrors.reduce((s, v) => s + v, 0) / allErrors.length * 100) / 100
   const overallRmse = Math.round(Math.sqrt(allErrors.reduce((s, v) => s + v * v, 0) / allErrors.length) * 100) / 100
   const overallBias = Math.round(allErrors.reduce((s, v) => s + v, 0) / allErrors.length * 100) / 100
+  const within2 = allResults.filter(r => Math.abs(r.error) <= 2).length
   const within1 = allResults.filter(r => Math.abs(r.error) <= 1).length
 
   // Best/worst cities by MAE
@@ -237,7 +239,7 @@ export async function runBacktest(days: number = 90, offsetDays: number = 0): Pr
     overall_mae: overallMae,
     overall_rmse: overallRmse,
     overall_bias: overallBias,
-    overall_accuracy_2c: Math.round(within1 / allResults.length * 10000) / 100,
+    overall_accuracy_2c: Math.round(within2 / allResults.length * 10000) / 100,
     overall_accuracy_1c: Math.round(within1 / allResults.length * 10000) / 100,
     por_ciudad: cityMetrics,
     mejores_ciudades: mejoresCiudades,

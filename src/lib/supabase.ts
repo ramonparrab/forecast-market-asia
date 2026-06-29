@@ -451,6 +451,54 @@ export async function getAccumulatedBacktest(limitDays = 180): Promise<BacktestS
   return computeSummaryFromResults(deduped, limitDays)
 }
 
+/**
+ * runBacktestFromHistory — reads ALL records from forecast_history with temp_real,
+ * deduplicates, and computes backtest metrics. Grows automatically as new days are added.
+ */
+export async function runBacktestFromHistory(days: number = 180): Promise<BacktestSummary | null> {
+  const client = getClient()
+  if (!client) return null
+
+  const since = days > 0 ? new Date(Date.now() - days * 86400000).toISOString() : '1970-01-01'
+
+  const { data, error } = await client
+    .from('forecast_history' as any)
+    .select('id, fecha_ejecucion, fecha_objetivo, ciudad, slug, temp_pronosticada, temp_corregida, temp_real, error, modelos_usados, consenso')
+    .not('temp_real', 'is', null)
+    .not('error', 'is', null)
+    .gte('fecha_ejecucion', since)
+    .order('id', { ascending: false } as any)
+
+  if (error || !data) return null
+
+  const seen = new Map<string, any>()
+  for (const r of (data as any[])) {
+    const key = `${r.slug}|${r.fecha_objetivo}`
+    if (!seen.has(key) || r.id > seen.get(key).id) {
+      seen.set(key, r)
+    }
+  }
+
+  const results: BacktestDayResult[] = Array.from(seen.values()).map(r => ({
+    fecha: r.fecha_objetivo,
+    ciudad: r.ciudad,
+    slug: r.slug,
+    temp_pronosticada: r.temp_pronosticada,
+    temp_corregida: r.temp_corregida,
+    temp_real: r.temp_real,
+    error: r.error,
+    modelos_usados: r.modelos_usados ?? 0,
+    consenso: r.consenso ?? 'N/A',
+    sesgo_aplicado: r.temp_corregida - r.temp_pronosticada,
+  }))
+
+  if (results.length < 3) return null
+
+  // Compute actual days covered (unique fechas)
+  const uniqueDates = new Set(results.map(r => r.fecha))
+  return computeSummaryFromResults(results, uniqueDates.size)
+}
+
 function computeSummaryFromResults(allResults: BacktestDayResult[], days: number): BacktestSummary {
   const byCity: Record<string, BacktestDayResult[]> = {}
   for (const r of allResults) {
