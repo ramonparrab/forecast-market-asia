@@ -140,7 +140,6 @@ export interface GlobalMetrics {
     overall_mae: number
     overall_rmse: number
     overall_bias: number
-    accuracy_2c: number
     accuracy_1c: number
     total_dias: number
     por_ciudad: AccuracyMetrics[]

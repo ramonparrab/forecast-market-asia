@@ -257,8 +257,8 @@ function CityBacktestCard({ city }: { city: BacktestCityMetrics }) {
         <div><span className="text-gray-500">RMSE:</span> <span className="text-gray-300">{city.rmse}°C</span></div>
         <div><span className="text-gray-500">Bias:</span> <span className="text-gray-300">{city.bias > 0 ? '+' : ''}{city.bias}°</span></div>
         <div><span className="text-gray-500">±1°C:</span> <span className={accuracyColor}>{city.accuracy_within_1c}%</span></div>
-        <div className="col-span-2"><span className="text-gray-500">Max error:</span> <span className="text-red-400">{city.max_error}°C</span></div>
-        <div className="col-span-2"><span className="text-gray-500">Muestras:</span> <span className="text-gray-400">{city.muestras} días</span></div>
+        <div><span className="text-gray-500">Max error:</span> <span className="text-red-400">{city.max_error}°C</span></div>
+        <div><span className="text-gray-500">Muestras:</span> <span className="text-gray-400">{city.muestras} días</span></div>
       </div>
     </div>
   )
