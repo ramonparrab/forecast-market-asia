@@ -324,17 +324,30 @@ export async function getRecordsWithoutActuals(
   const client = getClient()
   if (!client) return []
 
+  // Fetch enough raw records to deduplicate properly
+  const fetchLimit = Math.max(limit * 5, 200)
   const { data, error } = await client
     .from('forecast_history' as any)
     .select('id, slug, ciudad, fecha_objetivo')
     .is('temp_real', null)
     .not('fecha_objetivo', 'gte', new Date().toISOString().slice(0, 10))
     .order('fecha_objetivo', { ascending: false } as any)
-    .limit(limit)
+    .limit(fetchLimit)
 
   if (error || !data) return []
 
-  return (data as any[]).map((r: any) => {
+  // Deduplicate: keep only 1 record per (slug, fecha_objetivo) - the latest
+  const seen = new Set<string>()
+  const deduped: any[] = []
+  for (const r of (data as any[])) {
+    const key = `${r.slug}|${r.fecha_objetivo}`
+    if (!seen.has(key)) {
+      seen.add(key)
+      deduped.push(r)
+    }
+  }
+
+  return deduped.slice(0, limit).map((r: any) => {
     const city = CIUDADES_ASIA.find(c => c.slug === r.slug)
     return {
       id: r.id,
@@ -372,7 +385,16 @@ export async function getForecastVsActual(
 
   const { data, error } = await q
   if (error || !data) return []
-  return (data as any) as any[]
+
+  // Deduplicate: keep 1 record per (slug, fecha_objetivo) — latest fecha_ejecucion
+  const byKey: Record<string, any> = {}
+  for (const r of (data as any[])) {
+    const key = `${r.slug}|${r.fecha_objetivo}`
+    if (!byKey[key]) {
+      byKey[key] = r
+    }
+  }
+  return Object.values(byKey) as any[]
 }
 
 /**
