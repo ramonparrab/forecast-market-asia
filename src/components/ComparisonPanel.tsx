@@ -67,7 +67,7 @@ export default function ComparisonPanel() {
               <div>
                 <h3 className="font-semibold text-white">{ciudad?.nombre || slug}</h3>
                 <p className="text-[10px] text-gray-500">
-                  Error medio: <span className={avgError <= 1.5 ? 'text-emerald-400' : 'text-amber-400'}>{avgError.toFixed(2)}°C</span>
+                  Error medio: <span className={avgError <= 1.5 ? 'text-emerald-400' : 'text-amber-400'}>{avgError.toFixed(2)}{'\u00B0'}C</span>
                 </p>
               </div>
               <span className={`text-xs px-2 py-0.5 rounded-full ${avgError <= 1.5 ? 'bg-emerald-500/20 text-emerald-400' : 'bg-amber-500/20 text-amber-400'}`}>

@@ -250,24 +250,24 @@ export default function ForecastVsActualChart({ metrics }: Props) {
                   <tr key={r.ciudad} className="border-t border-gray-700/30 hover:bg-slate-800/50">
                     <td className="p-2 text-gray-300 font-medium">{r.ciudad}</td>
                     <td className={`p-2 font-mono ${r.live_mae != null ? 'text-blue-400' : 'text-gray-600'}`}>
-                      {r.live_mae != null ? r.live_mae.toFixed(2) + '┬░' : '—'}
+                      {r.live_mae != null ? r.live_mae.toFixed(2) + '°' : '—'}
                     </td>
                     <td className={`p-2 font-mono ${r.bt_mae != null ? 'text-blue-300' : 'text-gray-600'}`}>
-                      {r.bt_mae != null ? r.bt_mae.toFixed(2) + '┬░' : '—'}
+                      {r.bt_mae != null ? r.bt_mae.toFixed(2) + '°' : '—'}
                     </td>
                     <td className={`p-2 font-mono ${r.live_bias != null ? (Math.abs(r.live_bias) < 0.5 ? 'text-emerald-400' : 'text-red-400') : 'text-gray-600'}`}>
-                      {r.live_bias != null ? `${r.live_bias > 0 ? '+' : ''}${r.live_bias.toFixed(2)}┬░` : '—'}
+                      {r.live_bias != null ? `${r.live_bias > 0 ? '+' : ''}${r.live_bias.toFixed(2)}°` : '—'}
                     </td>
                     <td className={`p-2 font-mono ${r.bt_bias != null ? (Math.abs(r.bt_bias) < 0.5 ? 'text-emerald-400' : 'text-red-400') : 'text-gray-600'}`}>
-                      {r.bt_bias != null ? `${r.bt_bias > 0 ? '+' : ''}${r.bt_bias.toFixed(2)}┬░` : '—'}
+                      {r.bt_bias != null ? `${r.bt_bias > 0 ? '+' : ''}${r.bt_bias.toFixed(2)}°` : '—'}
                     </td>
                     <td className="p-2 font-mono text-emerald-400">
                       {r.live_acc != null ? r.live_acc.toFixed(0) + '%' : '—'}
                     </td>
                     <td className="p-2 text-gray-500">{r.live_n || '—'}</td>
                     <td className="p-2 text-gray-500">{r.bt_n || '—'}</td>
-                    <td className="p-2 text-blue-300 font-mono">{r.pron_prom != null ? r.pron_prom.toFixed(1) + '┬░' : '—'}</td>
-                    <td className="p-2 text-emerald-400 font-mono">{r.real_prom != null ? r.real_prom.toFixed(1) + '┬░' : '—'}</td>
+                    <td className="p-2 text-blue-300 font-mono">{r.pron_prom != null ? r.pron_prom.toFixed(1) + '°' : '—'}</td>
+                    <td className="p-2 text-emerald-400 font-mono">{r.real_prom != null ? r.real_prom.toFixed(1) + '°' : '—'}</td>
                   </tr>
                 ))}
               </tbody>
@@ -287,14 +287,14 @@ export default function ForecastVsActualChart({ metrics }: Props) {
             <ResponsiveContainer width="100%" height="100%">
               <ComposedChart>
                 <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-                <XAxis dataKey="pronosticado" stroke="#64748b" tick={{ fontSize: 10 }} name="Pronosticado ┬░C" type="number" domain={['auto', 'auto']} />
-                <YAxis stroke="#64748b" tick={{ fontSize: 10 }} name="Real ┬░C" type="number" domain={['auto', 'auto']} />
+                <XAxis dataKey="pronosticado" stroke="#64748b" tick={{ fontSize: 10 }} name="Pronosticado °C" type="number" domain={['auto', 'auto']} />
+                <YAxis stroke="#64748b" tick={{ fontSize: 10 }} name="Real °C" type="number" domain={['auto', 'auto']} />
                 <ReferenceLine x={0} stroke="#334155" />
                 <ReferenceLine y={0} stroke="#334155" />
                 <Tooltip
                   contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '8px' }}
                   labelStyle={{ color: '#f1f5f9' }}
-                  formatter={(value: number) => [`${value.toFixed(1)}┬░C`, '']}
+                  formatter={(value: number) => [`${value.toFixed(1)}°C`, '']}
                   labelFormatter={(label) => label as string}
                 />
                 <Legend />
@@ -326,7 +326,7 @@ export default function ForecastVsActualChart({ metrics }: Props) {
                 <Tooltip
                   contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '8px' }}
                   labelStyle={{ color: '#f1f5f9' }}
-                  formatter={(value: number, name: string) => [`${value.toFixed(1)}┬░C`, name]}
+                  formatter={(value: number, name: string) => [`${value.toFixed(1)}°C`, name]}
                 />
                 <Legend />
                 <Line type="monotone" dataKey="pronosticado" stroke="#3b82f6" strokeWidth={2} dot={{ r: 3 }} name="Pronosticado" />
@@ -347,10 +347,10 @@ export default function ForecastVsActualChart({ metrics }: Props) {
               <div key={i} className="flex items-center justify-between rounded-lg bg-slate-900/50 p-2 text-xs mb-1">
                 <span className="text-gray-300">{d.ciudad}</span>
                 <span className="text-gray-500">{formatFecha(d.fecha_objetivo)}</span>
-                <span className="text-blue-300">{d.temp_corregida.toFixed(1)}┬░C</span>
+                <span className="text-blue-300">{d.temp_corregida.toFixed(1)}°C</span>
                 <span className="text-gray-500">→</span>
-                <span className="text-emerald-400">{d.temp_real.toFixed(1)}┬░C</span>
-                <span className="font-semibold text-emerald-400">{d.error > 0 ? '+' : ''}{d.error.toFixed(2)}┬░</span>
+                <span className="text-emerald-400">{d.temp_real.toFixed(1)}°C</span>
+                <span className="font-semibold text-emerald-400">{d.error > 0 ? '+' : ''}{d.error.toFixed(2)}°</span>
               </div>
             ))}
           </div>
@@ -360,10 +360,10 @@ export default function ForecastVsActualChart({ metrics }: Props) {
               <div key={i} className="flex items-center justify-between rounded-lg bg-slate-900/50 p-2 text-xs mb-1">
                 <span className="text-gray-300">{d.ciudad}</span>
                 <span className="text-gray-500">{formatFecha(d.fecha_objetivo)}</span>
-                <span className="text-blue-300">{d.temp_corregida.toFixed(1)}┬░C</span>
+                <span className="text-blue-300">{d.temp_corregida.toFixed(1)}°C</span>
                 <span className="text-gray-500">→</span>
-                <span className="text-emerald-400">{d.temp_real.toFixed(1)}┬░C</span>
-                <span className="font-semibold text-red-400">{d.error > 0 ? '+' : ''}{d.error.toFixed(2)}┬░</span>
+                <span className="text-emerald-400">{d.temp_real.toFixed(1)}°C</span>
+                <span className="font-semibold text-red-400">{d.error > 0 ? '+' : ''}{d.error.toFixed(2)}°</span>
               </div>
             ))}
           </div>
@@ -396,7 +396,7 @@ export default function ForecastVsActualChart({ metrics }: Props) {
                     <td className="p-2">{formatFecha(d.fecha_objetivo)}</td>
                     <td className="p-2 text-blue-300">{d.temp_corregida.toFixed(1)}</td>
                     <td className="p-2 text-emerald-400">{d.temp_real.toFixed(1)}</td>
-                    <td className={`p-2 font-mono ${Math.abs(d.error) <= 1 ? 'text-emerald-400' : 'text-red-400'}`}>{d.error > 0 ? '+' : ''}{d.error.toFixed(2)}┬░</td>
+                    <td className={`p-2 font-mono ${Math.abs(d.error) <= 1 ? 'text-emerald-400' : 'text-red-400'}`}>{d.error > 0 ? '+' : ''}{d.error.toFixed(2)}°</td>
                   </tr>
                 ))}
                 {showBacktest && backtestData.map((d, i) => (
@@ -406,7 +406,7 @@ export default function ForecastVsActualChart({ metrics }: Props) {
                     <td className="p-2">{formatFecha(d.fecha)}</td>
                     <td className="p-2 text-blue-300">{d.pronosticado.toFixed(1)}</td>
                     <td className="p-2 text-emerald-400">{d.real.toFixed(1)}</td>
-                    <td className={`p-2 font-mono ${Math.abs(d.error) <= 1 ? 'text-emerald-400' : 'text-red-400'}`}>{d.error > 0 ? '+' : ''}{d.error.toFixed(2)}┬░</td>
+                    <td className={`p-2 font-mono ${Math.abs(d.error) <= 1 ? 'text-emerald-400' : 'text-red-400'}`}>{d.error > 0 ? '+' : ''}{d.error.toFixed(2)}°</td>
                   </tr>
                 ))}
               </tbody>
