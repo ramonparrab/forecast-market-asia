@@ -325,7 +325,8 @@ export async function getRecordsWithoutActuals(
   if (!client) return []
 
   // Fetch enough raw records to deduplicate properly
-  const fetchLimit = Math.max(limit * 5, 200)
+  // June 28 alone has 199 records, so we need a large fetch to reach older dates
+  const fetchLimit = 1000
   const { data, error } = await client
     .from('forecast_history' as any)
     .select('id, slug, ciudad, fecha_objetivo')
