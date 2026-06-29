@@ -130,7 +130,7 @@ export default function ForecastVsActualChart({ metrics }: Props) {
     const bMae = bErrors.length ? bErrors.reduce((s, e) => s + Math.abs(e), 0) / bErrors.length : null
     const lBias = lErrors.length ? lErrors.reduce((s, e) => s + e, 0) / lErrors.length : null
     const bBias = bErrors.length ? bErrors.reduce((s, e) => s + e, 0) / bErrors.length : null
-    const lAcc = lErrors.length ? lErrors.filter(e => Math.abs(e) <= 2).length / lErrors.length * 100 : null
+    const lAcc = lErrors.length ? lErrors.filter(e => Math.abs(e) <= 1).length / lErrors.length * 100 : null
     return {
       ciudad,
       live_mae: lMae, live_bias: lBias, live_n: lErrors.length, live_acc: lAcc,
@@ -238,7 +238,7 @@ export default function ForecastVsActualChart({ metrics }: Props) {
                   <th className="p-2">MAE BT</th>
                   <th className="p-2">Bias Live</th>
                   <th className="p-2">Bias BT</th>
-                  <th className="p-2">±2°C Live</th>
+                  <th className="p-2">±1°C Live</th>
                   <th className="p-2">N Live</th>
                   <th className="p-2">N BT</th>
                   <th className="p-2">Pron├│st. prom.</th>
@@ -396,7 +396,7 @@ export default function ForecastVsActualChart({ metrics }: Props) {
                     <td className="p-2">{formatFecha(d.fecha_objetivo)}</td>
                     <td className="p-2 text-blue-300">{d.temp_corregida.toFixed(1)}</td>
                     <td className="p-2 text-emerald-400">{d.temp_real.toFixed(1)}</td>
-                    <td className={`p-2 font-mono ${Math.abs(d.error) <= 2 ? 'text-emerald-400' : 'text-red-400'}`}>{d.error > 0 ? '+' : ''}{d.error.toFixed(2)}┬░</td>
+                    <td className={`p-2 font-mono ${Math.abs(d.error) <= 1 ? 'text-emerald-400' : 'text-red-400'}`}>{d.error > 0 ? '+' : ''}{d.error.toFixed(2)}┬░</td>
                   </tr>
                 ))}
                 {showBacktest && backtestData.map((d, i) => (
@@ -406,7 +406,7 @@ export default function ForecastVsActualChart({ metrics }: Props) {
                     <td className="p-2">{formatFecha(d.fecha)}</td>
                     <td className="p-2 text-blue-300">{d.pronosticado.toFixed(1)}</td>
                     <td className="p-2 text-emerald-400">{d.real.toFixed(1)}</td>
-                    <td className={`p-2 font-mono ${Math.abs(d.error) <= 2 ? 'text-emerald-400' : 'text-red-400'}`}>{d.error > 0 ? '+' : ''}{d.error.toFixed(2)}┬░</td>
+                    <td className={`p-2 font-mono ${Math.abs(d.error) <= 1 ? 'text-emerald-400' : 'text-red-400'}`}>{d.error > 0 ? '+' : ''}{d.error.toFixed(2)}┬░</td>
                   </tr>
                 ))}
               </tbody>

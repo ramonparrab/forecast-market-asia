@@ -239,10 +239,9 @@ export async function getForecastVsActual(
 
   let q = client
     .from('forecast_history' as any)
-    .select('fecha_objetivo, ciudad, slug, temp_pronosticada, temp_corregida, temp_real, error')
+    .select('id, fecha_objetivo, ciudad, slug, temp_pronosticada, temp_corregida, temp_real, error')
     .not('temp_real', 'is', null)
     .gte('fecha_ejecucion', sinceStr)
-    .order('fecha_objetivo', { ascending: false } as any)
 
   if (slug) {
     q = q.eq('slug', slug)
@@ -250,7 +249,102 @@ export async function getForecastVsActual(
 
   const { data, error } = await q
   if (error || !data) return []
-  return (data as any) as any[]
+
+  // Dedup: keep latest id per (slug, fecha_objetivo)
+  const seen = new Map<string, any>()
+  for (const r of (data as any[])) {
+    const key = `${r.slug}|${r.fecha_objetivo}`
+    if (!seen.has(key) || r.id > seen.get(key).id) {
+      seen.set(key, r)
+    }
+  }
+
+  return Array.from(seen.values())
+    .sort((a, b) => b.fecha_objetivo.localeCompare(a.fecha_objetivo)) as any[]
+}
+
+/**
+ * GetAllCalibrationPairs — returns ALL historical forecasts with temp_real
+ * (no time limit, no fetch limit) for Platt scaling grid search.
+ * Deduped by (slug, fecha_objetivo) keeping latest id.
+ * Transforms into (prediction, outcome) pairs where:
+ *   prediction = confidence proxy based on error magnitude
+ *   outcome   = 1 if |error| <= 1°C, else 0
+ */
+export async function getAllCalibrationPairs(): Promise<{ slug: string; prediction: number; outcome: number }[]> {
+  const client = getClient()
+  if (!client) return []
+
+  const { data, error } = await client
+    .from('forecast_history' as any)
+    .select('id, slug, fecha_objetivo, error')
+    .not('error', 'is', null)
+    .order('id', { ascending: false } as any)
+
+  if (error || !data) return []
+
+  // Dedup by (slug, fecha_objetivo) — keep latest id
+  const seen = new Map<string, any>()
+  for (const r of (data as any[])) {
+    const key = `${r.slug}|${r.fecha_objetivo}`
+    if (!seen.has(key) || r.id > seen.get(key).id) {
+      seen.set(key, r)
+    }
+  }
+
+  const pairs: { slug: string; prediction: number; outcome: number }[] = []
+  for (const r of seen.values()) {
+    const absErr = Math.abs(r.error)
+    // Confidence proxy: inverse of error, clamped to [0.05, 0.95]
+    const prediction = Math.max(0.05, Math.min(0.95, 1 - absErr / 5))
+    const outcome = absErr <= 1 ? 1 : 0
+    pairs.push({ slug: r.slug, prediction: Math.round(prediction * 100) / 100, outcome })
+  }
+
+  return pairs
+}
+
+/**
+ * getHistoricalAccuracy — returns per-city success rate within 1°C
+ * using ALL available history (0 = all time, or specify days).
+ */
+export async function getHistoricalAccuracy(
+  slug: string,
+  days = 0
+): Promise<{ accuracy: number; muestras: number }> {
+  const client = getClient()
+  if (!client) return { accuracy: 0, muestras: 0 }
+
+  let q = client
+    .from('forecast_history' as any)
+    .select('id, slug, fecha_objetivo, error')
+    .eq('slug', slug)
+    .not('error', 'is', null)
+
+  if (days > 0) {
+    const since = new Date()
+    since.setDate(since.getDate() - days)
+    q = q.gte('fecha_ejecucion', since.toISOString())
+  }
+
+  const { data, error } = await q
+  if (error || !data || (data as any[]).length === 0) return { accuracy: 0, muestras: 0 }
+
+  // Dedup
+  const seen = new Map<string, any>()
+  for (const r of (data as any[])) {
+    const key = `${r.slug}|${r.fecha_objetivo}`
+    if (!seen.has(key) || r.id > seen.get(key).id) {
+      seen.set(key, r)
+    }
+  }
+
+  const records = Array.from(seen.values())
+  const within1 = records.filter((r: any) => Math.abs(r.error) <= 1).length
+  return {
+    accuracy: Math.round((within1 / records.length) * 10000) / 100,
+    muestras: records.length,
+  }
 }
 
 // ===== Backtest Bias =====
@@ -414,16 +508,25 @@ export async function getCityMetrics(slug: string): Promise<{
   evolucion: { fecha: string; mae: number; rmse: number }[]
 }> {
   const history = await getLastDaysRecords(ULTIMOS_DIAS)
-  const withActuals = history.filter(r => r.slug === slug && r.temp_real !== null && r.error !== null)
+  let withActuals = history.filter(r => r.slug === slug && r.temp_real !== null && r.error !== null)
   if (withActuals.length < 2) return { metrics: null, improvement: null, evolucion: [] }
+
+  // Dedup by (slug, fecha_objetivo)
+  const seen = new Map<string, any>()
+  for (const r of withActuals) {
+    const key = `${r.slug}|${r.fecha_objetivo || r.fecha_ejecucion.slice(0, 10)}`
+    if (!seen.has(key)) { seen.set(key, r) }
+  }
+  withActuals = Array.from(seen.values())
+
   const errors = withActuals.map(r => r.error!)
   const absErrors = errors.map(Math.abs)
   const mae = Math.round(absErrors.reduce((s, v) => s + v, 0) / absErrors.length * 100) / 100
   const rmse = Math.round(Math.sqrt(errors.reduce((s, v) => s + v * v, 0) / errors.length) * 100) / 100
   const bias = Math.round(errors.reduce((s, v) => s + v, 0) / errors.length * 100) / 100
   const metrics: AccuracyMetrics = { ciudad: withActuals[0].ciudad, slug, mae, rmse, bias, muestras: withActuals.length }
-  const within2 = withActuals.filter(r => Math.abs(r.error!) <= 2).length
-  const accuracyPct = Math.round(within2 / withActuals.length * 100)
+  const within1 = withActuals.filter(r => Math.abs(r.error!) <= 1).length
+  const accuracyPct = Math.round(within1 / withActuals.length * 100)
   // Daily evolution
   const byDate: Record<string, number[]> = {}
   for (const r of withActuals) {
@@ -443,7 +546,7 @@ export async function getCityMetrics(slug: string): Promise<{
   const recentMae = recent.reduce((s, r) => s + Math.abs(r.error!), 0) / recent.length
   const olderMae = older.reduce((s, r) => s + Math.abs(r.error!), 0) / older.length
   const mejoraMaePct = olderMae > 0 ? Math.round((olderMae - recentMae) / olderMae * 100) : 0
-  const impactoPct = Math.round(Math.min(Math.max((2 - mae) / 2 * 100, -20), 30))
+  const impactoPct = Math.round(Math.min(Math.max((1 - mae) / 1 * 100, -20), 30))
   const improvement = {
     mejora_mae_pct: mejoraMaePct,
     accuracy_pct: accuracyPct,
@@ -458,9 +561,17 @@ export async function getCityMetrics(slug: string): Promise<{
 
 export async function computeGlobalMetrics(): Promise<GlobalMetrics | null> {
   const history = await getLastDaysRecords(ULTIMOS_DIAS)
-  const withActuals = history.filter(r => r.temp_real !== null && r.error !== null)
+  let withActuals = history.filter(r => r.temp_real !== null && r.error !== null)
 
   if (withActuals.length < 3) return null
+
+  // Dedup by (slug, fecha_objetivo)
+  const seen = new Map<string, any>()
+  for (const r of withActuals) {
+    const key = `${r.slug}|${r.fecha_objetivo || r.fecha_ejecucion?.slice(0, 10)}`
+    if (!seen.has(key)) { seen.set(key, r) }
+  }
+  withActuals = Array.from(seen.values())
 
   const errors = withActuals.map(r => r.error!)
   const absErrors = errors.map(Math.abs)
@@ -509,8 +620,8 @@ export async function computeGlobalMetrics(): Promise<GlobalMetrics | null> {
     })
     .sort((a, b) => a.fecha.localeCompare(b.fecha))
 
-  const within2 = withActuals.filter(r => Math.abs(r.error!) <= 2).length
-  const accuracyPct = Math.round((within2 / withActuals.length) * 10000) / 100
+  const within1 = withActuals.filter(r => Math.abs(r.error!) <= 1).length
+  const accuracyPct = Math.round((within1 / withActuals.length) * 10000) / 100
 
   return {
     overall_mae: Math.round(mae * 100) / 100,

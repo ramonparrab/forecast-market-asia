@@ -148,7 +148,7 @@ export default function BacktestChart() {
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <SummaryCard label="MAE Global" value={`${data.overall_mae}°C`} desc="Error absoluto medio" color="text-blue-400" />
             <SummaryCard label="RMSE Global" value={`${data.overall_rmse}°C`} desc="Raíz del error cuadrático" color="text-amber-400" />
-            <SummaryCard label="Acierto ±2°C" value={`${data.overall_accuracy_2c}%`} desc={`${data.total_muestras} muestras`} color="text-emerald-400" />
+            <SummaryCard label="Acierto ±1°C" value={`${data.overall_accuracy_1c}%`} desc={`${data.total_muestras} muestras`} color="text-emerald-400" />
             <SummaryCard label="Bias" value={`${data.overall_bias > 0 ? '+' : ''}${data.overall_bias}°C`} desc={data.overall_bias > 0 ? 'Sobre-estimación' : 'Sub-estimación'} color={Math.abs(data.overall_bias) < 0.3 ? 'text-emerald-400' : 'text-red-400'} />
           </div>
 
@@ -174,7 +174,7 @@ export default function BacktestChart() {
                   <Bar dataKey="mae" radius={[4, 4, 0, 0]}>
                     {data.por_ciudad.map((_, i) => (<Cell key={i} fill={COLORS[i % COLORS.length]} />))}
                   </Bar>
-                  <ReferenceLine y={2} stroke="#f59e0b" strokeDasharray="3 3" label={{ value: '±2°C', fill: '#f59e0b', fontSize: 10 }} />
+                  <ReferenceLine y={1} stroke="#f59e0b" strokeDasharray="3 3" label={{ value: '±1°C', fill: '#f59e0b', fontSize: 10 }} />
                 </BarChart>
               </ResponsiveContainer>
             </div>
@@ -224,7 +224,7 @@ export default function BacktestChart() {
             <div className="grid gap-2 sm:grid-cols-2">
               <div><strong className="text-gray-400">MAE:</strong> Error absoluto medio en °C.</div>
               <div><strong className="text-gray-400">RMSE:</strong> Penaliza errores grandes. Si RMSE &gt; MAE×1.5 hay outliers.</div>
-              <div><strong className="text-gray-400">Acierto ±2°C:</strong> % de días con error &lt; 2°C. Objetivo &gt;70%.</div>
+              <div><strong className="text-gray-400">Acierto ±1°C:</strong> % de días con error &lt; 1°C. Objetivo &gt;60%.</div>
               <div><strong className="text-gray-400">Bias:</strong> Error sistemático. Positivo = sobre-estimamos.</div>
             </div>
           </div>

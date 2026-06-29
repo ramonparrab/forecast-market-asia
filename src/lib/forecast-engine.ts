@@ -4,9 +4,9 @@ import { fetchWeatherModels } from './openmeteo'
 import { computeEnsemble } from './ensemble'
 import { monteCarloProbability, normalizeProbabilidades } from './montecarlo'
 import { fetchPolymarketPrices, parseContract } from './polymarket'
-import { calibrateProbabilities } from './calibration'
+import { calibrateProbabilities, findCalibrationParams, isotonicCalibrate, applyIsotonicAdjustment } from './calibration'
 import { calculateAllocation } from './kelly'
-import { getRecentErrors, getRecentModelErrors, computeGlobalMetrics } from './supabase'
+import { getRecentErrors, getRecentModelErrors, computeGlobalMetrics, getAllCalibrationPairs, getHistoricalAccuracy } from './supabase'
 import { nowcastTemperature } from './nowcaster'
 import { loadBacktestBias } from './backtest-bias'
 
@@ -48,7 +48,9 @@ async function analyzeCity(
   targetMonth: number,
   recentModelErrors: Record<string, number[]>,
   fetchPrices: boolean,
-  backtestBiasCorrection?: number
+  backtestBiasCorrection: number | undefined,
+  calibrationPairs: { slug: string; prediction: number; outcome: number }[],
+  historicalAccuracy: { accuracy: number; muestras: number } | null
 ): Promise<{ cityAnalysis: CityAnalysis | null; recommendations: BetRecommendation[] }> {
   // 1. Weather models (includes ECMWF ENS 51 members)
   const { models: ensembleRaw, ensembleMembers } = await fetchWeatherModels(city.lat, city.lon, fechaISO)
@@ -89,11 +91,10 @@ async function analyzeCity(
     contracts = getMockContracts(city.slug)
   }
 
-  // Calculate success probability: how likely is the forecast to be within ±2°C of actual
+  // Calculate success probability using heuristic + historical accuracy
   const modelosTemps = Object.values(forecast.ensemble_raw)
   const spread = modelosTemps.length > 0 ? Math.max(...modelosTemps) - Math.min(...modelosTemps) : 3
   const numModelos = modelosTemps.length
-  // Success factors: narrow spread, strong consensus, many models, nowcast active
   let exitoPct = 50
   if (numModelos >= 5) exitoPct += 8
   else if (numModelos >= 3) exitoPct += 4
@@ -106,6 +107,12 @@ async function analyzeCity(
   if (nowcastResult.obsWeight > 0.3) exitoPct += 8
   if (nowcastResult.observedTemp !== null) exitoPct += 5
   exitoPct = Math.max(10, Math.min(95, exitoPct))
+
+  // Blend with historical accuracy (full history, not just 30 days)
+  if (historicalAccuracy && historicalAccuracy.muestras >= 10) {
+    const histWeight = Math.min(0.4, historicalAccuracy.muestras / 500 * 0.4)
+    exitoPct = Math.round(exitoPct * (1 - histWeight) + historicalAccuracy.accuracy * histWeight)
+  }
   // Build explanation
   const parts: string[] = []
   parts.push(`${numModelos} modelos meteorológicos`)
@@ -154,9 +161,29 @@ async function analyzeCity(
     }
   }
 
-  // 6. Normalize + calibrate
+  // 6. Normalize + calibrate (Platt + Isotonic)
   const normalized = normalizeProbabilidades(contracts.map(c => c.prob_ia_raw!))
-  const calibrated = calibrateProbabilities(normalized, 1.0, 0.0)
+
+  // Find optimal Platt params from city-specific history
+  const cityPairs = calibrationPairs.filter(p => p.slug === city.slug)
+  let alpha = 1.0, beta = 0.0
+  let isotonicCal: ReturnType<typeof isotonicCalibrate> | null = null
+  if (cityPairs.length >= 5) {
+    const [bestAlpha, bestBeta] = findCalibrationParams(
+      cityPairs.map(p => p.prediction),
+      cityPairs.map(p => p.outcome)
+    )
+    alpha = bestAlpha
+    beta = bestBeta
+    // Build isotonic calibration as secondary refinement
+    isotonicCal = isotonicCalibrate(cityPairs.map(p => ({ confidence: p.prediction, outcome: p.outcome })), 10)
+  }
+
+  let calibrated = calibrateProbabilities(normalized, alpha, beta)
+  // Apply isotonic adjustment if available
+  if (isotonicCal && isotonicCal.status === 'isotonic_pava') {
+    calibrated = calibrated.map(p => applyIsotonicAdjustment(isotonicCal!, p))
+  }
   for (let i = 0; i < contracts.length; i++) {
     contracts[i].prob_ia_norm = calibrated[i]
   }
@@ -223,16 +250,25 @@ export async function runDailyAnalysis(
   const targetMonth = new Date(fechaObjetivo).getMonth() + 1
 
   // Pre-load history (parallel)
-  const [recentModelErrors, globalMetrics, backtestBias] = await Promise.all([
+  const [recentModelErrors, globalMetrics, backtestBias, calPairs] = await Promise.all([
     getRecentModelErrors(30),
     computeGlobalMetrics(),
     loadBacktestBias(),
+    getAllCalibrationPairs(),
   ])
+
+  // Pre-load historical accuracy per city (full history, no time limit)
+  const historicalAccuracyMap: Record<string, { accuracy: number; muestras: number }> = {}
+  await Promise.all(
+    CIUDADES_ASIA.map(async city => {
+      historicalAccuracyMap[city.slug] = await getHistoricalAccuracy(city.slug, 0)
+    })
+  )
 
   // Analyze all cities in parallel — use fechaObjetivo for Open-Meteo API calls
   const results = await Promise.all(
     CIUDADES_ASIA.map(city =>
-      analyzeCity(city, fechaObjetivo, fechaObjetivo, targetMonth, recentModelErrors, fetchPrices, backtestBias[city.slug])
+      analyzeCity(city, fechaObjetivo, fechaObjetivo, targetMonth, recentModelErrors, fetchPrices, backtestBias[city.slug], calPairs, historicalAccuracyMap[city.slug])
     )
   )
 
