@@ -199,7 +199,7 @@ export default function MetricsChart({ metrics }: MetricsChartProps) {
             <SummaryCard label="MAE Live" value={`${live.overall_mae.toFixed(2)}°`} sub={`Backtest: ${bt.overall_mae.toFixed(2)}°`} color="text-emerald-400" />
             <SummaryCard label="RMSE Live" value={`${live.overall_rmse.toFixed(2)}°`} sub={`Backtest: ${bt.overall_rmse.toFixed(2)}°`} color="text-amber-400" />
             <SummaryCard label="Bias Live" value={`${live.overall_bias > 0 ? '+' : ''}${live.overall_bias.toFixed(2)}°`} sub={`Backtest: ${bt.overall_bias > 0 ? '+' : ''}${bt.overall_bias.toFixed(2)}°`} color={Math.abs(live.overall_bias) < 0.5 ? 'text-emerald-400' : 'text-red-400'} />
-            <SummaryCard label="±2°C Live" value={`${live.accuracy_pct.toFixed(1)}%`} sub={`Backtest: ${bt.overall_accuracy_2c.toFixed(1)}%`} color="text-emerald-400" />
+            <SummaryCard label="±1°C Live" value={`${live.accuracy_pct.toFixed(1)}%`} sub={`Backtest: ${bt.overall_accuracy_1c.toFixed(1)}%`} color="text-emerald-400" />
           </div>
         </div>
       )}
@@ -212,7 +212,7 @@ export default function MetricsChart({ metrics }: MetricsChartProps) {
             <SummaryCard label="MAE" value={`${bt.overall_mae.toFixed(2)}°`} sub={`${bt.total_muestras} muestras`} color="text-blue-400" />
             <SummaryCard label="RMSE" value={`${bt.overall_rmse.toFixed(2)}°`} sub="" color="text-amber-400" />
             <SummaryCard label="Bias" value={`${bt.overall_bias > 0 ? '+' : ''}${bt.overall_bias.toFixed(2)}°`} sub={bt.overall_bias > 0 ? 'Sobre-est.' : 'Sub-est.'} color={Math.abs(bt.overall_bias) < 0.5 ? 'text-emerald-400' : 'text-red-400'} />
-            <SummaryCard label="±2°C" value={`${bt.overall_accuracy_2c.toFixed(1)}%`} sub={`±1°C: ${bt.overall_accuracy_1c.toFixed(1)}%`} color="text-emerald-400" />
+            <SummaryCard label="±1°C" value={`${bt.overall_accuracy_1c.toFixed(1)}%`} sub="" color="text-emerald-400" />
           </div>
         </div>
       )}

@@ -148,7 +148,7 @@ export default function BacktestChart() {
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <SummaryCard label="MAE Global" value={`${data.overall_mae}°C`} desc="Error absoluto medio" color="text-blue-400" />
             <SummaryCard label="RMSE Global" value={`${data.overall_rmse}°C`} desc="Raíz del error cuadrático" color="text-amber-400" />
-            <SummaryCard label="Acierto ±2°C" value={`${data.overall_accuracy_2c}%`} desc={`${data.total_muestras} muestras`} color="text-emerald-400" />
+            <SummaryCard label="Acierto ±1°C" value={`${data.overall_accuracy_1c}%`} desc={`${data.total_muestras} muestras`} color="text-emerald-400" />
             <SummaryCard label="Bias" value={`${data.overall_bias > 0 ? '+' : ''}${data.overall_bias}°C`} desc={data.overall_bias > 0 ? 'Sobre-estimación' : 'Sub-estimación'} color={Math.abs(data.overall_bias) < 0.3 ? 'text-emerald-400' : 'text-red-400'} />
           </div>
 
@@ -245,7 +245,7 @@ function SummaryCard({ label, value, desc, color }: { label: string; value: stri
 }
 
 function CityBacktestCard({ city }: { city: BacktestCityMetrics }) {
-  const accuracyColor = city.accuracy_within_2c >= 70 ? 'text-emerald-400' : city.accuracy_within_2c >= 50 ? 'text-amber-400' : 'text-red-400'
+  const accuracyColor = city.accuracy_within_1c >= 70 ? 'text-emerald-400' : city.accuracy_within_1c >= 50 ? 'text-amber-400' : 'text-red-400'
   const maeColor = city.mae <= 1.5 ? 'text-emerald-400' : city.mae <= 2.5 ? 'text-amber-400' : 'text-red-400'
   return (
     <div className="rounded-xl bg-slate-900/50 border border-gray-700/30 p-4">
@@ -256,8 +256,7 @@ function CityBacktestCard({ city }: { city: BacktestCityMetrics }) {
       <div className="grid grid-cols-2 gap-2 text-xs">
         <div><span className="text-gray-500">RMSE:</span> <span className="text-gray-300">{city.rmse}°C</span></div>
         <div><span className="text-gray-500">Bias:</span> <span className="text-gray-300">{city.bias > 0 ? '+' : ''}{city.bias}°</span></div>
-        <div><span className="text-gray-500">±1°C:</span> <span className="text-blue-300">{city.accuracy_within_1c}%</span></div>
-        <div><span className="text-gray-500">±2°C:</span> <span className={accuracyColor}>{city.accuracy_within_2c}%</span></div>
+        <div><span className="text-gray-500">±1°C:</span> <span className={accuracyColor}>{city.accuracy_within_1c}%</span></div>
         <div className="col-span-2"><span className="text-gray-500">Max error:</span> <span className="text-red-400">{city.max_error}°C</span></div>
         <div className="col-span-2"><span className="text-gray-500">Muestras:</span> <span className="text-gray-400">{city.muestras} días</span></div>
       </div>

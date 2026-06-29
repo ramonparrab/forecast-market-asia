@@ -167,7 +167,7 @@ export async function getCityAccuracy(
     const error = Math.abs(record.error)
     totalError += error
     if (error <= 1.0) correctCount1c++
-    if (error <= 2.0) correctCount2c++
+    if (error <= 1.0) correctCount2c++
   }
 
   const accuracy_1c = Math.round((correctCount1c / totalRecords) * 100)
@@ -220,7 +220,7 @@ export async function getAllCitiesAccuracy(
       const error = Math.abs(record.error)
       totalError += error
       if (error <= 1.0) correctCount1c++
-      if (error <= 2.0) correctCount2c++
+      if (error <= 1.0) correctCount2c++
     }
 
     const accuracy_1c = Math.round((correctCount1c / deduped.length) * 100)
@@ -549,7 +549,6 @@ function computeSummaryFromResults(allResults: BacktestDayResult[], days: number
     const mae = Math.round(absErrors.reduce((s, v) => s + v, 0) / errors.length * 100) / 100
     const rmse = Math.round(Math.sqrt(errors.reduce((s, v) => s + v * v, 0) / errors.length) * 100) / 100
     const bias = Math.round(errors.reduce((s, v) => s + v, 0) / errors.length * 100) / 100
-    const within2 = results.filter(r => Math.abs(r.error) <= 2).length
     const within1 = results.filter(r => Math.abs(r.error) <= 1).length
     const maxError = Math.round(Math.max(...absErrors) * 100) / 100
     return {
@@ -557,7 +556,7 @@ function computeSummaryFromResults(allResults: BacktestDayResult[], days: number
       slug,
       muestras: results.length,
       mae, rmse, bias,
-      accuracy_within_2c: Math.round(within2 / results.length * 10000) / 100,
+      accuracy_within_2c: Math.round(within1 / results.length * 10000) / 100,
       accuracy_within_1c: Math.round(within1 / results.length * 10000) / 100,
       max_error: maxError,
     }
@@ -568,7 +567,7 @@ function computeSummaryFromResults(allResults: BacktestDayResult[], days: number
   const allAbs = allErrors.map(Math.abs)
   const overallMae = Math.round(allAbs.reduce((s, v) => s + v, 0) / allErrors.length * 100) / 100
   const overallBias = Math.round(allErrors.reduce((s, v) => s + v, 0) / allErrors.length * 100) / 100
-  const within2 = allResults.filter(r => Math.abs(r.error) <= 2).length
+  const within1 = allResults.filter(r => Math.abs(r.error) <= 1).length
 
   return {
     total_dias: days,
@@ -577,8 +576,8 @@ function computeSummaryFromResults(allResults: BacktestDayResult[], days: number
     overall_mae: overallMae,
     overall_rmse: Math.round(Math.sqrt(allErrors.reduce((s, v) => s + v * v, 0) / allErrors.length) * 100) / 100,
     overall_bias: overallBias,
-    overall_accuracy_2c: Math.round(within2 / allResults.length * 10000) / 100,
-    overall_accuracy_1c: Math.round(allResults.filter(r => Math.abs(r.error) <= 1).length / allResults.length * 10000) / 100,
+    overall_accuracy_2c: Math.round(within1 / allResults.length * 10000) / 100,
+    overall_accuracy_1c: Math.round(within1 / allResults.length * 10000) / 100,
     por_ciudad: cityMetrics,
     mejores_ciudades: sorted.slice(0, 3).map(c => c.ciudad),
     peores_ciudades: sorted.slice(-3).reverse().map(c => c.ciudad),
@@ -612,8 +611,8 @@ export async function getCityMetrics(slug: string): Promise<{
   const rmse = Math.round(Math.sqrt(errors.reduce((s, v) => s + v * v, 0) / errors.length) * 100) / 100
   const bias = Math.round(errors.reduce((s, v) => s + v, 0) / errors.length * 100) / 100
   const metrics: AccuracyMetrics = { ciudad: deduped[0].ciudad, slug, mae, rmse, bias, muestras: deduped.length }
-  const within2 = deduped.filter((r: any) => Math.abs(r.error!) <= 2).length
-  const accuracyPct = Math.round(within2 / deduped.length * 100)
+  const within1 = deduped.filter((r: any) => Math.abs(r.error!) <= 1).length
+  const accuracyPct = Math.round(within1 / deduped.length * 100)
   // Daily evolution
   const byDate: Record<string, number[]> = {}
   for (const r of deduped) {

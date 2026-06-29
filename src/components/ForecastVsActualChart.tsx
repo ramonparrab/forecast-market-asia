@@ -123,7 +123,7 @@ export default function ForecastVsActualChart({ metrics }: Props) {
     const bMae = bErrors.length ? bErrors.reduce((s, e) => s + Math.abs(e), 0) / bErrors.length : null
     const lBias = lErrors.length ? lErrors.reduce((s, e) => s + e, 0) / lErrors.length : null
     const bBias = bErrors.length ? bErrors.reduce((s, e) => s + e, 0) / bErrors.length : null
-    const lAcc = lErrors.length ? lErrors.filter(e => Math.abs(e) <= 2).length / lErrors.length * 100 : null
+    const lAcc = lErrors.length ? lErrors.filter(e => Math.abs(e) <= 1).length / lErrors.length * 100 : null
     return {
       ciudad,
       live_mae: lMae, live_bias: lBias, live_n: lErrors.length, live_acc: lAcc,
@@ -304,7 +304,7 @@ export default function ForecastVsActualChart({ metrics }: Props) {
           <div className="mt-3 text-[10px] text-gray-500 flex items-center gap-4">
             <span><strong className="text-blue-400">MAE</strong> = Error Absoluto Medio (menor es mejor)</span>
             <span><strong className="text-emerald-400">Bias</strong> = Sesgo promedio (0 = perfecto)</span>
-            <span><strong className="text-amber-400">Precisión</strong> = % pronósticos dentro de ±2°C del real</span>
+            <span><strong className="text-amber-400">Precisión</strong> = % pronósticos dentro de ±1°C del real</span>
           </div>
         </div>
       )}
