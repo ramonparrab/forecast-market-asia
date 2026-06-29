@@ -212,7 +212,7 @@ export default function MetricsChart({ metrics }: MetricsChartProps) {
             <SummaryCard label="MAE" value={`${bt.overall_mae.toFixed(2)}°`} sub={`${bt.total_muestras} muestras`} color="text-blue-400" />
             <SummaryCard label="RMSE" value={`${bt.overall_rmse.toFixed(2)}°`} sub="" color="text-amber-400" />
             <SummaryCard label="Bias" value={`${bt.overall_bias > 0 ? '+' : ''}${bt.overall_bias.toFixed(2)}°`} sub={bt.overall_bias > 0 ? 'Sobre-est.' : 'Sub-est.'} color={Math.abs(bt.overall_bias) < 0.5 ? 'text-emerald-400' : 'text-red-400'} />
-            <SummaryCard label="±1°C" value={`${bt.overall_accuracy_1c.toFixed(1)}%`} sub={`±2°C: ${bt.overall_accuracy_2c.toFixed(1)}%`} color="text-emerald-400" />
+            <SummaryCard label="±1°C" value={`${bt.overall_accuracy_1c.toFixed(1)}%`} sub="Precisión del modelo" color="text-emerald-400" />
           </div>
         </div>
       )}
