@@ -6,7 +6,6 @@ import {
 } from 'recharts'
 
 const COLORS = ['#10b981', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#14b8a6', '#f97316', '#6366f1']
-const CHUNK_SIZE = 30
 
 export default function BacktestChart() {
   const [data, setData] = useState<BacktestSummary | null>(null)
@@ -28,31 +27,24 @@ export default function BacktestChart() {
     setProgress(0)
 
     try {
-      const numChunks = Math.ceil(days / CHUNK_SIZE)
+      setProgress(50)
+      const resp = await fetch(`/api/backtest?days=${days}`, { method: 'POST', signal: AbortSignal.timeout(30000) })
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+      const json = await resp.json()
+      if (json.status !== 'ok') throw new Error(json.message || 'Error')
 
-      for (let chunk = 0; chunk < numChunks; chunk++) {
-        setProgress(Math.round((chunk + 1) / numChunks * 100))
-        const offset = chunk * CHUNK_SIZE
-        const chunkDays = Math.min(CHUNK_SIZE, days - offset)
-
-        const resp = await fetch(`/api/backtest?days=${chunkDays}&offset=${offset}`, { method: 'POST', signal: AbortSignal.timeout(120000) })
-        if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
-        const json = await resp.json()
-        if (json.status !== 'ok') throw new Error(json.message || `Error en bloque ${chunk + 1}`)
-        // Keep last chunk's data as display data
-        if (chunk === 0) setData(json.data)
-      }
+      if (json.data) setData(json.data)
 
       setProgress(100)
 
-      // Try to fetch combined data from cache (may include Supabase-accumulated data)
+      // Refresh bias corrections
       try {
-        const finalResp = await fetch('/api/backtest', { signal: AbortSignal.timeout(10000) })
-        if (finalResp.ok) {
-          const finalJson = await finalResp.json()
-          if (finalJson?.data) setData(finalJson.data)
+        const biasResp = await fetch('/api/backtest-bias', { signal: AbortSignal.timeout(8000) })
+        if (biasResp.ok) {
+          const biasJson = await biasResp.json()
+          if (biasJson?.active_corrections) setBiasCorrections(biasJson.active_corrections)
         }
-      } catch { /* use last chunk data */ }
+      } catch { /* best effort */ }
     } catch (e: any) {
       setError(e.message || 'Error ejecutando backtest')
     } finally {

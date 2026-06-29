@@ -465,7 +465,7 @@ export async function runBacktestFromHistory(days: number = 180): Promise<Backte
     .select('id, fecha_ejecucion, fecha_objetivo, ciudad, slug, temp_pronosticada, temp_corregida, temp_real, error, modelos_usados, consenso')
     .not('temp_real', 'is', null)
     .not('error', 'is', null)
-    .gte('fecha_ejecucion', since)
+    .gte('fecha_objetivo', since)
     .order('id', { ascending: false } as any)
 
   if (error || !data) return null
