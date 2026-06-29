@@ -1,27 +1,216 @@
 import { CityAnalysis, PolymarketContract } from '@/types'
+import Tooltip from './Tooltip'
 
 interface CityCardProps {
   data: CityAnalysis
 }
 
 function ConsensoBadge({ consenso }: { consenso: string }) {
-  if (consenso === 'MUY FUERTE') return <span className="badge-green">{consenso}</span>
-  if (consenso === 'FUERTE') return <span className="badge-blue">{consenso}</span>
-  if (consenso === 'ACEPTABLE') return <span className="badge-yellow">{consenso}</span>
-  return <span className="badge-red">{consenso}</span>
+  if (consenso === 'MUY FUERTE') return (
+    <Tooltip
+      width="w-72"
+      content={
+        <>
+          <p className="font-bold mb-1 text-emerald-400">Consenso MUY FUERTE</p>
+          <p className="text-gray-300">Todos los modelos (6/6) coinciden en el mismo rango de temperatura. Alta confianza en el pronóstico.</p>
+        </>
+      }
+    >
+      <span className="badge-green">{consenso}</span>
+    </Tooltip>
+  )
+  if (consenso === 'FUERTE') return (
+    <Tooltip
+      width="w-72"
+      content={
+        <>
+          <p className="font-bold mb-1 text-blue-400">Consenso FUERTE</p>
+          <p className="text-gray-300">5 de 6 modelos coinciden. Buena confianza, pero hay 1 modelo diferente.</p>
+        </>
+      }
+    >
+      <span className="badge-blue">{consenso}</span>
+    </Tooltip>
+  )
+  if (consenso === 'ACEPTABLE') return (
+    <Tooltip
+      width="w-72"
+      content={
+        <>
+          <p className="font-bold mb-1 text-amber-400">Consenso ACEPTABLE</p>
+          <p className="text-gray-300">4 de 6 modelos coinciden. Confianza moderada, considerar otras opciones.</p>
+        </>
+      }
+    >
+      <span className="badge-yellow">{consenso}</span>
+    </Tooltip>
+  )
+  return (
+    <Tooltip
+      width="w-72"
+      content={
+        <>
+          <p className="font-bold mb-1 text-red-400">Consenso DÉBIL</p>
+          <p className="text-gray-300">3 o menos modelos coinciden. Alta incertidumbre, no recomendado apostar.</p>
+        </>
+      }
+    >
+      <span className="badge-red">{consenso}</span>
+    </Tooltip>
+  )
 }
 
 function ArbBadge({ nivel }: { nivel: string }) {
-  if (nivel.includes('ALTO')) return <span className="badge-red">{nivel}</span>
-  if (nivel.includes('MEDIO')) return <span className="badge-yellow">{nivel}</span>
-  return <span className="badge-green">{nivel}</span>
+  if (nivel.includes('ALTO')) return (
+    <Tooltip
+      width="w-72"
+      content={
+        <>
+          <p className="font-bold mb-1 text-red-400">Arbitraje ALTO</p>
+          <p className="text-gray-300">Las probabilidades suman más de 100%. El mercado está mal preciado, posibilidad de ganar sin riesgo.</p>
+        </>
+      }
+    >
+      <span className="badge-red">{nivel}</span>
+    </Tooltip>
+  )
+  if (nivel.includes('MEDIO')) return (
+    <Tooltip
+      width="w-72"
+      content={
+        <>
+          <p className="font-bold mb-1 text-amber-400">Arbitraje MEDIO</p>
+          <p className="text-gray-300">Pequeña discrepancia entre precios. Posible oportunidad pero con riesgo.</p>
+        </>
+      }
+    >
+      <span className="badge-yellow">{nivel}</span>
+    </Tooltip>
+  )
+  return (
+    <Tooltip
+      width="w-72"
+      content={
+        <>
+          <p className="font-bold mb-1 text-emerald-400">Sin Arbitraje</p>
+          <p className="text-gray-300">Precios coherentes entre contratos. Mercado bien preciado.</p>
+        </>
+      }
+    >
+      <span className="badge-green">{nivel}</span>
+    </Tooltip>
+  )
 }
 
-function ExitoPctBadge({ pct }: { pct: number }) {
-  if (pct >= 80) return <span className="text-emerald-400 font-bold">{pct}%</span>
-  if (pct >= 65) return <span className="text-green-400 font-bold">{pct}%</span>
-  if (pct >= 50) return <span className="text-amber-400 font-bold">{pct}%</span>
-  return <span className="text-red-400 font-bold">{pct}%</span>
+function LiquidityBadge({ liquidity }: { liquidity?: 'ALTA' | 'MEDIA' | 'BAJA' }) {
+  if (!liquidity || liquidity === 'BAJA') return (
+    <Tooltip
+      width="w-72"
+      content={
+        <>
+          <p className="font-bold mb-1 text-red-400">Liquidez BAJA</p>
+          <p className="text-gray-300">Poca gente comprando/vendiendo. Spread alto (&gt;$0.05). Riesgo de no poder vender o precio poco confiable.</p>
+        </>
+      }
+    >
+      <span className="badge-red">🔴 BAJA</span>
+    </Tooltip>
+  )
+  if (liquidity === 'MEDIA') return (
+    <Tooltip
+      width="w-72"
+      content={
+        <>
+          <p className="font-bold mb-1 text-amber-400">Liquidez MEDIA</p>
+          <p className="text-gray-300">Volumen moderado. Spread aceptable (&gt;$0.03). Se puede apostar pero con precaución.</p>
+        </>
+      }
+    >
+      <span className="badge-yellow">🟡 MEDIA</span>
+    </Tooltip>
+  )
+  return (
+    <Tooltip
+      width="w-72"
+      content={
+        <>
+          <p className="font-bold mb-1 text-emerald-400">Liquidez ALTA</p>
+          <p className="text-gray-300">Mercado líquido. Volumen &gt;$5,000/día, spread &lt;.03. Precio confiable, fácil entrada/salida.</p>
+        </>
+      }
+    >
+      <span className="badge-green">🟢 ALTA</span>
+    </Tooltip>
+  )
+}
+
+function EvIndicator({ ev }: { ev?: number }) {
+  if (ev === undefined || ev === null) return <span className="text-gray-500">N/A</span>
+  if (ev > 0.05) return (
+    <Tooltip
+      width="w-64"
+      content={
+        <>
+          <p className="font-bold mb-1 text-emerald-400">EV Positivo: +${ev.toFixed(2)}</p>
+          <p className="text-gray-300">Cada $1 apostado, ganás ${ev.toFixed(2)} en promedio. Apuesta recomendada.</p>
+        </>
+      }
+    >
+      <span className="text-emerald-400 font-bold">+${ev.toFixed(2)} ✅</span>
+    </Tooltip>
+  )
+  if (ev > 0) return (
+    <Tooltip
+      width="w-64"
+      content={
+        <>
+          <p className="font-bold mb-1 text-amber-400">EV Bajo: +${ev.toFixed(2)}</p>
+          <p className="text-gray-300">Ganancia mínima. Considerar si vale la pena el riesgo.</p>
+        </>
+      }
+    >
+      <span className="text-amber-400">+${ev.toFixed(2)} ⚠️</span>
+    </Tooltip>
+  )
+  return (
+    <Tooltip
+      width="w-64"
+      content={
+        <>
+          <p className="font-bold mb-1 text-red-400">EV Negativo: ${ev.toFixed(2)}</p>
+          <p className="text-gray-300">Perdés ${Math.abs(ev).toFixed(2)} por cada $1 apostado a largo plazo. NO apostar.</p>
+        </>
+      }
+    >
+      <span className="text-red-400 font-bold">${ev.toFixed(2)} ❌</span>
+    </Tooltip>
+  )
+}
+
+function ExitoPctBadge({ pct, isReal }: { pct: number; isReal?: boolean }) {
+  const tooltipContent = (
+    <>
+      <p className="font-bold mb-2">Precisión: {pct}%</p>
+      {isReal ? (
+        <>
+          <p className="text-emerald-300 mb-2">✅ Basado en pronósticos REALES vs temperatura real en Polymarket</p>
+          <p className="text-gray-400 text-[10px]">Se calcula: % de pronósticos que estuvieron dentro de ±2°C de la temperatura real del cierre.</p>
+          <p className="text-blue-300 text-[10px] mt-2">Con cada historial adicional, esta precisión MEJORA.</p>
+        </>
+      ) : (
+        <>
+          <p className="text-amber-300 mb-2">⚠️ Estimación teórica (sin datos suficientes)</p>
+          <p className="text-gray-400 text-[10px]">Basado en: modelos, spread, consenso, nowcast.</p>
+          <p className="text-gray-400 text-[10px] mt-2">Se volverá REAL cuando haya 5+ pronósticos verificados.</p>
+        </>
+      )}
+    </>
+  )
+
+  if (pct >= 80) return <Tooltip width="w-80" content={tooltipContent}><span className="text-emerald-400 font-bold">{pct}%</span></Tooltip>
+  if (pct >= 65) return <Tooltip width="w-80" content={tooltipContent}><span className="text-green-400 font-bold">{pct}%</span></Tooltip>
+  if (pct >= 50) return <Tooltip width="w-80" content={tooltipContent}><span className="text-amber-400 font-bold">{pct}%</span></Tooltip>
+  return <Tooltip width="w-80" content={tooltipContent}><span className="text-red-400 font-bold">{pct}%</span></Tooltip>
 }
 
 function NowcastIndicator({ data }: { data: CityAnalysis }) {
@@ -29,11 +218,23 @@ function NowcastIndicator({ data }: { data: CityAnalysis }) {
   if (!n || !n.activo) return null
   const color = n.peso_observacion > 0.5 ? 'text-emerald-400' : 'text-blue-400'
   return (
-    <span className={`inline-flex items-center gap-1 text-xs ${color}`}>
-      <span>📡</span>
-      Nowcast {(n.peso_observacion * 100).toFixed(0)}%
-      {n.temp_observada !== null && <span>({n.temp_observada.toFixed(1)}°C obs)</span>}
-    </span>
+    <Tooltip
+      width="w-72"
+      content={
+        <>
+          <p className="font-bold mb-1">Nowcasting Activo</p>
+          <p className="text-gray-300 mb-2">Usa observaciones METAR del aeropuerto {n.estacion} en tiempo real.</p>
+          <p className="text-gray-400 text-[10px] mb-2">El peso de la observación sube de 0% a 80% durante el día, capturando la temperatura real.</p>
+          <p className="text-blue-300 text-[10px]">Temperatura observada: {n.temp_observada?.toFixed(1)}°C</p>
+        </>
+      }
+    >
+      <span className={`inline-flex items-center gap-1 text-xs ${color}`}>
+        <span>📡</span>
+        Nowcast {(n.peso_observacion * 100).toFixed(0)}%
+        {n.temp_observada !== null && <span>({n.temp_observada.toFixed(1)}°C obs)</span>}
+      </span>
+    </Tooltip>
   )
 }
 
@@ -50,12 +251,14 @@ function ContractRow({ contract }: { contract: PolymarketContract }) {
   return (
     <div className="flex items-center justify-between border-b border-gray-700/30 py-2 last:border-0">
       <span className="text-sm text-gray-300">{contract.texto}</span>
-      <div className="flex items-center gap-4 text-sm">
+      <div className="flex items-center gap-3 text-xs">
         <span className="text-gray-500">Mkt: <span className="text-gray-300">{contract.prob_mkt}%</span></span>
         <span className="text-gray-500">IA: <span className="text-blue-300">{probIAPct}%</span></span>
         <span className={`font-mono font-semibold ${edgeColor}`}>
           {edge > 0 ? '+' : ''}{edge}%
         </span>
+        <LiquidityBadge liquidity={contract.liquidity} />
+        <EvIndicator ev={contract.ev} />
       </div>
     </div>
   )
@@ -69,7 +272,7 @@ export default function CityCard({ data }: CityCardProps) {
   const totalMkt = data.contratos.reduce((s, c) => s + c.prob_mkt, 0)
 
   return (
-    <div className="card relative overflow-hidden">
+    <div className="card">
       {/* Success probability bar at top */}
       <div className="absolute top-0 left-0 right-0 h-1">
         <div
@@ -90,6 +293,7 @@ export default function CityCard({ data }: CityCardProps) {
         </div>
         <div className="flex items-center gap-2">
           <NowcastIndicator data={data} />
+          <LiquidityBadge liquidity={data.liquidity_avg} />
           <ConsensoBadge consenso={forecast.consenso} />
         </div>
       </div>
@@ -101,8 +305,8 @@ export default function CityCard({ data }: CityCardProps) {
         'bg-red-500/5 border border-red-500/10'
       }`}>
         <div className="flex items-center justify-between mb-1">
-          <span className="text-gray-500">Precisión estimada</span>
-          <ExitoPctBadge pct={data.exito_pct} />
+          <span className="text-gray-500">Precisión ±1°C</span>
+          <ExitoPctBadge pct={data.exito_pct} isReal={data.totalRecords !== undefined && data.totalRecords >= 5} />
         </div>
         <p className="text-gray-400 leading-relaxed">{data.explicacion}</p>
       </div>
@@ -163,6 +367,18 @@ export default function CityCard({ data }: CityCardProps) {
         <span>Vol: {forecast.volatilidad.toFixed(2)}</span>
         <span>·</span>
         <span>Spread: {spread.toFixed(1)}°</span>
+        {data.volume_total !== undefined && data.volume_total > 0 && (
+          <>
+            <span>·</span>
+            <span className="text-blue-400">Volumen: ${data.volume_total.toFixed(0)}</span>
+          </>
+        )}
+        {data.avg_spread !== undefined && (
+          <>
+            <span>·</span>
+            <span className="text-amber-400">Mkt Spread: {(data.avg_spread * 100).toFixed(1)}¢</span>
+          </>
+        )}
         {data.nowcast?.activo && (
           <>
             <span>·</span>

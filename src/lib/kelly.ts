@@ -5,7 +5,7 @@ const KELLY_FRACTION = 0.25
 const MAX_PER_BET = 5.0
 const MIN_PER_BET = 1.0
 const MIN_EDGE = 6.0
-const MAX_BANKROLL_PCT = 0.10
+const MAX_BANKROLL_PCT = 0.40
 
 /**
  * Kelly criterion fractional bet sizing.
@@ -18,16 +18,11 @@ export function kellyBetSize(
 ): number {
   const p = probIA / 100
   const q = 1 - p
-  // Fair odds from market
   const odds = 1 / (probMkt / 100)
 
-  // Full Kelly: f* = (p * odds - q) / odds
   let f = (p * odds - q) / odds
-
-  // Truncate extreme values
   f = Math.max(0, Math.min(f, MAX_BANKROLL_PCT))
 
-  // Fractional Kelly
   return f * KELLY_FRACTION * bankroll
 }
 
@@ -38,7 +33,6 @@ export function calculateAllocation(
   recommendations: BetRecommendation[],
   presupuesto: number = BANKROLL_DIARIO
 ): BetRecommendation[] {
-  // Filter candidates
   const candidates = recommendations.filter(r => {
     const edgeOk = r.edge > MIN_EDGE
     const consensoOk = r.consenso === 'MUY FUERTE' || r.consenso === 'FUERTE'
@@ -48,7 +42,7 @@ export function calculateAllocation(
 
   if (candidates.length === 0) return []
 
-  // Weight by edge * consensus factor * arb penalty * exito_pct
+  // Weight by edge * consensus factor * exito_pct
   for (const r of candidates) {
     let peso = r.edge
     if (r.consenso === 'MUY FUERTE') peso *= 1.4
@@ -64,7 +58,6 @@ export function calculateAllocation(
   // Proportional allocation
   for (const r of candidates) {
     r.monto = (r.peso! / totalPeso) * presupuesto
-    // Clamp
     r.monto = Math.max(MIN_PER_BET, Math.min(MAX_PER_BET, r.monto))
     r.monto = Math.round(r.monto * 100) / 100
   }

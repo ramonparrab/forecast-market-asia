@@ -167,6 +167,72 @@ export function applyIsotonicAdjustment(
 }
 
 /**
+ * Build isotonic PAVA calibration from HISTORICAL prediction-outcome pairs.
+ * Returns a lookup table: for each bin, the ratio of actual_outcome / predicted_prob.
+ */
+export function buildIsotonicCalibration(
+  historicalPairs: { predicted: number; outcome: number }[],
+  nBins: number = 10
+): { binMin: number; binMax: number; ratio: number }[] {
+  if (historicalPairs.length < 20) return []
+
+  const sorted = [...historicalPairs].sort((a, b) => a.predicted - b.predicted)
+  const binSize = Math.max(1, Math.floor(sorted.length / nBins))
+
+  const bins: { predictedMean: number; actualRate: number; ratio: number }[] = []
+
+  for (let i = 0; i < sorted.length; i += binSize) {
+    const batch = sorted.slice(i, i + binSize)
+    if (batch.length < 2) continue
+    const predMean = batch.reduce((s, p) => s + p.predicted, 0) / batch.length
+    const actRate = batch.reduce((s, p) => s + p.outcome, 0) / batch.length
+    const ratio = predMean > 0.001 ? actRate / predMean : 1.0
+    bins.push({ predictedMean: predMean, actualRate: actRate, ratio })
+  }
+
+  if (bins.length < 2) return []
+
+  // Apply PAVA to enforce monotonicity on the actual rates
+  const rates = bins.map(b => b.actualRate)
+  const { fitted } = isotonicRegressionPAVA(rates)
+
+  // Build calibration points with bin ranges
+  const calibration: { binMin: number; binMax: number; ratio: number }[] = []
+  for (let i = 0; i < bins.length; i++) {
+    const binMin = i === 0 ? 0 : (bins[i - 1].predictedMean + bins[i].predictedMean) / 2
+    const binMax = i === bins.length - 1 ? 1 : (bins[i].predictedMean + bins[i + 1].predictedMean) / 2
+    const ratio = bins[i].predictedMean > 0.001 ? fitted[i] / bins[i].predictedMean : 1.0
+    calibration.push({ binMin, binMax, ratio })
+  }
+
+  return calibration
+}
+
+/**
+ * Apply isotonic calibration to a raw probability.
+ */
+export function applyIsotonicCalibration(
+  calibration: { binMin: number; binMax: number; ratio: number }[],
+  rawProb: number
+): number {
+  if (calibration.length === 0) return rawProb
+
+  const p = Math.max(0.001, Math.min(0.999, rawProb))
+
+  for (const pt of calibration) {
+    if (p >= pt.binMin && p <= pt.binMax) {
+      return Math.max(0.01, Math.min(0.95, p * pt.ratio))
+    }
+  }
+
+  // Nearest bin fallback
+  const nearest = calibration.reduce((best, pt) =>
+    Math.abs(pt.binMin - p) < Math.abs(best.binMin - p) ? pt : best
+  )
+  return Math.max(0.01, Math.min(0.95, p * nearest.ratio))
+}
+
+/**
  * Platt scaling calibration using historical prediction errors.
  */
 export function calibrateProbabilities(

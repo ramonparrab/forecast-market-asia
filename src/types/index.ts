@@ -28,6 +28,11 @@ export interface PolymarketContract {
   prob_mkt: number
   prob_ia_raw?: number
   prob_ia_norm?: number
+  // Liquidity fields
+  volume_24h?: number
+  spread?: number
+  liquidity?: 'ALTA' | 'MEDIA' | 'BAJA'
+  ev?: number
 }
 
 export interface NowcastInfo {
@@ -45,9 +50,16 @@ export interface CityAnalysis {
   forecast: ForecastResult
   arbitraje: { desvio: number; nivel: string }
   nowcast: NowcastInfo
-  // Probabilidad de que el pronóstico acierte el bucket correcto (±2°C)
+  // Probability of forecast being within ±1°C of actual (the ONLY metric that matters for betting)
   exito_pct: number
   explicacion: string
+  // Liquidity summary
+  liquidity_avg?: 'ALTA' | 'MEDIA' | 'BAJA'
+  volume_total?: number
+  avg_spread?: number
+  // Real accuracy data
+  totalRecords?: number
+  avgError?: number
 }
 
 export interface BetRecommendation {

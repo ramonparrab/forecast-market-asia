@@ -49,7 +49,7 @@ export default function Layout({ children, lastUpdated }: LayoutProps) {
       {/* Footer */}
       <footer className="border-t border-gray-700/30 bg-slate-900/50 py-4">
         <div className="mx-auto max-w-7xl px-4 text-center text-xs text-gray-600">
-          <p className="mb-1">v4.0 · Student-t ν=4 · Nowcasting METAR · Bias dinámicos · Pesos adaptativos · Calibración Platt · Kelly 0.25</p>
+          <p className="mb-1">v6.0 · Empirical CDF · Platt Scaling · EWMA weights · Nowcasting · Z-score filter · Kelly 0.25 · Resumen Ejecutivo</p>
           <p className="text-gray-700">Ejecución automática 22:00 Caracas (02:00 UTC) · No es consejo financiero</p>
         </div>
       </footer>
