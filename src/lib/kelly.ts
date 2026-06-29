@@ -1,7 +1,7 @@
 import { BetRecommendation } from '@/types'
 
 const BANKROLL_DIARIO = 10.0
-const KELLY_FRACTION = 0.50
+const KELLY_FRACTION = 0.25
 const MAX_PER_BET = 5.0
 const MIN_PER_BET = 1.0
 const MIN_EDGE = 6.0

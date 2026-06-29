@@ -4,7 +4,7 @@ import { fetchWeatherModels } from './openmeteo'
 import { computeEnsemble } from './ensemble'
 import { monteCarloProbability, normalizeProbabilidades } from './montecarlo'
 import { fetchPolymarketPrices, parseContract, calculateLiquidity, calculateEV } from './polymarket'
-import { buildIsotonicCalibration, applyIsotonicCalibration, calibrateProbabilities } from './calibration'
+import { buildIsotonicCalibration, applyIsotonicCalibration, calibrateProbabilities, findCalibrationParams } from './calibration'
 import { calculateAllocation } from './kelly'
 import { getRecentErrors, getRecentModelErrors, computeGlobalMetrics, getAllCitiesAccuracy, getCalibrationPairs } from './supabase'
 import { nowcastTemperature } from './nowcaster'
@@ -50,7 +50,9 @@ async function analyzeCity(
   fetchPrices: boolean,
   backtestBiasCorrection?: number,
   realAccuracy?: { accuracy_1c: number; accuracy_2c: number; totalRecords: number; avgError: number },
-  isotonicCalibration?: { binMin: number; binMax: number; ratio: number }[]
+  isotonicCalibration?: { binMin: number; binMax: number; ratio: number }[],
+  plattAlpha: number = 1.0,
+  plattBeta: number = 0.0
 ): Promise<{ cityAnalysis: CityAnalysis | null; recommendations: BetRecommendation[] }> {
   // 1. Weather models (includes ECMWF ENS 51 members)
   const { models: ensembleRaw, ensembleMembers } = await fetchWeatherModels(city.lat, city.lon, fechaISO)
@@ -169,15 +171,20 @@ async function analyzeCity(
     }
   }
 
-  // 6. Normalize + calibrate (Platt scaling — outperforms PAVA on weather data)
+  // 6. Normalize + calibrate (Platt scaling with optimal params + isotonic refinement)
   const normalized = normalizeProbabilidades(contracts.map(c => c.prob_ia_raw!))
-  const calibrated = calibrateProbabilities(normalized, 1.0, 0.0)
+  const plattCalibrated = calibrateProbabilities(normalized, plattAlpha, plattBeta)
   for (let i = 0; i < contracts.length; i++) {
-    contracts[i].prob_ia_norm = calibrated[i]
+    let p = plattCalibrated[i]
+    // Apply isotonic calibration as secondary refinement if available
+    if (isotonicCalibration && isotonicCalibration.length > 0) {
+      p = applyIsotonicCalibration(isotonicCalibration, p)
+    }
+    contracts[i].prob_ia_norm = p
     // Calculate liquidity for each contract
     contracts[i].liquidity = calculateLiquidity(contracts[i].volume_24h, contracts[i].spread)
     // Calculate EV for each contract
-    const iaPct = Math.round((calibrated[i] ?? 0) * 10000) / 100
+    const iaPct = Math.round((p ?? 0) * 10000) / 100
     contracts[i].ev = calculateEV(iaPct / 100, contracts[i].prob_mkt / 100)
   }
 
@@ -267,10 +274,15 @@ export async function runDailyAnalysis(
   const { buildIsotonicCalibration } = await import('./calibration')
   const isotonicCalibration = buildIsotonicCalibration(calibrationPairs)
 
+  // Find optimal Platt scaling params via grid search
+  const predictions = calibrationPairs.map(p => p.predicted)
+  const outcomes = calibrationPairs.map(p => p.outcome)
+  const [plattAlpha, plattBeta] = findCalibrationParams(predictions, outcomes)
+
   // Analyze all cities in parallel — use fechaObjetivo for Open-Meteo API calls
   const results = await Promise.all(
     CIUDADES_ASIA.map(city =>
-      analyzeCity(city, fechaObjetivo, fechaObjetivo, targetMonth, recentModelErrors, fetchPrices, backtestBias[city.slug], cityAccuracy[city.slug], isotonicCalibration)
+      analyzeCity(city, fechaObjetivo, fechaObjetivo, targetMonth, recentModelErrors, fetchPrices, backtestBias[city.slug], cityAccuracy[city.slug], isotonicCalibration, plattAlpha, plattBeta)
     )
   )
 
