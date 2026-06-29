@@ -333,22 +333,21 @@ export async function getRecordsWithoutActuals(
     .is('temp_real', null)
     .not('fecha_objetivo', 'gte', new Date().toISOString().slice(0, 10))
     .order('fecha_objetivo', { ascending: false } as any)
+    .order('id', { ascending: false } as any)
     .limit(fetchLimit)
 
   if (error || !data) return []
 
-  // Deduplicate: keep only 1 record per (slug, fecha_objetivo) - the latest
-  const seen = new Set<string>()
-  const deduped: any[] = []
+  // Deduplicate: keep only 1 record per (slug, fecha_objetivo) — the latest by id
+  const byKey: Record<string, any> = {}
   for (const r of (data as any[])) {
     const key = `${r.slug}|${r.fecha_objetivo}`
-    if (!seen.has(key)) {
-      seen.add(key)
-      deduped.push(r)
+    if (!byKey[key] || r.id > byKey[key].id) {
+      byKey[key] = r
     }
   }
 
-  return deduped.slice(0, limit).map((r: any) => {
+  return Object.values(byKey).slice(0, limit).map((r: any) => {
     const city = CIUDADES_ASIA.find(c => c.slug === r.slug)
     return {
       id: r.id,
@@ -375,10 +374,11 @@ export async function getForecastVsActual(
 
   let q = client
     .from('forecast_history' as any)
-    .select('fecha_objetivo, ciudad, slug, temp_pronosticada, temp_corregida, temp_real, error')
+    .select('id, fecha_objetivo, ciudad, slug, temp_pronosticada, temp_corregida, temp_real, error')
     .not('temp_real', 'is', null)
     .gte('fecha_ejecucion', sinceStr)
     .order('fecha_objetivo', { ascending: false } as any)
+    .order('id', { ascending: false } as any)
 
   if (slug) {
     q = q.eq('slug', slug)
@@ -387,7 +387,7 @@ export async function getForecastVsActual(
   const { data, error } = await q
   if (error || !data) return []
 
-  // Deduplicate: keep 1 record per (slug, fecha_objetivo) — latest fecha_ejecucion
+  // Deduplicate: keep 1 record per (slug, fecha_objetivo) — first encountered is latest by id
   const byKey: Record<string, any> = {}
   for (const r of (data as any[])) {
     const key = `${r.slug}|${r.fecha_objetivo}`
@@ -595,17 +595,28 @@ export async function getCityMetrics(slug: string): Promise<{
   const history = await getLastDaysRecords(ULTIMOS_DIAS)
   const withActuals = history.filter(r => r.slug === slug && r.temp_real !== null && r.error !== null)
   if (withActuals.length < 2) return { metrics: null, improvement: null, evolucion: [] }
-  const errors = withActuals.map(r => r.error!)
+
+  // Deduplicate: keep 1 record per fecha_objetivo — the latest by id
+  const byKey: Record<string, any> = {}
+  for (const r of withActuals) {
+    const key = (r as any).fecha_objetivo
+    if (!byKey[key] || (r as any).id > byKey[key].id) {
+      byKey[key] = r
+    }
+  }
+  const deduped = Object.values(byKey) as any[]
+
+  const errors = deduped.map((r: any) => r.error!)
   const absErrors = errors.map(Math.abs)
   const mae = Math.round(absErrors.reduce((s, v) => s + v, 0) / absErrors.length * 100) / 100
   const rmse = Math.round(Math.sqrt(errors.reduce((s, v) => s + v * v, 0) / errors.length) * 100) / 100
   const bias = Math.round(errors.reduce((s, v) => s + v, 0) / errors.length * 100) / 100
-  const metrics: AccuracyMetrics = { ciudad: withActuals[0].ciudad, slug, mae, rmse, bias, muestras: withActuals.length }
-  const within2 = withActuals.filter(r => Math.abs(r.error!) <= 2).length
-  const accuracyPct = Math.round(within2 / withActuals.length * 100)
+  const metrics: AccuracyMetrics = { ciudad: deduped[0].ciudad, slug, mae, rmse, bias, muestras: deduped.length }
+  const within2 = deduped.filter((r: any) => Math.abs(r.error!) <= 2).length
+  const accuracyPct = Math.round(within2 / deduped.length * 100)
   // Daily evolution
   const byDate: Record<string, number[]> = {}
-  for (const r of withActuals) {
+  for (const r of deduped) {
     const fecha = r.fecha_objetivo || r.fecha_ejecucion.slice(0, 10)
     if (!fecha) continue
     if (!byDate[fecha]) byDate[fecha] = []
@@ -616,11 +627,9 @@ export async function getCityMetrics(slug: string): Promise<{
     const rmseD = Math.sqrt(errs.map(e => e * e).reduce((s, v) => s + v, 0) / errs.length)
     return { fecha, mae: Math.round(absM * 100) / 100, rmse: Math.round(rmseD * 100) / 100 }
   }).sort((a, b) => a.fecha.localeCompare(b.fecha))
-  const half = Math.floor(withActuals.length / 2)
-  const recent = withActuals.slice(0, half)
-  const older = withActuals.slice(half)
-  const recentMae = recent.reduce((s, r) => s + Math.abs(r.error!), 0) / recent.length
-  const olderMae = older.reduce((s, r) => s + Math.abs(r.error!), 0) / older.length
+  const half = Math.floor(deduped.length / 2)
+  const recent = deduped.slice(0, half)
+  const older = deduped.slice(half)
   const mejoraMaePct = olderMae > 0 ? Math.round((olderMae - recentMae) / olderMae * 100) : 0
   const impactoPct = Math.round(Math.min(Math.max((2 - mae) / 2 * 100, -20), 30))
   const improvement = {
@@ -629,8 +638,8 @@ export async function getCityMetrics(slug: string): Promise<{
     tendencia: mae <= 1.5 ? 'mejorando' : mae <= 2.5 ? 'estable' : 'empeorando',
     impacto_proximo_pct: impactoPct,
     descripcion_impacto: impactoPct > 5 ? `Mejora esperada ~${impactoPct}% en el próximo pronóstico por bias dinámico` : `Estable (~${impactoPct}%)`,
-    ultima_mejora_fecha: withActuals[0].fecha_ejecucion.slice(0, 10),
-    ultima_mejora_desc: `Último error: ${withActuals[0].error!.toFixed(2)}°C`,
+    ultima_mejora_fecha: deduped[0].fecha_ejecucion.slice(0, 10),
+    ultima_mejora_desc: `Último error: ${deduped[0].error!.toFixed(2)}°C`,
   }
   return { metrics, improvement, evolucion }
 }
@@ -641,7 +650,17 @@ export async function computeGlobalMetrics(): Promise<GlobalMetrics | null> {
 
   if (withActuals.length < 3) return null
 
-  const errors = withActuals.map(r => r.error!)
+  // Deduplicate: keep 1 record per (slug, fecha_objetivo) — latest by id
+  const byKey: Record<string, any> = {}
+  for (const r of withActuals) {
+    const key = `${r.slug}|${(r as any).fecha_objetivo}`
+    if (!byKey[key] || (r as any).id > byKey[key].id) {
+      byKey[key] = r
+    }
+  }
+  const deduped = Object.values(byKey) as any[]
+
+  const errors = deduped.map((r: any) => r.error!)
   const absErrors = errors.map(Math.abs)
   const squaredErrors = errors.map(e => e * e)
 
@@ -651,7 +670,7 @@ export async function computeGlobalMetrics(): Promise<GlobalMetrics | null> {
 
   // Per city
   const byCity: Record<string, number[]> = {}
-  for (const r of withActuals) {
+  for (const r of deduped) {
     if (!byCity[r.slug]) byCity[r.slug] = []
     byCity[r.slug].push(r.error!)
   }
@@ -660,7 +679,7 @@ export async function computeGlobalMetrics(): Promise<GlobalMetrics | null> {
     const m = errs.reduce((s, v) => s + v, 0) / errs.length
     const absM = errs.map(Math.abs).reduce((s, v) => s + v, 0) / errs.length
     const rmseC = Math.sqrt(errs.map(e => e * e).reduce((s, v) => s + v, 0) / errs.length)
-    const city = withActuals.find(r => r.slug === slug)
+    const city = deduped.find((r: any) => r.slug === slug)
     return {
       ciudad: city?.ciudad ?? slug,
       slug,
@@ -673,7 +692,7 @@ export async function computeGlobalMetrics(): Promise<GlobalMetrics | null> {
 
   // Daily evolution
   const byDate: Record<string, number[]> = {}
-  for (const r of withActuals) {
+  for (const r of deduped) {
     const fecha = r.fecha_objetivo || r.fecha_ejecucion?.slice(0, 10)
     if (!fecha) continue
     if (!byDate[fecha]) byDate[fecha] = []
@@ -688,15 +707,15 @@ export async function computeGlobalMetrics(): Promise<GlobalMetrics | null> {
     })
     .sort((a, b) => a.fecha.localeCompare(b.fecha))
 
-  const within2 = withActuals.filter(r => Math.abs(r.error!) <= 2).length
-  const accuracyPct = Math.round((within2 / withActuals.length) * 10000) / 100
+  const within2 = deduped.filter((r: any) => Math.abs(r.error!) <= 2).length
+  const accuracyPct = Math.round((within2 / deduped.length) * 10000) / 100
 
   return {
     overall_mae: Math.round(mae * 100) / 100,
     overall_rmse: Math.round(rmse * 100) / 100,
     overall_bias: Math.round(bias * 100) / 100,
     brier_score: 0,
-    total_muestras: withActuals.length,
+    total_muestras: deduped.length,
     accuracy_pct: accuracyPct,
     por_ciudad: porCiudad,
     evolucion_diaria: evolucion,
