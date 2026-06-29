@@ -36,15 +36,6 @@ export default function BacktestChart() {
       if (json.data) setData(json.data)
 
       setProgress(100)
-
-      // Refresh bias corrections
-      try {
-        const biasResp = await fetch('/api/backtest-bias', { signal: AbortSignal.timeout(8000) })
-        if (biasResp.ok) {
-          const biasJson = await biasResp.json()
-          if (biasJson?.active_corrections) setBiasCorrections(biasJson.active_corrections)
-        }
-      } catch { /* best effort */ }
     } catch (e: any) {
       setError(e.message || 'Error ejecutando backtest')
     } finally {
@@ -109,7 +100,7 @@ export default function BacktestChart() {
               />
             </div>
             <p className="text-xs text-gray-500 mt-1">
-              Procesando {days} días en {Math.ceil(days / CHUNK_SIZE)} bloques de {CHUNK_SIZE} días...
+              Procesando {days} días...
             </p>
           </div>
         )}
