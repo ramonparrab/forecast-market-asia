@@ -709,8 +709,8 @@ export async function computeGlobalMetrics(): Promise<GlobalMetrics | null> {
     })
     .sort((a, b) => a.fecha.localeCompare(b.fecha))
 
-  const within2 = deduped.filter((r: any) => Math.abs(r.error!) <= 2).length
-  const accuracyPct = Math.round((within2 / deduped.length) * 10000) / 100
+  const within1 = deduped.filter((r: any) => Math.abs(r.error!) <= 1).length
+  const accuracyPct = Math.round((within1 / deduped.length) * 10000) / 100
 
   return {
     overall_mae: Math.round(mae * 100) / 100,
