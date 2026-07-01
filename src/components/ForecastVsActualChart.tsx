@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { ForecastVsActual } from '@/types'
 import {
   LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
-  ResponsiveContainer, Legend, ComposedChart, Scatter, ReferenceLine, Cell, Area
+  ResponsiveContainer, Legend, ComposedChart, Scatter, ReferenceLine, Cell
 } from 'recharts'
 
 interface Props {
@@ -291,8 +291,6 @@ export default function ForecastVsActualChart({ metrics }: Props) {
                         }} />
                         <YAxis stroke="#64748b" tick={{ fontSize: 10 }} domain={['dataMin - 2', 'dataMax + 2']} />
                         <Tooltip contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #475569', borderRadius: '8px', fontSize: '11px' }} labelStyle={{ color: '#f1f5f9' }} formatter={(value: number) => [`${value.toFixed(1)}°C`, '']} />
-                        <Area type="monotone" dataKey="banda_sup" stroke="transparent" fill="#8b5cf6" fillOpacity={0.06} />
-                        <Area type="monotone" dataKey="banda_inf" stroke="transparent" fill="#8b5cf6" fillOpacity={0.06} />
                         <Line type="monotone" dataKey="banda_sup" stroke="#8b5cf6" strokeWidth={1} strokeDasharray="3 3" dot={false} />
                         <Line type="monotone" dataKey="banda_inf" stroke="#8b5cf6" strokeWidth={1} strokeDasharray="3 3" dot={false} />
                         <Line type="monotone" dataKey="pronosticado" stroke="#3b82f6" strokeWidth={2} dot={{ r: 3 }} />

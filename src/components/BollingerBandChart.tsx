@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import {
-  ComposedChart, Line, Area, XAxis, YAxis, CartesianGrid, Tooltip,
-  ResponsiveContainer, Legend, ReferenceLine
+  ComposedChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
+  ResponsiveContainer, Legend
 } from 'recharts'
 import { CIUDADES_ASIA } from '@/lib/cities'
 
@@ -225,20 +225,6 @@ export default function BollingerBandChart() {
                     }}
                   />
                   <Legend wrapperStyle={{ fontSize: '11px' }} />
-                  <Area
-                    type="monotone"
-                    dataKey="banda_superior"
-                    stroke="transparent"
-                    fill="#8b5cf6"
-                    fillOpacity={0.08}
-                  />
-                  <Area
-                    type="monotone"
-                    dataKey="banda_inferior"
-                    stroke="transparent"
-                    fill="#8b5cf6"
-                    fillOpacity={0.08}
-                  />
                   <Line
                     type="monotone"
                     dataKey="banda_superior"
