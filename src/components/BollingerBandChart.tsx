@@ -12,6 +12,14 @@ function isTemp(v: any): v is number {
   return typeof v === 'number' && !isNaN(v) && v >= TEMP_MIN && v <= TEMP_MAX
 }
 
+function safeTemp(v: any): number {
+  const n = Number(v)
+  if (isNaN(n)) return TEMP_MIN
+  if (n < TEMP_MIN) return TEMP_MIN
+  if (n > TEMP_MAX) return TEMP_MAX
+  return n
+}
+
 interface CityData {
   slug: string
   ciudad: string
@@ -61,7 +69,7 @@ export default function BollingerBandChart() {
           slug, ciudad: info?.nombre ?? slug,
           pairs: sorted.map(x => ({
             fecha: String(x.fecha_objetivo).slice(0, 10),
-            pronostico: Number(x.temp_corregida),
+            pronostico: safeTemp(x.temp_corregida),
             real: isTemp(x.temp_real) ? Number(x.temp_real) : null,
           })),
           std: Math.round(std * 100) / 100,
@@ -111,10 +119,13 @@ export default function BollingerBandChart() {
           f: p.fecha,
           p: p.pronostico,
           r: p.real,
-          up: p.pronostico + half,
-          lo: p.pronostico - half,
+          up: safeTemp(p.pronostico + half),
+          lo: safeTemp(p.pronostico - half),
         }))
         const someOut = chartData.some(d => d.r !== null && (d.r > d.up || d.r < d.lo))
+        const allY = chartData.flatMap(d => [d.lo, d.up, d.p, d.r].filter((v): v is number => v !== null && !isNaN(v)))
+        const yMin = Math.floor(Math.min(...allY) - 1)
+        const yMax = Math.ceil(Math.max(...allY) + 1)
 
         return (
           <div key={city.slug} className="rounded-xl bg-slate-800/50 border border-gray-700/30 p-4 sm:p-6">
@@ -134,19 +145,19 @@ export default function BollingerBandChart() {
                   <XAxis dataKey="f" stroke="#64748b" tick={{ fontSize: 10 }}
                     tickFormatter={v => { const d = new Date(v + 'T12:00:00'); return d.toLocaleDateString('es-ES', { day: 'numeric', month: 'short' }) }} />
                   <YAxis stroke="#64748b" tick={{ fontSize: 11 }}
-                    domain={[Math.floor(Math.min(...chartData.map(d => d.lo)) - 1), Math.ceil(Math.max(...chartData.map(d => d.up)) + 1)]}
+                    domain={[yMin, yMax]}
                     label={{ value: 'C', angle: -90, position: 'insideLeft', fill: '#94a3b8', fontSize: 12 }} />
                   <Tooltip
                     contentStyle={{ background: '#1e293b', border: '1px solid #475569', borderRadius: 8, fontSize: 12 }}
                     labelFormatter={l => { const d = new Date(l + 'T12:00:00'); return d.toLocaleDateString('es-ES', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }) }}
                     formatter={(v: number, n: string) => [`${v.toFixed(1)}C`, { p: 'Pronostico', r: 'Real', up: 'Banda Sup', lo: 'Banda Inf' }[n] || n]} />
                   <Legend wrapperStyle={{ fontSize: 11 }} />
-                  {/* Band fill: two semi-transparent areas overlapping -> darker zone between lines */}
-                  <Area dataKey="up" fill="#8b5cf6" fillOpacity={0.5} stroke="none" />
-                  <Area dataKey="lo" fill="#8b5cf6" fillOpacity={0.5} stroke="none" />
-                  {/* Band lines */}
-                  <Line dataKey="up" stroke="#8b5cf6" strokeWidth={1.5} dot={false} />
-                  <Line dataKey="lo" stroke="#8b5cf6" strokeWidth={1.5} dot={false} />
+                  {/* Band fill via stackId: lo area invisible, up area stacked on top -> fills only between lo and up */}
+                  <Area dataKey="lo" stackId="band" fill="#a78bfa" fillOpacity={0} stroke="none" />
+                  <Area dataKey="up" stackId="band" fill="#a78bfa" fillOpacity={0.85} stroke="none" />
+                  {/* Band border lines */}
+                  <Line dataKey="up" stroke="#a78bfa" strokeWidth={1.5} dot={false} strokeDasharray="4 2" />
+                  <Line dataKey="lo" stroke="#a78bfa" strokeWidth={1.5} dot={false} strokeDasharray="4 2" />
                   {/* Forecast line */}
                   <Line dataKey="p" stroke="#3b82f6" strokeWidth={2.5} dot={{ r: 3, fill: '#3b82f6', strokeWidth: 0 }} activeDot={{ r: 5 }} />
                   {/* Actual temps */}
@@ -158,7 +169,7 @@ export default function BollingerBandChart() {
             <div className="flex items-center gap-4 text-[10px] text-gray-500 justify-center mt-2">
               <span><span className="inline-block h-2 w-2 rounded bg-blue-400 mr-1"></span>Pronostico</span>
               <span><span className="inline-block h-2 w-2 rounded bg-emerald-400 mr-1"></span>Real</span>
-              <span><span className="inline-block h-2 w-2 bg-purple-400 mr-1" style={{ opacity: 0.6 }}></span>Banda +/-{k}({half.toFixed(1)}C)</span>
+              <span><span className="inline-block h-2 w-2 bg-purple-400 mr-1" style={{ opacity: 0.85 }}></span>Banda +/-{k}({half.toFixed(1)}C)</span>
             </div>
             {someOut && <div className="mt-1 text-[10px] text-amber-400 text-center">Real fuera de banda</div>}
           </div>
