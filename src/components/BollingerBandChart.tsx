@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import {
-  ComposedChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
+  ComposedChart, Line, Area, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, Legend
 } from 'recharts'
 import { CIUDADES_ASIA } from '@/lib/cities'
@@ -12,8 +12,6 @@ interface CityBollingerData {
     fecha: string
     pronosticado: number
     real: number | null
-    banda_superior: number
-    banda_inferior: number
     error: number | null
   }[]
   stats: {
@@ -65,12 +63,10 @@ export default function BollingerBandChart() {
         const sorted = [...recs].sort((a, b) => a.fecha_objetivo.localeCompare(b.fecha_objetivo))
 
         const records = sorted.map(r => ({
-          fecha: r.fecha_objetivo,
-          pronosticado: r.temp_corregida,
-          real: r.temp_real,
-          banda_superior: r.temp_corregida + std * 2,
-          banda_inferior: r.temp_corregida - std * 2,
-          error: r.error,
+          fecha: r.fecha_objetivo.slice(0, 10),
+          pronosticado: Number(r.temp_corregida),
+          real: r.temp_real !== null ? Number(r.temp_real) : null,
+          error: r.error !== null ? Number(r.error) : null,
         }))
 
         const cityInfo = CIUDADES_ASIA.find(c => c.slug === slug)
@@ -118,7 +114,7 @@ export default function BollingerBandChart() {
               Bandas de Error: Pronóstico vs Real
             </h2>
             <p className="text-xs text-gray-400 mt-1">
-              Las bandas muestran el rango probable de la temperatura real basado en el error histórico del modelo (±{bandMultiplier}σ)
+              Las bandas muestran el rango probable de la temperatura real (±{bandMultiplier}σ del error histórico)
             </p>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
@@ -127,13 +123,13 @@ export default function BollingerBandChart() {
               onChange={e => setSelectedCity(e.target.value)}
               className="rounded-lg bg-slate-800 border border-gray-600 px-3 py-1.5 text-xs text-white focus:outline-none focus:border-purple-500"
             >
-              <option value="all">🏙️ Todas las ciudades</option>
+              <option value="all">Todas las ciudades</option>
               {cities.map(c => (
                 <option key={c.slug} value={c.slug}>{c.ciudad}</option>
               ))}
             </select>
             <div className="flex items-center gap-1 text-xs">
-              <span className="text-gray-400">σ ×</span>
+              <span className="text-gray-400">x</span>
               <select
                 value={bandMultiplier}
                 onChange={e => setBandMultiplier(Number(e.target.value))}
@@ -147,21 +143,27 @@ export default function BollingerBandChart() {
               </select>
             </div>
             <button onClick={loadData} className="text-xs text-purple-400 hover:text-purple-300 transition">
-              🔄
+              Actualizar
             </button>
           </div>
         </div>
       </div>
 
       {filtered.map(city => {
+        const k = bandMultiplier
+        const sup = city.stats.std * k
+
         const chartData = city.records.map(r => ({
-          ...r,
-          banda_superior: r.pronosticado + city.stats.std * bandMultiplier,
-          banda_inferior: r.pronosticado - city.stats.std * bandMultiplier,
+          fecha: r.fecha,
+          pronosticado: r.pronosticado,
+          real: r.real,
+          banda_sup: r.pronosticado + sup,
+          banda_inf: r.pronosticado - sup,
+          band_width: sup * 2,
         }))
 
         const actuals = chartData.filter(d => d.real !== null)
-        const bandaInColor = actuals.some(d => d.real !== null && (d.real > d.banda_superior || d.real < d.banda_inferior))
+        const someOutside = actuals.some(d => d.real! > d.banda_sup || d.real! < d.banda_inf)
 
         return (
           <div key={city.slug} className="rounded-xl bg-slate-800/50 border border-gray-700/30 p-4 sm:p-6">
@@ -169,21 +171,21 @@ export default function BollingerBandChart() {
               <div>
                 <h3 className="text-base font-bold text-white">{city.ciudad}</h3>
                 <p className="text-[10px] text-gray-500">
-                  σ={city.stats.std.toFixed(2)}°C · MAE={city.stats.mae.toFixed(2)}°C · Bias={city.stats.bias > 0 ? '+' : ''}{city.stats.bias.toFixed(2)}°C · {city.stats.n} registros
+                  ={city.stats.std.toFixed(2)}C . MAE={city.stats.mae.toFixed(2)}C . Bias={city.stats.bias > 0 ? '+' : ''}{city.stats.bias.toFixed(2)}C . {city.stats.n} registros
                 </p>
               </div>
               <div className="flex items-center gap-2 text-[10px]">
                 <span className="flex items-center gap-1">
                   <span className="inline-block h-2 w-2 rounded bg-blue-400"></span>
-                  <span className="text-gray-400">Pronóstico</span>
+                  <span className="text-gray-400">Pronostico</span>
                 </span>
                 <span className="flex items-center gap-1">
                   <span className="inline-block h-2 w-2 rounded bg-emerald-400"></span>
                   <span className="text-gray-400">Real</span>
                 </span>
                 <span className="flex items-center gap-1">
-                  <span className="inline-block h-2 w-2 rounded bg-purple-400/40"></span>
-                  <span className="text-gray-400">±{bandMultiplier}σ</span>
+                  <span className="inline-block h-2 w-0 border-l-2 border-dashed border-purple-400 rotate-90"></span>
+                  <span className="text-gray-400">+/-{k}({sup.toFixed(1)}C)</span>
                 </span>
               </div>
             </div>
@@ -191,6 +193,11 @@ export default function BollingerBandChart() {
             <div className="h-72 sm:h-96">
               <ResponsiveContainer width="100%" height="100%">
                 <ComposedChart data={chartData} margin={{ top: 10, right: 20, bottom: 10, left: 0 }}>
+                  <defs>
+                    <clipPath id="band-clip-{city.slug}">
+                      <rect x="0" y="0" width="100%" height="100%" />
+                    </clipPath>
+                  </defs>
                   <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
                   <XAxis
                     dataKey="fecha"
@@ -205,19 +212,19 @@ export default function BollingerBandChart() {
                     stroke="#64748b"
                     tick={{ fontSize: 11 }}
                     domain={['dataMin - 2', 'dataMax + 2']}
-                    label={{ value: '°C', angle: -90, position: 'insideLeft', fill: '#94a3b8', fontSize: 12 }}
+                    label={{ value: 'C', angle: -90, position: 'insideLeft', fill: '#94a3b8', fontSize: 12 }}
                   />
                   <Tooltip
                     contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #475569', borderRadius: '8px', fontSize: '12px' }}
                     labelStyle={{ color: '#f1f5f9', fontWeight: 'bold' }}
                     formatter={(value: number, name: string) => {
                       const labels: Record<string, string> = {
-                        pronosticado: 'Pronóstico',
+                        pronosticado: 'Pronostico',
                         real: 'Real',
-                        banda_superior: 'Banda Superior',
-                        banda_inferior: 'Banda Inferior',
+                        banda_sup: 'Banda Sup',
+                        banda_inf: 'Banda Inf',
                       }
-                      return [`${value.toFixed(1)}°C`, labels[name] || name]
+                      return [`${value.toFixed(1)}C`, labels[name] || name]
                     }}
                     labelFormatter={label => {
                       const d = new Date(label + 'T12:00:00')
@@ -225,23 +232,37 @@ export default function BollingerBandChart() {
                     }}
                   />
                   <Legend wrapperStyle={{ fontSize: '11px' }} />
-                  <Line
-                    type="monotone"
-                    dataKey="banda_superior"
-                    stroke="#8b5cf6"
-                    strokeWidth={1}
-                    strokeDasharray="4 4"
-                    dot={false}
-                    name="banda_superior"
+                  {/* Band fill: transparent from 0 to lower band, colored from lower to upper */}
+                  <Area
+                    dataKey="banda_inf"
+                    stackId="band"
+                    stroke="none"
+                    fill="transparent"
+                  />
+                  <Area
+                    dataKey="band_width"
+                    stackId="band"
+                    stroke="none"
+                    fill="#8b5cf6"
+                    fillOpacity={0.45}
                   />
                   <Line
                     type="monotone"
-                    dataKey="banda_inferior"
+                    dataKey="banda_sup"
                     stroke="#8b5cf6"
                     strokeWidth={1}
                     strokeDasharray="4 4"
                     dot={false}
-                    name="banda_inferior"
+                    name="banda_sup"
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="banda_inf"
+                    stroke="#8b5cf6"
+                    strokeWidth={1}
+                    strokeDasharray="4 4"
+                    dot={false}
+                    name="banda_inf"
                   />
                   <Line
                     type="monotone"
@@ -266,24 +287,9 @@ export default function BollingerBandChart() {
               </ResponsiveContainer>
             </div>
 
-            <div className="mt-3 flex items-center gap-4 text-[10px] text-gray-500 justify-center">
-              <span className="flex items-center gap-1.5">
-                <span className="inline-block h-3 w-3 rounded-full bg-blue-400"></span>
-                <span>Pronóstico corregido</span>
-              </span>
-              <span className="flex items-center gap-1.5">
-                <span className="inline-block h-3 w-3 rounded-full bg-emerald-400"></span>
-                <span>Temperatura real</span>
-              </span>
-              <span className="flex items-center gap-1.5">
-                <span className="inline-block h-3 w-0 border-l-2 border-dashed border-purple-400 rotate-90"></span>
-                <span>Banda ±{bandMultiplier}σ ({city.stats.std.toFixed(2)}°C)</span>
-              </span>
-            </div>
-
-            {bandaInColor && (
+            {someOutside && (
               <div className="mt-2 rounded-lg bg-amber-500/10 border border-amber-500/20 p-2 text-[10px] text-amber-300 text-center">
-                ⚠️ Hay temperaturas reales fuera de la banda ±{bandMultiplier}σ — el error real superó el rango esperado
+                Temperaturas reales fuera de la banda +/-{k} - el error real supero el rango esperado
               </div>
             )}
           </div>
@@ -291,12 +297,12 @@ export default function BollingerBandChart() {
       })}
 
       <div className="rounded-xl bg-slate-800/30 border border-gray-700/30 p-3 text-[10px] text-gray-500">
-        <p className="font-medium text-gray-400 mb-1">📖 ¿Cómo leer este gráfico?</p>
+        <p className="font-medium text-gray-400 mb-1">Como leer este grafico</p>
         <ul className="space-y-0.5">
-          <li><strong className="text-blue-300">Línea azul</strong> = Temperatura pronosticada por el ensemble (corregida con bias dinámico)</li>
-          <li><strong className="text-emerald-300">Línea verde</strong> = Temperatura máxima real que ocurrió</li>
-          <li><strong className="text-purple-300">Banda morada</strong> = Rango esperado del error ±{bandMultiplier}σ (desviación estándar histórica del error)</li>
-          <li>Si la línea verde sale de la banda morada, el error fue mayor al esperado — el modelo estaba menos seguro de lo que indicaba</li>
+          <li><strong className="text-blue-300">Linea azul</strong> = Temperatura pronosticada</li>
+          <li><strong className="text-emerald-300">Linea verde</strong> = Temperatura real</li>
+          <li><strong className="text-purple-300">Banda morada</strong> = Rango +/-{bandMultiplier} (desviacion estandar historica del error)</li>
+          <li>La banda solo aparece ENTRE las lineas punteadas, el fondo fuera de ella es transparente</li>
         </ul>
       </div>
     </div>
