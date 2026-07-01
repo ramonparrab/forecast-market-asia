@@ -60,6 +60,10 @@ export default function ComparisonPanel() {
         }))
 
         const avgError = items.reduce((s, i) => s + i.error, 0) / items.length
+        const allTemps = chartData.flatMap(d => [d.pronostico, d.real]).filter((v): v is number => typeof v === 'number' && !isNaN(v))
+        const yDomain: [number, number] = allTemps.length > 0
+          ? [Math.min(...allTemps) - 2, Math.max(...allTemps) + 2]
+          : [0, 50]
 
         return (
           <div key={slug} className="card">
@@ -80,10 +84,10 @@ export default function ComparisonPanel() {
                 <LineChart data={chartData}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
                   <XAxis dataKey="fecha" stroke="#64748b" tick={{ fontSize: 9 }} interval="preserveStartEnd" />
-                  <YAxis stroke="#64748b" tick={{ fontSize: 10 }} domain={['dataMin - 1', 'dataMax + 1']} />
+                  <YAxis stroke="#64748b" tick={{ fontSize: 10 }} domain={yDomain} />
                   <Tooltip contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '8px' }} labelStyle={{ color: '#f1f5f9' }} />
                   <Legend wrapperStyle={{ fontSize: '11px' }} />
-                  <Line type="monotone" dataKey="pronostico" stroke="#3b82f6" strokeWidth={2} dot={{ r: 3 }} name="Pronóstico 10PM Caracas" />
+                  <Line type="monotone" dataKey="pronostico" stroke="#3b82f6" strokeWidth={2} dot={{ r: 3 }} name="Pronostico 10PM Caracas" />
                   <Line type="monotone" dataKey="real" stroke="#f59e0b" strokeWidth={2} dot={{ r: 3 }} name="Temp. Real" />
                 </LineChart>
               </ResponsiveContainer>

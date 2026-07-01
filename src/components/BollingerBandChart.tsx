@@ -142,8 +142,8 @@ export default function BollingerBandChart() {
                     formatter={(v: number, n: string) => [`${v.toFixed(1)}C`, { p: 'Pronostico', r: 'Real', up: 'Banda Sup', lo: 'Banda Inf' }[n] || n]} />
                   <Legend wrapperStyle={{ fontSize: 11 }} />
                   {/* Band fill: two semi-transparent areas overlapping -> darker zone between lines */}
-                  <Area dataKey="up" fill="#8b5cf6" fillOpacity={0.3} stroke="none" />
-                  <Area dataKey="lo" fill="#8b5cf6" fillOpacity={0.3} stroke="none" />
+                  <Area dataKey="up" fill="#8b5cf6" fillOpacity={0.5} stroke="none" />
+                  <Area dataKey="lo" fill="#8b5cf6" fillOpacity={0.5} stroke="none" />
                   {/* Band lines */}
                   <Line dataKey="up" stroke="#8b5cf6" strokeWidth={1.5} dot={false} />
                   <Line dataKey="lo" stroke="#8b5cf6" strokeWidth={1.5} dot={false} />

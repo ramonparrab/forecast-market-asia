@@ -275,6 +275,10 @@ export default function ForecastVsActualChart({ metrics }: Props) {
                 banda_inf: r.temp_corregida - std * 2,
               }))
               const hasOutside = chartData.some(d => d.real !== null && (d.real > d.banda_sup || d.real < d.banda_inf))
+              const allVals = chartData.flatMap(d => [d.pronosticado, d.real]).filter((v): v is number => typeof v === 'number' && !isNaN(v))
+              const yDomain2: [number, number] = allVals.length > 0
+                ? [Math.min(...allVals) - 2, Math.max(...allVals) + 2]
+                : [0, 50]
               return (
                 <div key={slug} className="mb-4 last:mb-0">
                   <div className="flex items-center justify-between mb-1">
@@ -289,7 +293,7 @@ export default function ForecastVsActualChart({ metrics }: Props) {
                           const d = new Date(v + 'T12:00:00')
                           return d.toLocaleDateString('es-ES', { day: 'numeric', month: 'short' })
                         }} />
-                        <YAxis stroke="#64748b" tick={{ fontSize: 10 }} domain={['dataMin - 2', 'dataMax + 2']} />
+                        <YAxis stroke="#64748b" tick={{ fontSize: 10 }} domain={yDomain2} />
                         <Tooltip contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #475569', borderRadius: '8px', fontSize: '11px' }} labelStyle={{ color: '#f1f5f9' }} formatter={(value: number) => [`${value.toFixed(1)}°C`, '']} />
                         <Line type="monotone" dataKey="banda_sup" stroke="#8b5cf6" strokeWidth={1} strokeDasharray="3 3" dot={false} />
                         <Line type="monotone" dataKey="banda_inf" stroke="#8b5cf6" strokeWidth={1} strokeDasharray="3 3" dot={false} />
