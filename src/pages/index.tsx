@@ -8,6 +8,7 @@ import ArbitragePanel from '@/components/ArbitragePanel'
 import ForecastTable from '@/components/ForecastTable'
 import BacktestChart from '@/components/BacktestChart'
 import ExecutiveSummaryPanel from '@/components/ExecutiveSummary'
+import ComparisonPanel from '@/components/ComparisonPanel'
 import { DailyAnalysis, GlobalMetrics, CityAnalysis } from '@/types'
 
 export async function getServerSideProps() {
@@ -781,7 +782,21 @@ export default function Home({ initialAnalysis, initialMetrics, initialAvailable
       {activeView === 'metrics' && <MetricsChart metrics={metrics} />}
 
       {/* Comparison View - Forecast vs Actual per city */}
-      {activeView === 'comparison' && <ForecastVsActualChart metrics={metrics} />}
+      {activeView === 'comparison' && (
+        <div className="space-y-6">
+          <ForecastVsActualChart metrics={metrics} />
+          <details className="rounded-xl bg-slate-800/50 border border-gray-700/30 overflow-hidden">
+            <summary className="cursor-pointer px-4 py-3 text-sm font-medium text-blue-400 hover:text-blue-300 transition flex items-center gap-2">
+              <span>📋</span>
+              Ver comparación clásica por ciudad (30 días)
+              <span className="ml-auto text-xs text-gray-500">(click para expandir)</span>
+            </summary>
+            <div className="p-4 pt-2">
+              <ComparisonPanel />
+            </div>
+          </details>
+        </div>
+      )}
 
       {/* Backtest View */}
       {activeView === 'backtest' && <BacktestChart />}

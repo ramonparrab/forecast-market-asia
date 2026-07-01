@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { ForecastVsActual } from '@/types'
 import {
   LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
-  ResponsiveContainer, Legend, ComposedChart, Scatter, ReferenceLine, Cell
+  ResponsiveContainer, Legend, ComposedChart, Scatter, ReferenceLine, Cell, Area
 } from 'recharts'
 
 interface Props {
@@ -31,6 +31,7 @@ export default function ForecastVsActualChart({ metrics }: Props) {
   const [showBacktest, setShowBacktest] = useState(true)
   const [backtestData, setBacktestData] = useState<BacktestPoint[]>([])
   const [btLoading, setBtLoading] = useState(false)
+  const [viewMode, setViewMode] = useState<'general' | 'per-city' | 'bollinger'>('general')
 
   // Load data on mount
   useEffect(() => {
@@ -216,6 +217,99 @@ export default function ForecastVsActualChart({ metrics }: Props) {
         </div>
       </div>
 
+      {/* View mode selector */}
+      <div className="flex gap-1 rounded-lg bg-slate-800 p-1 w-fit">
+        <button
+          onClick={() => setViewMode('general')}
+          className={`rounded-md px-3 py-1.5 text-xs font-medium transition ${viewMode === 'general' ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/20' : 'text-gray-400 hover:text-gray-200'}`}
+        >
+          📊 General
+        </button>
+        <button
+          onClick={() => setViewMode('per-city')}
+          className={`rounded-md px-3 py-1.5 text-xs font-medium transition ${viewMode === 'per-city' ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/20' : 'text-gray-400 hover:text-gray-200'}`}
+        >
+          🏙️ Por Ciudad
+        </button>
+        <button
+          onClick={() => setViewMode('bollinger')}
+          className={`rounded-md px-3 py-1.5 text-xs font-medium transition ${viewMode === 'bollinger' ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/20' : 'text-gray-400 hover:text-gray-200'}`}
+        >
+          📈 Bandas de Error
+        </button>
+      </div>
+
+      {/* Bollinger Band View */}
+      {viewMode === 'bollinger' && (
+        <div className="card">
+          <div className="mb-3">
+            <h3 className="text-sm font-bold text-purple-400 flex items-center gap-2">
+              <span>📈</span>
+              Bandas de Error (Bollinger) — Pronóstico vs Real
+            </h3>
+            <p className="text-[10px] text-gray-500">
+              Las bandas muestran ±2σ del error histórico. Cuando el real (verde) sale de la banda, el error fue mayor al esperado.
+            </p>
+          </div>
+          {(() => {
+            // Group data by city for per-city bollinger bands
+            const byCity: Record<string, any[]> = {}
+            for (const d of data) {
+              if (!byCity[d.slug]) byCity[d.slug] = []
+              byCity[d.slug].push(d)
+            }
+            const cityEntries = Object.entries(byCity)
+            if (cityEntries.length === 0) return <p className="text-xs text-gray-500">Sin datos suficientes</p>
+            return cityEntries.map(([slug, recs]) => {
+              const sorted = [...recs].sort((a, b) => a.fecha_objetivo.localeCompare(b.fecha_objetivo))
+              const errors = sorted.map(r => r.error).filter(e => e !== null) as number[]
+              if (errors.length < 2) return null
+              const mean = errors.reduce((s, v) => s + v, 0) / errors.length
+              const std = Math.sqrt(errors.reduce((s, v) => s + (v - mean) ** 2, 0) / errors.length)
+              const cityName = sorted[0]?.ciudad || slug
+              const chartData = sorted.map(r => ({
+                fecha: r.fecha_objetivo,
+                pronosticado: r.temp_corregida,
+                real: r.temp_real,
+                banda_sup: r.temp_corregida + std * 2,
+                banda_inf: r.temp_corregida - std * 2,
+              }))
+              const hasOutside = chartData.some(d => d.real !== null && (d.real > d.banda_sup || d.real < d.banda_inf))
+              return (
+                <div key={slug} className="mb-4 last:mb-0">
+                  <div className="flex items-center justify-between mb-1">
+                    <h4 className="text-xs font-bold text-white">{cityName}</h4>
+                    <span className="text-[9px] text-gray-500">σ={std.toFixed(2)}°C · MAE={(errors.reduce((s, v) => s + Math.abs(v), 0) / errors.length).toFixed(2)}°C</span>
+                  </div>
+                  <div className="h-56">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <ComposedChart data={chartData} margin={{ top: 5, right: 10, bottom: 5, left: -10 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
+                        <XAxis dataKey="fecha" stroke="#64748b" tick={{ fontSize: 9 }} tickFormatter={v => {
+                          const d = new Date(v + 'T12:00:00')
+                          return d.toLocaleDateString('es-ES', { day: 'numeric', month: 'short' })
+                        }} />
+                        <YAxis stroke="#64748b" tick={{ fontSize: 10 }} domain={['dataMin - 2', 'dataMax + 2']} />
+                        <Tooltip contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #475569', borderRadius: '8px', fontSize: '11px' }} labelStyle={{ color: '#f1f5f9' }} formatter={(value: number) => [`${value.toFixed(1)}°C`, '']} />
+                        <Area type="monotone" dataKey="banda_sup" stroke="transparent" fill="#8b5cf6" fillOpacity={0.06} />
+                        <Area type="monotone" dataKey="banda_inf" stroke="transparent" fill="#8b5cf6" fillOpacity={0.06} />
+                        <Line type="monotone" dataKey="banda_sup" stroke="#8b5cf6" strokeWidth={1} strokeDasharray="3 3" dot={false} />
+                        <Line type="monotone" dataKey="banda_inf" stroke="#8b5cf6" strokeWidth={1} strokeDasharray="3 3" dot={false} />
+                        <Line type="monotone" dataKey="pronosticado" stroke="#3b82f6" strokeWidth={2} dot={{ r: 3 }} />
+                        <Line type="monotone" dataKey="real" stroke="#10b981" strokeWidth={2} dot={{ r: 3 }} connectNulls={false} />
+                      </ComposedChart>
+                    </ResponsiveContainer>
+                  </div>
+                  {hasOutside && (
+                    <div className="mt-1 text-[9px] text-amber-400">⚠️ Real fuera de banda</div>
+                  )}
+                </div>
+              )
+            })
+          })()}
+        </div>
+      )}
+
       {/* Source badges */}
       <div className="flex items-center gap-4 text-xs text-gray-400">
         {hasLive && <span className="flex items-center gap-1"><span className="inline-block h-2.5 w-2.5 rounded-full bg-emerald-400"></span> Live ({data.length} regs)</span>}
@@ -338,8 +432,76 @@ export default function ForecastVsActualChart({ metrics }: Props) {
         </div>
       )}
 
+      {/* Per-city large charts */}
+      {viewMode === 'per-city' && data.length > 0 && (
+        <div className="card">
+          <h3 className="mb-3 text-sm font-bold text-white flex items-center gap-2">
+            <span>🏙️</span>
+            Pronóstico vs Real — Por Ciudad
+            <span className="text-xs font-normal text-gray-500">(datos históricos con temp_real)</span>
+          </h3>
+          <div className="space-y-6">
+            {allCities.map(ciudad => {
+              const cityData = data.filter(d => d.ciudad === ciudad).sort((a, b) => a.fecha_objetivo.localeCompare(b.fecha_objetivo))
+              if (cityData.length < 2) return null
+              const cityChartData = cityData.map(d => ({
+                fecha: d.fecha_objetivo,
+                Pronóstico: d.temp_corregida,
+                Real: d.temp_real,
+              }))
+              const cityError = cityData.reduce((s, d) => s + Math.abs(d.error), 0) / cityData.length
+              return (
+                <div key={ciudad} className="rounded-xl bg-slate-900/50 border border-gray-700/20 p-4">
+                  <div className="flex items-center justify-between mb-2">
+                    <h4 className="text-base font-bold text-white">{ciudad}</h4>
+                    <div className="flex items-center gap-3 text-[10px]">
+                      <span className="text-gray-500">MAE: <span className={cityError <= 1.5 ? 'text-emerald-400' : 'text-amber-400'}>{cityError.toFixed(2)}°C</span></span>
+                      <span className="text-gray-500">{cityData.length} registros</span>
+                    </div>
+                  </div>
+                  <div className="h-64 sm:h-72">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <ComposedChart data={cityChartData} margin={{ top: 10, right: 20, bottom: 10, left: 0 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
+                        <XAxis
+                          dataKey="fecha"
+                          stroke="#64748b"
+                          tick={{ fontSize: 11 }}
+                          tickFormatter={v => {
+                            const d = new Date(v + 'T12:00:00')
+                            return d.toLocaleDateString('es-ES', { day: 'numeric', month: 'short' })
+                          }}
+                        />
+                        <YAxis
+                          stroke="#64748b"
+                          tick={{ fontSize: 12 }}
+                          domain={['dataMin - 1.5', 'dataMax + 1.5']}
+                          label={{ value: 'Temperatura °C', angle: -90, position: 'insideLeft', fill: '#94a3b8', fontSize: 12 }}
+                        />
+                        <Tooltip
+                          contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #475569', borderRadius: '8px', fontSize: '13px' }}
+                          labelStyle={{ color: '#f1f5f9', fontWeight: 'bold' }}
+                          formatter={(value: number, name: string) => [`${value.toFixed(1)}°C`, name]}
+                          labelFormatter={label => {
+                            const d = new Date(label + 'T12:00:00')
+                            return d.toLocaleDateString('es-ES', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })
+                          }}
+                        />
+                        <Legend wrapperStyle={{ fontSize: '12px' }} />
+                        <Line type="monotone" dataKey="Pronóstico" stroke="#3b82f6" strokeWidth={2.5} dot={{ r: 4, fill: '#3b82f6' }} activeDot={{ r: 6 }} />
+                        <Line type="monotone" dataKey="Real" stroke="#10b981" strokeWidth={2.5} dot={{ r: 4, fill: '#10b981' }} activeDot={{ r: 6 }} />
+                      </ComposedChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
       {/* Best/Worst (live) */}
-      {hasLive && (
+      {hasLive && viewMode === 'general' && (
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="card">
             <h3 className="mb-3 text-sm font-medium text-emerald-400">🏆 Mejores (Live)</h3>

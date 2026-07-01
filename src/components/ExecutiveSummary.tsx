@@ -183,10 +183,79 @@ export default function ExecutiveSummaryPanel({ analysis, metrics, previousAnaly
   }, [analysis, metrics, previousAnalysis, previousMetrics])
 
   if (!summary) {
+    const hasAnalysis = analysis && analysis.cities.length > 0
     return (
-      <div className="rounded-2xl bg-slate-800/50 border border-gray-700/30 p-8 text-center">
-        <div className="text-4xl mb-4">📊</div>
-        <p className="text-gray-400">Ejecuta el análisis para ver el Resumen Ejecutivo</p>
+      <div className="space-y-6">
+        {/* Hero CTA */}
+        {!hasAnalysis && (
+          <div className="rounded-2xl bg-gradient-to-br from-slate-800/50 to-slate-900/50 border border-gray-700/30 p-8 text-center">
+            <div className="text-4xl mb-4">📊</div>
+            <h2 className="text-xl font-bold text-white mb-2">Resumen Ejecutivo de Forecast</h2>
+            <p className="text-gray-400 mb-4">Ejecuta el análisis para ver las recomendaciones del día, precisión global, y oportunidades de apuesta.</p>
+            <div className="grid grid-cols-3 gap-4 max-w-lg mx-auto text-xs">
+              <div className="rounded-lg bg-blue-500/10 border border-blue-500/20 p-3">
+                <p className="text-blue-400 font-bold mb-1">🎯 Recomendación</p>
+                <p className="text-gray-500">Mejor apuesta del día con edge positivo</p>
+              </div>
+              <div className="rounded-lg bg-emerald-500/10 border border-emerald-500/20 p-3">
+                <p className="text-emerald-400 font-bold mb-1">📈 Precisión</p>
+                <p className="text-gray-500">Evolución diaria del acierto ±1°C</p>
+              </div>
+              <div className="rounded-lg bg-purple-500/10 border border-purple-500/20 p-3">
+                <p className="text-purple-400 font-bold mb-1">💰 Plan Acción</p>
+                <p className="text-gray-500">Asignación Kelly con presupuesto $10/día</p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Show basic analysis info even without summary */}
+        {hasAnalysis && (
+          <div className="rounded-2xl bg-gradient-to-br from-blue-600/10 via-blue-500/5 to-blue-600/10 border border-blue-500/20 p-6">
+            <h2 className="text-lg font-bold text-white mb-3 flex items-center gap-2">
+              <span>📊</span>
+              Resumen del Análisis — {analysis.fecha_objetivo}
+            </h2>
+            <p className="text-sm text-gray-300 mb-4">{analysis.message}</p>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <div className="rounded-lg bg-slate-900/50 border border-gray-700/30 p-3 text-center">
+                <p className="text-2xl font-bold text-white">{analysis.cities.length}</p>
+                <p className="text-xs text-gray-400">Ciudades analizadas</p>
+              </div>
+              <div className="rounded-lg bg-slate-900/50 border border-gray-700/30 p-3 text-center">
+                <p className="text-2xl font-bold text-amber-400">{analysis.recommendations.length}</p>
+                <p className="text-xs text-gray-400">Recomendaciones</p>
+              </div>
+              <div className="rounded-lg bg-slate-900/50 border border-gray-700/30 p-3 text-center">
+                <p className="text-2xl font-bold text-emerald-400">${analysis.total_allocated.toFixed(2)}</p>
+                <p className="text-xs text-gray-400">Total asignado</p>
+              </div>
+              <div className="rounded-lg bg-slate-900/50 border border-gray-700/30 p-3 text-center">
+                <p className="text-2xl font-bold text-blue-400">{analysis.recommendations.filter(r => r.edge > 5).length}</p>
+                <p className="text-xs text-gray-400">Oportunidades (edge &gt;5%)</p>
+              </div>
+            </div>
+            {metrics && (
+              <div className="mt-4 rounded-lg bg-slate-900/50 border border-gray-700/30 p-3 flex items-center justify-between text-sm">
+                <span className="text-gray-400">Precisión global ±1°C:</span>
+                <span className="text-emerald-400 font-bold">{metrics.accuracy_pct.toFixed(1)}%</span>
+                <span className="text-gray-500">MAE: {metrics.overall_mae.toFixed(2)}°C</span>
+                <span className="text-gray-500">Bias: {metrics.overall_bias > 0 ? '+' : ''}{metrics.overall_bias.toFixed(2)}°C</span>
+                <span className="text-gray-500">Muestras: {metrics.total_muestras}</span>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Help text */}
+        <div className="rounded-xl bg-slate-800/30 border border-gray-700/30 p-4 text-xs text-gray-500">
+          <p className="font-medium text-gray-400 mb-2">💡 ¿Qué necesitas para ver el Resumen Ejecutivo completo?</p>
+          <ul className="space-y-1">
+            <li>1. El sistema debe tener al menos 5 registros históricos con temperatura real (±1°C de precisión)</li>
+            <li>2. Debe haber contratos en Polymarket con edge positivo (&gt;4%)</li>
+            <li>3. El análisis diario debe ejecutarse (usa el botón <strong className="text-blue-400">🚀 Actualizar</strong>)</li>
+          </ul>
+        </div>
       </div>
     )
   }
