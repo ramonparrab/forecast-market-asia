@@ -260,7 +260,8 @@ export async function getForecastVsActual(
   }
 
   return Array.from(seen.values())
-    .sort((a, b) => b.fecha_objetivo.localeCompare(a.fecha_objetivo)) as any[]
+    .sort((a, b) => b.fecha_objetivo.localeCompare(a.fecha_objetivo))
+    .map(({ id, ...rest }: any) => rest) as any[]
 }
 
 /**

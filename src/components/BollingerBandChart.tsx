@@ -244,7 +244,7 @@ export default function BollingerBandChart() {
                     stackId="band"
                     stroke="none"
                     fill="#8b5cf6"
-                    fillOpacity={0.45}
+                    fillOpacity={0.7}
                   />
                   <Line
                     type="monotone"

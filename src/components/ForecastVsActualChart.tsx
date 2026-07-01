@@ -170,7 +170,7 @@ export default function ForecastVsActualChart({ metrics }: Props) {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div className="flex items-center gap-3 flex-wrap">
-          <h2 className="text-lg font-semibold text-white">📊 Comparaci├│n por Ciudad</h2>
+          <h2 className="text-lg font-semibold text-white">📊 Comparacion por Ciudad</h2>
           {/* City selector */}
           <select
             value={selectedCity}
