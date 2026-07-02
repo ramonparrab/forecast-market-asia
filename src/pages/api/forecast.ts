@@ -1,5 +1,6 @@
 import { NextApiRequest, NextApiResponse } from 'next'
 import { runDailyAnalysis } from '@/lib/forecast-engine'
+import { CityAnalysis } from '@/types'
 import { saveDailyRun, saveForecastRecords } from '@/lib/supabase'
 import { CIUDADES_ASIA } from '@/lib/cities'
 
@@ -18,6 +19,25 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const defaultFecha = nowCaracas.toISOString().slice(0, 10)
     const fecha = fechaQuery || defaultFecha
     const result = await runDailyAnalysis(fecha, true)
+
+    // Preserve temp_corregida from the 10PM Caracas cron run if it exists
+    try {
+      const savedResp = await fetch(`${process.env.NEXT_PUBLIC_SUPABASE_URL}/rest/v1/daily_runs?fecha_objetivo=eq.${fecha}&order=fecha_ejecucion.desc&limit=1`, {
+        headers: { apikey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '', Authorization: `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''}` },
+        signal: AbortSignal.timeout(5000),
+      })
+      if (savedResp.ok) {
+        const savedRows = await savedResp.json()
+        if (savedRows && savedRows.length > 0) {
+          const savedCities: CityAnalysis[] = typeof savedRows[0].resultados === 'string' ? JSON.parse(savedRows[0].resultados) : savedRows[0].resultados
+          const savedMap = new Map(savedCities.map(c => [c.slug, c.forecast.temp_corregida]))
+          for (const city of result.cities) {
+            const saved = savedMap.get(city.slug)
+            if (saved !== undefined) city.forecast.temp_corregida = saved
+          }
+        }
+      }
+    } catch { /* no saved cron data — use freshly computed values */ }
 
     // Save to Supabase (fire-and-forget for manual runs)
     const records = result.cities.map(city => ({
