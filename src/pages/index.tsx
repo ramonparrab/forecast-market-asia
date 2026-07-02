@@ -466,11 +466,12 @@ export default function Home({ initialAnalysis, initialMetrics, initialAvailable
     const init = async () => {
       await fetchMetrics()
       await fetchAvailableDates()
-      const today = getDefaultTargetDate()
-      setSelectedDate(today)
-      // Auto-load today's cron result (saved at 10PM Caracas)
+      // Load today's cron result (cron runs at 10PM Caracas, fecha_objetivo = today in Caracas)
+      const caracasOffset = -4 * 60 * 60000
+      const todayCaracas = new Date(Date.now() + caracasOffset).toISOString().slice(0, 10)
+      setSelectedDate(getDefaultTargetDate())
       try {
-        const resp = await fetch(`/api/forecast-history?fecha=${today}`)
+        const resp = await fetch(`/api/forecast-history?fecha=${todayCaracas}`)
         if (resp.ok) {
           const data: DailyAnalysis = await resp.json()
           setAnalysis(data)
