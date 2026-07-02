@@ -266,16 +266,16 @@ export default function ForecastVsActualChart({ metrics }: Props) {
               if (errors.length < 2) return null
               const mean = errors.reduce((s, v) => s + v, 0) / errors.length
               const std = Math.sqrt(errors.reduce((s, v) => s + (v - mean) ** 2, 0) / errors.length)
-              const maxAbsErr = Math.max(...errors.map(Math.abs))
-              const maxErr = Math.max(...errors)
-              const minErr = Math.min(...errors)
+              const errSorted = [...errors].sort((a, b) => a - b)
+              const pLow = errSorted[Math.max(0, Math.floor(errSorted.length * 0.05))]
+              const pHigh = errSorted[Math.min(errSorted.length - 1, Math.floor(errSorted.length * 0.95))]
               const cityName = sorted[0]?.ciudad || slug
               const chartData = sorted.map(r => ({
                 fecha: r.fecha_objetivo,
                 pronosticado: r.temp_corregida,
                 real: r.temp_real,
-                banda_sup: r.temp_corregida + maxAbsErr,
-                banda_inf: r.temp_corregida - maxAbsErr,
+                banda_sup: r.temp_corregida + pHigh,
+                banda_inf: r.temp_corregida + pLow,
               }))
               const hasOutside = chartData.some(d => d.real !== null && (d.real > d.banda_sup || d.real < d.banda_inf))
               const lastForecast = chartData.length > 0 ? chartData[chartData.length - 1].pronosticado : 0
@@ -287,7 +287,7 @@ export default function ForecastVsActualChart({ metrics }: Props) {
                 <div key={slug} className="mb-4 last:mb-0">
                   <div className="flex items-center justify-between mb-1">
                     <h4 className="text-xs font-bold text-white">{cityName}</h4>
-                    <span className="text-[9px] text-gray-500">Error max: ±{maxAbsErr.toFixed(2)}°C · MAE={(errors.reduce((s, v) => s + Math.abs(v), 0) / errors.length).toFixed(2)}°C · σ={std.toFixed(2)}°C</span>
+                    <span className="text-[9px] text-gray-500">Banda P5-P95: [{pLow.toFixed(2)},{pHigh.toFixed(2)}]°C · MAE={(errors.reduce((s, v) => s + Math.abs(v), 0) / errors.length).toFixed(2)}°C</span>
                   </div>
                   <div className="h-56">
                     <ResponsiveContainer width="100%" height="100%">
@@ -304,8 +304,8 @@ export default function ForecastVsActualChart({ metrics }: Props) {
                         }} />
                         <Legend wrapperStyle={{ fontSize: '10px' }} />
                         {/* Band boundaries */}
-                        <Line type="monotone" dataKey="banda_sup" stroke="#e879f9" strokeWidth={2} dot={false} strokeDasharray="8 4" name="Banda Sup (+2)" />
-                        <Line type="monotone" dataKey="banda_inf" stroke="#e879f9" strokeWidth={2} dot={false} strokeDasharray="8 4" name="Banda Inf (-2)" />
+                        <Line type="monotone" dataKey="banda_sup" stroke="#e879f9" strokeWidth={2} dot={false} strokeDasharray="8 4" name={`Banda P95 (+${pHigh.toFixed(1)})`} />
+                        <Line type="monotone" dataKey="banda_inf" stroke="#e879f9" strokeWidth={2} dot={false} strokeDasharray="8 4" name={`Banda P5 (${pLow.toFixed(1)})`} />
                         {/* Forecast line */}
                         <Line type="monotone" dataKey="pronosticado" stroke="#60a5fa" strokeWidth={2.5} dot={{ r: 3, fill: '#60a5fa' }} name="Pronostico" />
                         {/* Actual temperature line */}
@@ -317,7 +317,7 @@ export default function ForecastVsActualChart({ metrics }: Props) {
                     </ResponsiveContainer>
                   </div>
                   {hasOutside && (
-                    <div className="mt-1 text-[9px] text-amber-400 text-center">Real fuera del rango historico maximo (±{maxAbsErr.toFixed(2)}°C)</div>
+                    <div className="mt-1 text-[9px] text-amber-400 text-center">Real fuera de la banda P5-P95 [{pLow.toFixed(2)},{pHigh.toFixed(2)}]°C</div>
                   )}
                 </div>
               )
