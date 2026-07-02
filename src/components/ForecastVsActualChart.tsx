@@ -266,13 +266,16 @@ export default function ForecastVsActualChart({ metrics }: Props) {
               if (errors.length < 2) return null
               const mean = errors.reduce((s, v) => s + v, 0) / errors.length
               const std = Math.sqrt(errors.reduce((s, v) => s + (v - mean) ** 2, 0) / errors.length)
+              const maxAbsErr = Math.max(...errors.map(Math.abs))
+              const maxErr = Math.max(...errors)
+              const minErr = Math.min(...errors)
               const cityName = sorted[0]?.ciudad || slug
               const chartData = sorted.map(r => ({
                 fecha: r.fecha_objetivo,
                 pronosticado: r.temp_corregida,
                 real: r.temp_real,
-                banda_sup: r.temp_corregida + std * 2,
-                banda_inf: r.temp_corregida - std * 2,
+                banda_sup: r.temp_corregida + maxAbsErr,
+                banda_inf: r.temp_corregida - maxAbsErr,
               }))
               const hasOutside = chartData.some(d => d.real !== null && (d.real > d.banda_sup || d.real < d.banda_inf))
               const lastForecast = chartData.length > 0 ? chartData[chartData.length - 1].pronosticado : 0
@@ -284,7 +287,7 @@ export default function ForecastVsActualChart({ metrics }: Props) {
                 <div key={slug} className="mb-4 last:mb-0">
                   <div className="flex items-center justify-between mb-1">
                     <h4 className="text-xs font-bold text-white">{cityName}</h4>
-                    <span className="text-[9px] text-gray-500">σ={std.toFixed(2)}°C · MAE={(errors.reduce((s, v) => s + Math.abs(v), 0) / errors.length).toFixed(2)}°C</span>
+                    <span className="text-[9px] text-gray-500">Error max: ±{maxAbsErr.toFixed(2)}°C · MAE={(errors.reduce((s, v) => s + Math.abs(v), 0) / errors.length).toFixed(2)}°C · σ={std.toFixed(2)}°C</span>
                   </div>
                   <div className="h-56">
                     <ResponsiveContainer width="100%" height="100%">
@@ -300,24 +303,21 @@ export default function ForecastVsActualChart({ metrics }: Props) {
                           return [`${value.toFixed(1)}°C`, labels[name] || name]
                         }} />
                         <Legend wrapperStyle={{ fontSize: '10px' }} />
-                        {/* Translucent error band (stackId fills only between banda_inf and banda_sup) */}
-                        <Area dataKey="banda_inf" stackId="band" fill="#e879f9" fillOpacity={0} stroke="none" />
-                        <Area dataKey="banda_sup" stackId="band" fill="#e879f9" fillOpacity={0.3} stroke="none" />
                         {/* Band boundaries */}
-                        <Line type="monotone" dataKey="banda_sup" stroke="#e879f9" strokeWidth={1.5} dot={false} strokeDasharray="6 3" />
-                        <Line type="monotone" dataKey="banda_inf" stroke="#e879f9" strokeWidth={1.5} dot={false} strokeDasharray="6 3" />
+                        <Line type="monotone" dataKey="banda_sup" stroke="#e879f9" strokeWidth={2} dot={false} strokeDasharray="8 4" name="Banda Sup (+2)" />
+                        <Line type="monotone" dataKey="banda_inf" stroke="#e879f9" strokeWidth={2} dot={false} strokeDasharray="8 4" name="Banda Inf (-2)" />
                         {/* Forecast line */}
                         <Line type="monotone" dataKey="pronosticado" stroke="#60a5fa" strokeWidth={2.5} dot={{ r: 3, fill: '#60a5fa' }} name="Pronostico" />
                         {/* Actual temperature line */}
                         <Line type="monotone" dataKey="real" stroke="#34d399" strokeWidth={2.5} dot={{ r: 3, fill: '#34d399' }} name="Real" connectNulls={false} />
                         {/* Reference line for latest forecast */}
-                        <ReferenceLine y={lastForecast} stroke="#fbbf24" strokeWidth={1.5} strokeDasharray="4 4"
-                          label={{ value: `Ultimo pron.: ${lastForecast.toFixed(1)}°C`, position: 'right', fill: '#fbbf24', fontSize: 10 }} />
+                        <ReferenceLine y={lastForecast} stroke="#f59e0b" strokeWidth={1.5} strokeDasharray="4 4"
+                          label={{ value: `Ultimo pron.: ${lastForecast.toFixed(1)}°C`, position: 'right', fill: '#f59e0b', fontSize: 10 }} />
                       </ComposedChart>
                     </ResponsiveContainer>
                   </div>
                   {hasOutside && (
-                    <div className="mt-1 text-[9px] text-amber-400 text-center">Real fuera de banda (±{std.toFixed(2)}°C)</div>
+                    <div className="mt-1 text-[9px] text-amber-400 text-center">Real fuera del rango historico maximo (±{maxAbsErr.toFixed(2)}°C)</div>
                   )}
                 </div>
               )
