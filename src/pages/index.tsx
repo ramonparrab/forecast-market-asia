@@ -463,9 +463,24 @@ export default function Home({ initialAnalysis, initialMetrics, initialAvailable
   }
 
   useEffect(() => {
-    fetchMetrics()
-    fetchAvailableDates()
-    if (!selectedDate) setSelectedDate(getDefaultTargetDate())
+    const init = async () => {
+      await fetchMetrics()
+      await fetchAvailableDates()
+      const today = getDefaultTargetDate()
+      setSelectedDate(today)
+      // Auto-load today's cron result (saved at 10PM Caracas)
+      try {
+        const resp = await fetch(`/api/forecast-history?fecha=${today}`)
+        if (resp.ok) {
+          const data: DailyAnalysis = await resp.json()
+          setAnalysis(data)
+          setIsHistorical(true)
+          setLastUpdated(`Cargado: ${data.fecha_objetivo} (cron 10PM)`)
+          await fetchPreviousDay(data.fecha_objetivo)
+        }
+      } catch { /* no saved data — user clicks Run Analysis */ }
+    }
+    init()
   }, [])
 
   async function fetchAvailableDates() {
