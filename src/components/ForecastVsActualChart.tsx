@@ -275,9 +275,10 @@ export default function ForecastVsActualChart({ metrics }: Props) {
                 banda_inf: r.temp_corregida - std * 2,
               }))
               const hasOutside = chartData.some(d => d.real !== null && (d.real > d.banda_sup || d.real < d.banda_inf))
-              const allVals = chartData.flatMap(d => [d.pronosticado, d.real]).filter((v): v is number => typeof v === 'number' && !isNaN(v))
+              const lastForecast = chartData.length > 0 ? chartData[chartData.length - 1].pronosticado : 0
+              const allVals = chartData.flatMap(d => [d.pronosticado, d.real, d.banda_sup, d.banda_inf]).filter((v): v is number => typeof v === 'number' && !isNaN(v) && v > -50 && v < 100)
               const yDomain2: [number, number] = allVals.length > 0
-                ? [Math.min(...allVals) - 2, Math.max(...allVals) + 2]
+                ? [Math.floor(Math.min(...allVals) - 1), Math.ceil(Math.max(...allVals) + 1)]
                 : [0, 50]
               return (
                 <div key={slug} className="mb-4 last:mb-0">
@@ -293,19 +294,30 @@ export default function ForecastVsActualChart({ metrics }: Props) {
                           const d = new Date(v + 'T12:00:00')
                           return d.toLocaleDateString('es-ES', { day: 'numeric', month: 'short' })
                         }} />
-                        <YAxis stroke="#64748b" tick={{ fontSize: 10 }} domain={yDomain2} />
-                        <Tooltip contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #475569', borderRadius: '8px', fontSize: '11px' }} labelStyle={{ color: '#f1f5f9' }} formatter={(value: number) => [`${value.toFixed(1)}°C`, '']} />
-                        <Area dataKey="banda_inf" stackId="band" fill="#a78bfa" fillOpacity={0} stroke="none" />
-                        <Area dataKey="banda_sup" stackId="band" fill="#a78bfa" fillOpacity={0.85} stroke="none" />
-                        <Line type="monotone" dataKey="banda_sup" stroke="#a78bfa" strokeWidth={1} strokeDasharray="4 2" dot={false} />
-                        <Line type="monotone" dataKey="banda_inf" stroke="#a78bfa" strokeWidth={1} strokeDasharray="4 2" dot={false} />
-                        <Line type="monotone" dataKey="pronosticado" stroke="#3b82f6" strokeWidth={2} dot={{ r: 3 }} />
-                        <Line type="monotone" dataKey="real" stroke="#10b981" strokeWidth={2} dot={{ r: 3 }} connectNulls={false} />
+                        <YAxis stroke="#64748b" tick={{ fontSize: 10 }} domain={yDomain2} label={{ value: '°C', angle: -90, position: 'insideLeft', fill: '#94a3b8', fontSize: 11 }} />
+                        <Tooltip contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #475569', borderRadius: '8px', fontSize: '11px' }} labelStyle={{ color: '#f1f5f9' }} formatter={(value: number, name: string) => {
+                          const labels: Record<string,string> = { pronosticado: 'Pronostico', real: 'Real', banda_sup: 'Banda Sup', banda_inf: 'Banda Inf' }
+                          return [`${value.toFixed(1)}°C`, labels[name] || name]
+                        }} />
+                        <Legend wrapperStyle={{ fontSize: '10px' }} />
+                        {/* Translucent error band (stackId fills only between banda_inf and banda_sup) */}
+                        <Area dataKey="banda_inf" stackId="band" fill="#e879f9" fillOpacity={0} stroke="none" />
+                        <Area dataKey="banda_sup" stackId="band" fill="#e879f9" fillOpacity={0.3} stroke="none" />
+                        {/* Band boundaries */}
+                        <Line type="monotone" dataKey="banda_sup" stroke="#e879f9" strokeWidth={1.5} dot={false} strokeDasharray="6 3" />
+                        <Line type="monotone" dataKey="banda_inf" stroke="#e879f9" strokeWidth={1.5} dot={false} strokeDasharray="6 3" />
+                        {/* Forecast line */}
+                        <Line type="monotone" dataKey="pronosticado" stroke="#60a5fa" strokeWidth={2.5} dot={{ r: 3, fill: '#60a5fa' }} name="Pronostico" />
+                        {/* Actual temperature line */}
+                        <Line type="monotone" dataKey="real" stroke="#34d399" strokeWidth={2.5} dot={{ r: 3, fill: '#34d399' }} name="Real" connectNulls={false} />
+                        {/* Reference line for latest forecast */}
+                        <ReferenceLine y={lastForecast} stroke="#fbbf24" strokeWidth={1.5} strokeDasharray="4 4"
+                          label={{ value: `Ultimo pron.: ${lastForecast.toFixed(1)}°C`, position: 'right', fill: '#fbbf24', fontSize: 10 }} />
                       </ComposedChart>
                     </ResponsiveContainer>
                   </div>
                   {hasOutside && (
-                    <div className="mt-1 text-[9px] text-amber-400">⚠️ Real fuera de banda</div>
+                    <div className="mt-1 text-[9px] text-amber-400 text-center">Real fuera de banda (±{std.toFixed(2)}°C)</div>
                   )}
                 </div>
               )
