@@ -2,6 +2,42 @@ import { useState, useEffect, useMemo } from 'react'
 import { DailyAnalysis, GlobalMetrics } from '@/types'
 import { computeExecutiveSummary, ExecutiveSummary, BetAction } from '@/lib/unified-model'
 
+function useCronCountdown(): string {
+  const [label, setLabel] = useState('')
+
+  useEffect(() => {
+    const tick = () => {
+      const now = new Date()
+      const caracasOffset = -4 * 60
+      const msOffset = caracasOffset * 60000
+      const caracasMs = now.getTime() + msOffset
+      const caracasDate = new Date(caracasMs)
+      const caracasHour = caracasDate.getUTCHours()
+      const caracasMin = caracasDate.getUTCMinutes()
+      const caracasSec = caracasDate.getUTCSeconds()
+
+      // Next 10PM Caracas (22:00)
+      const next = new Date(caracasDate)
+      if (caracasHour >= 22) {
+        next.setUTCDate(next.getUTCDate() + 1)
+      }
+      next.setUTCHours(22, 0, 0, 0)
+
+      const diffMs = next.getTime() - caracasMs
+      if (diffMs <= 0) { setLabel('Ejecutándose...'); return }
+      const h = Math.floor(diffMs / 3600000)
+      const m = Math.floor((diffMs % 3600000) / 60000)
+      const s = Math.floor((diffMs % 60000) / 1000)
+      setLabel(`${h}h ${m.toString().padStart(2, '0')}m ${s.toString().padStart(2, '0')}s`)
+    }
+    tick()
+    const id = setInterval(tick, 1000)
+    return () => clearInterval(id)
+  }, [])
+
+  return label
+}
+
 interface Props {
   analysis: DailyAnalysis | null
   metrics: GlobalMetrics | null
@@ -178,6 +214,13 @@ export default function ExecutiveSummaryPanel({ analysis, metrics, previousAnaly
     return { totalInv, totalEV, roi, upsideTotal, downsideTotal, numApuestas: apuestas.length }
   }, [summary])
 
+  const cronCountdown = useCronCountdown()
+
+  // Format the analysis date for display
+  const analysisDate = analysis?.fecha_objetivo
+    ? new Date(analysis.fecha_objetivo + 'T12:00:00').toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
+    : ''
+
   if (!analysis || analysis.cities.length === 0) {
     return (
       <div className="rounded-2xl bg-gradient-to-br from-slate-800/50 to-slate-900/50 border border-gray-700/30 p-8 text-center">
@@ -194,6 +237,20 @@ export default function ExecutiveSummaryPanel({ analysis, metrics, previousAnaly
     <div className="space-y-4">
       {/* ===== ALERT BAR ===== */}
       <SystemAlertBar alerts={alerts} />
+
+      {/* ===== CRON INFO ===== */}
+      <div className="flex items-center justify-between rounded-lg bg-slate-800/30 border border-gray-700/20 px-4 py-2 text-xs">
+        <div className="flex items-center gap-2 text-gray-400">
+          <span>📡</span>
+          <span>Resumen del <span className="text-white font-semibold">{analysisDate}</span></span>
+          <span className="text-gray-600">|</span>
+          <span>Capturado a las <span className="text-blue-300 font-semibold">10PM Caracas</span> (cron noche anterior)</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-gray-500">Próximo cron:</span>
+          <span className="font-mono font-bold text-emerald-400 min-w-[100px] text-right">{cronCountdown}</span>
+        </div>
+      </div>
 
       {/* ===== HOT TAKE ROW ===== */}
       <div className="grid gap-3 sm:grid-cols-3">
