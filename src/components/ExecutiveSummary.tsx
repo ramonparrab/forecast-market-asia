@@ -151,7 +151,7 @@ export default function ExecutiveSummaryPanel({ analysis, metrics, previousAnaly
   // Determine worst city (lowest accuracy in metrics)
   const worstCity = useMemo(() => {
     if (!metrics?.por_ciudad) return null
-    return [...metrics.por_ciudad].sort((a, b) => a.mae - b.mae)[0]
+    return [...metrics.por_ciudad].sort((a, b) => b.mae - a.mae)[0]
   }, [metrics])
 
   // Daily MAE trend for sparkline
@@ -255,8 +255,8 @@ export default function ExecutiveSummaryPanel({ analysis, metrics, previousAnaly
           </div>
           <div className="flex items-baseline gap-3">
             <span className="text-3xl font-extrabold text-white">{metrics?.accuracy_pct.toFixed(1) ?? '?'}%</span>
-            {summary?.precision_global_ayer !== null && (
-              <span className="text-xs text-gray-500">ayer {summary!.precision_global_ayer!.toFixed(1)}%</span>
+            {summary?.precision_global_ayer != null && (
+              <span className="text-xs text-gray-500">ayer {summary.precision_global_ayer.toFixed(1)}%</span>
             )}
           </div>
           <div className="mt-2 h-1.5 rounded-full bg-slate-700 overflow-hidden">
@@ -299,13 +299,13 @@ export default function ExecutiveSummaryPanel({ analysis, metrics, previousAnaly
       </div>
 
       {/* ===== EXPECTED P&L ===== */}
-      {roiData && (
+      {roiData && summary && (
         <div className="rounded-xl bg-gradient-to-br from-amber-600/15 to-amber-500/5 border border-amber-500/30 p-4">
           <p className="text-[10px] text-amber-300 font-semibold tracking-wider mb-2">💰 EXPECTED P&L — HOY</p>
           <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
             <div className="rounded-lg bg-black/20 p-2 text-center">
               <p className="text-[10px] text-gray-400">Presupuesto</p>
-              <p className="text-lg font-extrabold text-white">${summary!.action_plan.presupuesto_total}</p>
+              <p className="text-lg font-extrabold text-white">${summary.action_plan.presupuesto_total}</p>
             </div>
             <div className="rounded-lg bg-black/20 p-2 text-center">
               <p className="text-[10px] text-gray-400">Asignado</p>
@@ -336,18 +336,18 @@ export default function ExecutiveSummaryPanel({ analysis, metrics, previousAnaly
       )}
 
       {/* ===== ACTION PLAN ===== */}
-      {actions.length > 0 && (
+      {actions.length > 0 && summary && (
         <div className="rounded-xl bg-slate-800/50 border border-gray-700/30 p-4">
           <div className="flex items-center justify-between mb-3">
             <h3 className="text-sm font-bold text-white flex items-center gap-2">
               <span className="text-lg">🎰</span>
               PLAN DE ACCIÓN
             </h3>
-            <span className="text-xs text-gray-400">${summary!.action_plan.total_asignado} / ${summary!.action_plan.presupuesto_total} asignados</span>
+            <span className="text-xs text-gray-400">${summary.action_plan.total_asignado} / ${summary.action_plan.presupuesto_total} asignados</span>
           </div>
           <div className="h-2 rounded-full bg-slate-700 overflow-hidden flex mb-4">
             {actions.map((a, i) => {
-              const pct = (a.montoinvertir / summary!.action_plan.presupuesto_total) * 100
+              const pct = (a.montoinvertir / summary.action_plan.presupuesto_total) * 100
               const colors = ['bg-emerald-500', 'bg-blue-500', 'bg-purple-500', 'bg-amber-500', 'bg-pink-500']
               return <div key={i} className={`${colors[i % colors.length]} h-full transition-all duration-500`} style={{ width: `${pct}%` }} title={`${a.ciudad}: $${a.montoinvertir}`} />
             })}
