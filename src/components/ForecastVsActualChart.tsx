@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { ForecastVsActual } from '@/types'
 import {
   LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
-  ResponsiveContainer, Legend, ComposedChart, Scatter, ReferenceLine, Cell
+  ResponsiveContainer, Legend, ComposedChart, Scatter, ReferenceLine, Cell, Area
 } from 'recharts'
 
 interface Props {
@@ -295,8 +295,10 @@ export default function ForecastVsActualChart({ metrics }: Props) {
                         }} />
                         <YAxis stroke="#64748b" tick={{ fontSize: 10 }} domain={yDomain2} />
                         <Tooltip contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #475569', borderRadius: '8px', fontSize: '11px' }} labelStyle={{ color: '#f1f5f9' }} formatter={(value: number) => [`${value.toFixed(1)}°C`, '']} />
-                        <Line type="monotone" dataKey="banda_sup" stroke="#8b5cf6" strokeWidth={1} strokeDasharray="3 3" dot={false} />
-                        <Line type="monotone" dataKey="banda_inf" stroke="#8b5cf6" strokeWidth={1} strokeDasharray="3 3" dot={false} />
+                        <Area dataKey="banda_inf" stackId="band" fill="#a78bfa" fillOpacity={0} stroke="none" />
+                        <Area dataKey="banda_sup" stackId="band" fill="#a78bfa" fillOpacity={0.85} stroke="none" />
+                        <Line type="monotone" dataKey="banda_sup" stroke="#a78bfa" strokeWidth={1} strokeDasharray="4 2" dot={false} />
+                        <Line type="monotone" dataKey="banda_inf" stroke="#a78bfa" strokeWidth={1} strokeDasharray="4 2" dot={false} />
                         <Line type="monotone" dataKey="pronosticado" stroke="#3b82f6" strokeWidth={2} dot={{ r: 3 }} />
                         <Line type="monotone" dataKey="real" stroke="#10b981" strokeWidth={2} dot={{ r: 3 }} connectNulls={false} />
                       </ComposedChart>
