@@ -81,7 +81,6 @@ async function analyzeCity(
   const tempFinal = nowcastResult.temp
   // Update forecast with nowcasted temperature
   forecast.temp_corregida = tempFinal
-  forecast.temp_ponderada = tempFinal
 
   // 4. Polymarket prices
   let contracts: PolymarketContract[] = []
