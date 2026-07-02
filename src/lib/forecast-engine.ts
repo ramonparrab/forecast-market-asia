@@ -50,7 +50,8 @@ async function analyzeCity(
   fetchPrices: boolean,
   backtestBiasCorrection: number | undefined,
   calibrationPairs: { slug: string; prediction: number; outcome: number }[],
-  historicalAccuracy: { accuracy: number; muestras: number } | null
+  historicalAccuracy: { accuracy: number; muestras: number } | null,
+  globalAccuracyPct: number
 ): Promise<{ cityAnalysis: CityAnalysis | null; recommendations: BetRecommendation[] }> {
   // 1. Weather models (includes ECMWF ENS 51 members)
   const { models: ensembleRaw, ensembleMembers } = await fetchWeatherModels(city.lat, city.lon, fechaISO)
@@ -91,29 +92,20 @@ async function analyzeCity(
     contracts = getMockContracts(city.slug)
   }
 
-  // Calculate success probability using heuristic + historical accuracy
+  // Calculate success probability using real historical accuracy
+  let exitoPct: number
+  if (historicalAccuracy && historicalAccuracy.muestras >= 5) {
+    const priorStrength = 10
+    exitoPct = Math.round(
+      (historicalAccuracy.accuracy * historicalAccuracy.muestras + globalAccuracyPct * priorStrength)
+      / (historicalAccuracy.muestras + priorStrength)
+    )
+  } else {
+    exitoPct = Math.round(globalAccuracyPct)
+  }
   const modelosTemps = Object.values(forecast.ensemble_raw)
   const spread = modelosTemps.length > 0 ? Math.max(...modelosTemps) - Math.min(...modelosTemps) : 3
   const numModelos = modelosTemps.length
-  let exitoPct = 50
-  if (numModelos >= 5) exitoPct += 8
-  else if (numModelos >= 3) exitoPct += 4
-  if (spread <= 1.5) exitoPct += 15
-  else if (spread <= 2.5) exitoPct += 8
-  else if (spread <= 3.5) exitoPct += 3
-  else exitoPct -= 5
-  if (forecast.consenso === 'MUY FUERTE') exitoPct += 10
-  else if (forecast.consenso === 'FUERTE') exitoPct += 5
-  if (nowcastResult.obsWeight > 0.3) exitoPct += 8
-  if (nowcastResult.observedTemp !== null) exitoPct += 5
-  exitoPct = Math.max(10, Math.min(95, exitoPct))
-
-  // Blend with historical accuracy (full history, not just 30 days)
-  if (historicalAccuracy && historicalAccuracy.muestras >= 10) {
-    const histWeight = Math.min(0.4, historicalAccuracy.muestras / 500 * 0.4)
-    exitoPct = Math.round(exitoPct * (1 - histWeight) + historicalAccuracy.accuracy * histWeight)
-  }
-  // Build explanation
   const parts: string[] = []
   parts.push(`${numModelos} modelos meteorológicos`)
   if (nowcastResult.obsWeight > 0) {
@@ -121,7 +113,11 @@ async function analyzeCity(
   }
   parts.push(`consenso ${forecast.consenso.toLowerCase()}`)
   parts.push(`spread ${spread.toFixed(1)}°C entre modelos`)
-  const explicacion = `Pronóstico basado en ${parts.join(', ')}. Precisión histórica estimada: ±${(spread * 0.5).toFixed(1)}°C.`
+  const histSamples = historicalAccuracy?.muestras ?? 0
+  const histInfo = histSamples >= 5
+    ? `Precisión histórica real: ${exitoPct}% (${histSamples} registros).`
+    : `Precisión histórica real: ${exitoPct}% (promedio global, pocos registros locales).`
+  const explicacion = `Pronóstico basado en ${parts.join(', ')}. ${histInfo}`
 
   // 5. Probability: empirical CDF (ECMWF ENS 51) or Monte Carlo
   const useEmpirical = forecast.ensemble_members && forecast.ensemble_members.length >= 20
@@ -256,6 +252,7 @@ export async function runDailyAnalysis(
     loadBacktestBias(),
     getAllCalibrationPairs(),
   ])
+  const globalAccuracyPct = globalMetrics?.accuracy_pct ?? 50
 
   // Pre-load historical accuracy per city (full history, no time limit)
   const historicalAccuracyMap: Record<string, { accuracy: number; muestras: number }> = {}
@@ -268,7 +265,7 @@ export async function runDailyAnalysis(
   // Analyze all cities in parallel — use fechaObjetivo for Open-Meteo API calls
   const results = await Promise.all(
     CIUDADES_ASIA.map(city =>
-      analyzeCity(city, fechaObjetivo, fechaObjetivo, targetMonth, recentModelErrors, fetchPrices, backtestBias[city.slug], calPairs, historicalAccuracyMap[city.slug])
+      analyzeCity(city, fechaObjetivo, fechaObjetivo, targetMonth, recentModelErrors, fetchPrices, backtestBias[city.slug], calPairs, historicalAccuracyMap[city.slug], globalAccuracyPct)
     )
   )
 
