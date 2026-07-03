@@ -19,6 +19,11 @@ export async function saveDailyRun(run: DailyRun): Promise<number | null> {
   const client = getClient()
   if (!client) return null
 
+  if (!run.resultados || !Array.isArray(run.resultados) || run.resultados.length === 0) {
+    console.warn('[saveDailyRun] Skipping save — resultados vacíos')
+    return null
+  }
+
   const { data, error } = await client
     .from('daily_runs' as any)
     .insert({

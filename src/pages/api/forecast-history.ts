@@ -53,6 +53,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(500).json({ error: 'Error parsing saved forecast data' })
   }
 
+  if (!resultados || !Array.isArray(resultados) || resultados.length === 0) {
+    return res.status(404).json({ error: `No hay datos de pronóstico para ${fecha} (cities vacío)` })
+  }
+
   // Recalculate exito_pct using Bayesian formula (same as forecast-engine.ts)
   const globalMetrics = await computeGlobalMetrics()
   const globalAccuracyPct = globalMetrics?.accuracy_pct ?? 50
