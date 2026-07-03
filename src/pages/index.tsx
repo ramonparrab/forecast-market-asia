@@ -53,33 +53,27 @@ export async function getServerSideProps() {
     }
 
     if (!analysis) {
-      const { runDailyAnalysis } = await import('@/lib/forecast-engine')
-      const { saveForecastRecords, saveDailyRun } = await import('@/lib/supabase')
-
-      const result = await runDailyAnalysis(fecha, true)
-
-      const records = result.cities.map(city => ({
-        fecha_ejecucion: result.fecha,
-        fecha_objetivo: fecha,
-        ciudad: city.ciudad,
-        slug: city.slug,
-        temp_pronosticada: city.forecast.temp_ponderada,
-        temp_corregida: city.forecast.temp_corregida,
-        temp_real: null, error: null,
-        modelos_usados: Object.keys(city.forecast.ensemble_raw).length,
-        consenso: city.forecast.consenso,
-      }))
-
-      await saveForecastRecords(records)
-      await saveDailyRun({
-        fecha_ejecucion: result.fecha,
-        fecha_objetivo: fecha,
-        resultados: result.cities,
-        recomendaciones: result.recommendations,
-        total_asignado: result.total_allocated,
-      })
-
-      analysis = result
+      // Try loading yesterday's forecast from DB (more likely to exist)
+      const yesterdayCaracas = new Date(Date.now() + (-4 * 60 * 60000))
+      const fechaAyer = yesterdayCaracas.toISOString().slice(0, 10)
+      const { data: ayerData } = await client.from('daily_runs' as any).select('*').eq('fecha_objetivo', fechaAyer).order('fecha_ejecucion', { ascending: false } as any).limit(1)
+      if ((ayerData as any[] | undefined)?.length) {
+        const row = (ayerData as any[])[0]
+        const parsedCities = typeof row.resultados === 'string' ? JSON.parse(row.resultados) : row.resultados
+        if (parsedCities && Array.isArray(parsedCities) && parsedCities.length > 0) {
+          analysis = {
+            fecha: row.fecha_ejecucion,
+            fecha_objetivo: row.fecha_objetivo,
+            message: `Pronóstico del ${new Date(row.fecha_ejecucion).toLocaleDateString('es-ES', { timeZone: 'America/Caracas' })}`,
+            cities: parsedCities,
+            recommendations: typeof row.recomendaciones === 'string' ? JSON.parse(row.recomendaciones) : row.recomendaciones,
+            total_allocated: row.total_asignado ?? 0,
+            global_metrics: null,
+            arbitrage_alerts: [],
+            historicalErrors: {},
+          }
+        }
+      }
     }
 
     // ===== STEP 2: Hindcast 30 días (si no existe data histórica) =====
