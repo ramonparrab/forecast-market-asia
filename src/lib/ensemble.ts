@@ -1,7 +1,8 @@
-import { ModelTemps, ForecastResult } from '@/types'
+import { ModelTemps, ForecastResult, WeatherCondition } from '@/types'
 import { std, mean } from './math-utils'
 import { computeDynamicBias, computeAdaptiveWeights } from './bias-correction'
 import { getEstacion } from './cities'
+import { getWeatherInfo } from './openmeteo'
 
 interface EnsembleInput {
   slug: string
@@ -11,6 +12,8 @@ interface EnsembleInput {
   recentModelErrors: Record<string, number[]>
   backtestBiasCorrection?: number
   ensembleMembers?: number[]
+  weatherCode?: number
+  precipitation?: number
 }
 
 export function computeEnsemble(input: EnsembleInput): ForecastResult {
@@ -64,7 +67,7 @@ export function computeEnsemble(input: EnsembleInput): ForecastResult {
 
   // Dynamic bias correction
   const sesgo = computeDynamicBias(slug, mes, recentErrors)
-  let tempCorregida = Math.max(0, tempPonderada - sesgo)
+  let tempCorregida = Math.max(0, tempPonderada + sesgo)
 
   if (input.backtestBiasCorrection !== undefined && Math.abs(input.backtestBiasCorrection) >= 0.15) {
     tempCorregida = Math.max(0, tempCorregida + input.backtestBiasCorrection)
@@ -88,6 +91,12 @@ export function computeEnsemble(input: EnsembleInput): ForecastResult {
     consenso = 'DEBIL'
   }
 
+  let weather: WeatherCondition | undefined
+  if (input.weatherCode !== undefined) {
+    const info = getWeatherInfo(input.weatherCode, input.precipitation ?? 0)
+    weather = { code: input.weatherCode, precipitation: input.precipitation ?? 0, ...info }
+  }
+
   return {
     temp_ponderada: Math.round(tempPonderada * 100) / 100,
     temp_corregida: Math.round(tempCorregida * 100) / 100,
@@ -96,6 +105,7 @@ export function computeEnsemble(input: EnsembleInput): ForecastResult {
     ensemble_raw: modelsRaw,
     sesgo_aplicado: Math.round(sesgo * 100) / 100,
     ensemble_members: ensembleMembers,
+    weather,
   }
 }
 

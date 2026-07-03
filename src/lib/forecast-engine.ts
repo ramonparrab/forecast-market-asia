@@ -4,9 +4,8 @@ import { fetchWeatherModels } from './openmeteo'
 import { computeEnsemble } from './ensemble'
 import { monteCarloProbability, normalizeProbabilidades } from './montecarlo'
 import { fetchPolymarketPrices, parseContract } from './polymarket'
-import { calibrateProbabilities, findCalibrationParams, isotonicCalibrate, applyIsotonicAdjustment } from './calibration'
 import { calculateAllocation } from './kelly'
-import { getRecentErrors, getRecentModelErrors, computeGlobalMetrics, getAllCalibrationPairs, getHistoricalAccuracy } from './supabase'
+import { getRecentErrors, getRecentModelErrors, computeGlobalMetrics, getAllCalibrationPairs, getHistoricalAccuracy, getAllHistoricalErrors } from './supabase'
 import { nowcastTemperature } from './nowcaster'
 import { loadBacktestBias } from './backtest-bias'
 
@@ -54,7 +53,11 @@ async function analyzeCity(
   globalAccuracyPct: number
 ): Promise<{ cityAnalysis: CityAnalysis | null; recommendations: BetRecommendation[] }> {
   // 1. Weather models (includes ECMWF ENS 51 members)
-  const { models: ensembleRaw, ensembleMembers } = await fetchWeatherModels(city.lat, city.lon, fechaISO)
+  const weatherModelsResult = await fetchWeatherModels(city.lat, city.lon, fechaISO)
+  const ensembleRaw = weatherModelsResult.models
+  const ensembleMembers = weatherModelsResult.ensembleMembers
+  const weatherCode = weatherModelsResult.weatherCode
+  const precipitation = weatherModelsResult.precipitation
   if (Object.keys(ensembleRaw).length === 0) {
     return { cityAnalysis: null, recommendations: [] }
   }
@@ -74,6 +77,8 @@ async function analyzeCity(
     recentModelErrors: cityModelErrors,
     backtestBiasCorrection,
     ensembleMembers,
+    weatherCode,
+    precipitation,
   })
 
   // 3. Nowcasting — blend live METAR observation into forecast
@@ -81,6 +86,7 @@ async function analyzeCity(
   const tempFinal = nowcastResult.temp
   // Update forecast with nowcasted temperature
   forecast.temp_corregida = tempFinal
+  forecast.temp_ponderada = tempFinal
 
   // 4. Polymarket prices
   let contracts: PolymarketContract[] = []
@@ -102,6 +108,18 @@ async function analyzeCity(
   } else {
     exitoPct = Math.round(globalAccuracyPct)
   }
+  // Weather penalty based on real data analysis (225 records):
+  // Nublado (code 3) → MAE +0.13°C peor que global; Lluvia y tormenta NO penalizan
+  const weather = forecast.weather
+  let weatherPenalty = 0
+  let weatherNote = ''
+  if (weather) {
+    if (weather.code === 3) { weatherPenalty = -1; weatherNote = 'Nublado — precisión ligeramente reducida' }
+    if (weatherPenalty < 0) {
+      exitoPct = Math.max(10, exitoPct + weatherPenalty)
+    }
+  }
+
   const modelosTemps = Object.values(forecast.ensemble_raw)
   const spread = modelosTemps.length > 0 ? Math.max(...modelosTemps) - Math.min(...modelosTemps) : 3
   const numModelos = modelosTemps.length
@@ -112,11 +130,12 @@ async function analyzeCity(
   }
   parts.push(`consenso ${forecast.consenso.toLowerCase()}`)
   parts.push(`spread ${spread.toFixed(1)}°C entre modelos`)
+  if (weather) parts.push(`${weather.icon} ${weather.label}`)
   const histSamples = historicalAccuracy?.muestras ?? 0
   const histInfo = histSamples >= 5
     ? `Precisión histórica real: ${exitoPct}% (${histSamples} registros).`
     : `Precisión histórica real: ${exitoPct}% (promedio global, pocos registros locales).`
-  const explicacion = `Pronóstico basado en ${parts.join(', ')}. ${histInfo}`
+  const explicacion = `${weatherNote ? weatherNote + '. ' : ''}Pronóstico basado en ${parts.join(', ')}. ${histInfo}`
 
   // 5. Probability: empirical CDF (ECMWF ENS 51) or Monte Carlo
   const useEmpirical = forecast.ensemble_members && forecast.ensemble_members.length >= 20
@@ -160,25 +179,8 @@ async function analyzeCity(
   const normalized = normalizeProbabilidades(contracts.map(c => c.prob_ia_raw!))
 
   // Find optimal Platt params from city-specific history
-  const cityPairs = calibrationPairs.filter(p => p.slug === city.slug)
-  let alpha = 1.0, beta = 0.0
-  let isotonicCal: ReturnType<typeof isotonicCalibrate> | null = null
-  if (cityPairs.length >= 5) {
-    const [bestAlpha, bestBeta] = findCalibrationParams(
-      cityPairs.map(p => p.prediction),
-      cityPairs.map(p => p.outcome)
-    )
-    alpha = bestAlpha
-    beta = bestBeta
-    // Build isotonic calibration as secondary refinement
-    isotonicCal = isotonicCalibrate(cityPairs.map(p => ({ confidence: p.prediction, outcome: p.outcome })), 10)
-  }
-
-  let calibrated = calibrateProbabilities(normalized, alpha, beta)
-  // Apply isotonic adjustment if available
-  if (isotonicCal && isotonicCal.status === 'isotonic_pava') {
-    calibrated = calibrated.map(p => applyIsotonicAdjustment(isotonicCal!, p))
-  }
+  // Calibración: pares sintéticos no son confiables para isotónico. Usar identity.
+  const calibrated = normalized
   for (let i = 0; i < contracts.length; i++) {
     contracts[i].prob_ia_norm = calibrated[i]
   }
@@ -222,10 +224,11 @@ async function analyzeCity(
         peso_observacion: nowcastResult.obsWeight,
         temp_observada: nowcastResult.observedTemp,
         estacion: nowcastResult.station,
-        hora_local: new Date().getUTCHours() + Math.round(city.lon / 15),
+        hora_local: (new Date().getUTCHours() + Math.round(city.lon / 15) + 24) % 24,
       },
       exito_pct: exitoPct,
       explicacion,
+      totalRecords: histSamples,
     },
     recommendations: recs,
   }
@@ -245,11 +248,12 @@ export async function runDailyAnalysis(
   const targetMonth = new Date(fechaObjetivo).getMonth() + 1
 
   // Pre-load history (parallel)
-  const [recentModelErrors, globalMetrics, backtestBias, calPairs] = await Promise.all([
+  const [recentModelErrors, globalMetrics, backtestBias, calPairs, historicalErrors] = await Promise.all([
     getRecentModelErrors(30),
     computeGlobalMetrics(),
     loadBacktestBias(),
     getAllCalibrationPairs(),
+    getAllHistoricalErrors(),
   ])
   const globalAccuracyPct = globalMetrics?.accuracy_pct ?? 50
 
@@ -294,5 +298,6 @@ export async function runDailyAnalysis(
     total_allocated: Math.round(totalAllocated * 100) / 100,
     global_metrics: globalMetrics,
     arbitrage_alerts: arbitrageAlerts,
+    historicalErrors,
   }
 }

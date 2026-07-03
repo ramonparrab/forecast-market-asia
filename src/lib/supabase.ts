@@ -111,6 +111,25 @@ export async function getRecentModelErrors(
   return grouped
 }
 
+export async function getAllHistoricalErrors(): Promise<Record<string, number[]>> {
+  const client = getClient()
+  if (!client) return {}
+  const { data, error } = await client
+    .from('forecast_history' as any)
+    .select('slug, error')
+    .not('error', 'is', null)
+    .order('fecha_ejecucion', { ascending: false } as any)
+  if (error || !data) return {}
+  const grouped: Record<string, number[]> = {}
+  for (const row of (data as any[])) {
+    if (!grouped[row.slug]) grouped[row.slug] = []
+    if (grouped[row.slug].length < 100) {
+      grouped[row.slug].push(row.error)
+    }
+  }
+  return grouped
+}
+
 export async function getLastDaysRecords(
   days = 30
 ): Promise<HistoricalRecord[]> {
@@ -193,6 +212,41 @@ export async function updateActualTemperature(
     return false
   }
 
+  return true
+}
+
+export async function getAllRecordsWithActuals(): Promise<{ id: number; slug: string; temp_pronosticada: number; temp_corregida: number; temp_real: number; error: number }[]> {
+  const client = getClient()
+  if (!client) return []
+  const { data, error } = await client
+    .from('forecast_history' as any)
+    .select('id, slug, temp_pronosticada, temp_corregida, temp_real, error')
+    .not('temp_real', 'is', null)
+    .order('id', { ascending: true } as any)
+  if (error || !data) return []
+  return (data as any[]).map(r => ({
+    id: r.id, slug: r.slug,
+    temp_pronosticada: r.temp_pronosticada,
+    temp_corregida: r.temp_corregida,
+    temp_real: r.temp_real, error: r.error,
+  }))
+}
+
+export async function fixBiasSign(
+  recordId: number,
+  newTempCorregida: number,
+  newError: number
+): Promise<boolean> {
+  const client = getClient()
+  if (!client) return false
+  const { error: updateErr } = await (client
+    .from('forecast_history' as any) as any)
+    .update({ temp_corregida: newTempCorregida, error: newError })
+    .eq('id', recordId)
+  if (updateErr) {
+    console.error(`Error fixing bias for record ${recordId}:`, updateErr)
+    return false
+  }
   return true
 }
 

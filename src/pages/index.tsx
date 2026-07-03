@@ -9,6 +9,7 @@ import ForecastTable from '@/components/ForecastTable'
 import BacktestChart from '@/components/BacktestChart'
 import ExecutiveSummaryPanel from '@/components/ExecutiveSummary'
 import ComparisonPanel from '@/components/ComparisonPanel'
+import SignalsPanel from '@/components/SignalsPanel'
 import { DailyAnalysis, GlobalMetrics, CityAnalysis } from '@/types'
 
 export async function getServerSideProps() {
@@ -35,17 +36,23 @@ export async function getServerSideProps() {
 
     if ((runs as any[] | undefined)?.length) {
       const row = (runs as any[])[0]
-      analysis = {
-        fecha: row.fecha_ejecucion,
-        fecha_objetivo: row.fecha_objetivo,
-        message: `Pronóstico del ${new Date(row.fecha_ejecucion).toLocaleDateString('es-ES', { timeZone: 'America/Caracas' })}`,
-        cities: typeof row.resultados === 'string' ? JSON.parse(row.resultados) : row.resultados,
-        recommendations: typeof row.recomendaciones === 'string' ? JSON.parse(row.recomendaciones) : row.recomendaciones,
-        total_allocated: row.total_asignado ?? 0,
-        global_metrics: null,
-        arbitrage_alerts: [],
+      const parsedCities = typeof row.resultados === 'string' ? JSON.parse(row.resultados) : row.resultados
+      if (parsedCities && Array.isArray(parsedCities) && parsedCities.length > 0) {
+        analysis = {
+          fecha: row.fecha_ejecucion,
+          fecha_objetivo: row.fecha_objetivo,
+          message: `Pronóstico del ${new Date(row.fecha_ejecucion).toLocaleDateString('es-ES', { timeZone: 'America/Caracas' })}`,
+          cities: parsedCities,
+          recommendations: typeof row.recomendaciones === 'string' ? JSON.parse(row.recomendaciones) : row.recomendaciones,
+          total_allocated: row.total_asignado ?? 0,
+          global_metrics: null,
+          arbitrage_alerts: [],
+          historicalErrors: {},
+        }
       }
-    } else {
+    }
+
+    if (!analysis) {
       const { runDailyAnalysis } = await import('@/lib/forecast-engine')
       const { saveForecastRecords, saveDailyRun } = await import('@/lib/supabase')
 
@@ -145,7 +152,7 @@ export async function getServerSideProps() {
   }
 }
 
-type View = 'executive' | 'dashboard' | 'table' | 'metrics' | 'comparison' | 'backtest' | 'arbitrage' | 'architecture'
+type View = 'executive' | 'dashboard' | 'table' | 'metrics' | 'comparison' | 'backtest' | 'arbitrage' | 'architecture' | 'signals'
 
 /** Returns a friendly confidence label + color class */
 function getConfidence(city: CityAnalysis): { label: string; color: string; bg: string } {
@@ -156,7 +163,7 @@ function getConfidence(city: CityAnalysis): { label: string; color: string; bg: 
   return { label: 'BAJA', color: 'text-red-400', bg: 'bg-red-500/10' }
 }
 
-function TargetDateBanner({ fechaObjetivo, caracasTime }: { fechaObjetivo: string; caracasTime: string }) {
+function TargetDateBanner({ fechaObjetivo, caracasTime, isHistorical }: { fechaObjetivo: string; caracasTime: string; isHistorical: boolean }) {
   const targetDate = new Date(fechaObjetivo + 'T12:00:00')
   const dayName = targetDate.toLocaleDateString('es-ES', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })
   return (
@@ -178,6 +185,9 @@ function TargetDateBanner({ fechaObjetivo, caracasTime }: { fechaObjetivo: strin
           <div className="text-center">
             <p className="text-gray-500">Ejecución automática</p>
             <p className="text-lg font-semibold text-blue-400">22:00 Caracas</p>
+          </div>
+          <div className={`rounded-full px-2.5 py-0.5 text-[10px] font-bold border ${isHistorical ? 'bg-blue-500/10 border-blue-500/30 text-blue-300' : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'}`}>
+            {isHistorical ? '📡 Cron 10PM' : '⚡ Análisis fresco'}
           </div>
         </div>
       </div>
@@ -588,6 +598,7 @@ export default function Home({ initialAnalysis, initialMetrics, initialAvailable
 
   const views: { key: View; label: string; icon: string; desc: string }[] = [
     { key: 'executive', label: 'Resumen Ejecutivo', icon: '🎯', desc: 'Recomendaciones del día' },
+    { key: 'signals', label: 'Señales', icon: '📡', desc: 'Datos para cobertura' },
     { key: 'dashboard', label: 'Dashboard', icon: '🏠', desc: 'Vista general' },
     { key: 'table', label: 'Tabla', icon: '📊', desc: 'Datos completos' },
     { key: 'metrics', label: 'Precisión', icon: '📈', desc: 'Métricas históricas' },
@@ -677,7 +688,7 @@ export default function Home({ initialAnalysis, initialMetrics, initialAvailable
 
       {/* Target Date Banner */}
       {analysis?.fecha_objetivo && (
-        <TargetDateBanner fechaObjetivo={analysis.fecha_objetivo} caracasTime={caracasTime} />
+        <TargetDateBanner fechaObjetivo={analysis.fecha_objetivo} caracasTime={caracasTime} isHistorical={isHistorical} />
       )}
       {isHistorical && (
         <div className="mb-4 rounded-lg bg-amber-500/10 border border-amber-500/20 px-4 py-2 text-sm text-amber-400 flex items-center gap-2">
@@ -744,11 +755,11 @@ export default function Home({ initialAnalysis, initialMetrics, initialAvailable
                 </div>
                 <div className="flex justify-center gap-6 text-xs text-gray-500">
                   <span>📡 {analysis.cities.filter(c => c.nowcast?.activo).length}/{analysis.cities.length} nowcast activo</span>
-                  <span>🎯 Meta: ±2°C &gt;70%</span>
+                  <span>🎯 Meta: ±1°C &gt;65%</span>
                 </div>
               </div>
               <div className="grid grid-cols-3 sm:grid-cols-5 lg:grid-cols-9 divide-x divide-blue-500/10 border-t border-blue-500/10">
-                {analysis.cities.map(city => (
+                {analysis.cities.sort((a, b) => b.exito_pct - a.exito_pct).map(city => (
                   <div key={city.slug} className="p-3 text-center hover:bg-blue-500/5 transition">
                     <p className="text-[10px] text-gray-500 truncate">{city.ciudad.split(',')[0]}</p>
                     <p className="text-lg sm:text-xl font-bold text-emerald-400">{city.forecast.temp_corregida.toFixed(1)}°C</p>
@@ -768,7 +779,7 @@ export default function Home({ initialAnalysis, initialMetrics, initialAvailable
 
           {/* City Cards Grid */}
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {analysis.cities.map(city => (
+            {analysis.cities.sort((a, b) => b.exito_pct - a.exito_pct).map(city => (
               <CityCard key={city.slug} data={city} />
             ))}
           </div>
@@ -794,13 +805,16 @@ export default function Home({ initialAnalysis, initialMetrics, initialAvailable
         />
       )}
 
+      {/* Signals View */}
+      {activeView === 'signals' && <SignalsPanel />}
+
       {/* Metrics View - Per city with backtesting data */}
       {activeView === 'metrics' && <MetricsChart metrics={metrics} />}
 
       {/* Comparison View - Forecast vs Actual per city */}
       {activeView === 'comparison' && (
         <div className="space-y-6">
-          <ForecastVsActualChart metrics={metrics} />
+          <ForecastVsActualChart metrics={metrics} currentForecasts={analysis.cities} fechaObjetivo={analysis.fecha_objetivo} />
           <details className="rounded-xl bg-slate-800/50 border border-gray-700/30 overflow-hidden">
             <summary className="cursor-pointer px-4 py-3 text-sm font-medium text-blue-400 hover:text-blue-300 transition flex items-center gap-2">
               <span>📋</span>

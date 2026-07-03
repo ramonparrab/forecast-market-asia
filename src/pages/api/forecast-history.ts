@@ -1,6 +1,7 @@
 import { NextApiRequest, NextApiResponse } from 'next'
 import { createClient } from '@supabase/supabase-js'
 import { DailyAnalysis, CityAnalysis, BetRecommendation } from '@/types'
+import { computeGlobalMetrics, getHistoricalAccuracy } from '@/lib/supabase'
 
 const supabaseUrl = (process.env.NEXT_PUBLIC_SUPABASE_URL || '').replace(/\/rest\/v1\/?$/, '')
 const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
@@ -10,7 +11,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const action = req.query.action as string
 
   if (action === 'dates') {
-    // Return list of available dates
     const client = createClient(supabaseUrl, supabaseKey)
     const { data, error } = await client
       .from('daily_runs' as any)
@@ -53,6 +53,29 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(500).json({ error: 'Error parsing saved forecast data' })
   }
 
+  // Recalculate exito_pct using Bayesian formula (same as forecast-engine.ts)
+  const globalMetrics = await computeGlobalMetrics()
+  const globalAccuracyPct = globalMetrics?.accuracy_pct ?? 50
+
+  for (const city of resultados) {
+    const hist = await getHistoricalAccuracy(city.slug)
+    let exitoPct: number
+    if (hist.muestras >= 5) {
+      const priorStrength = 10
+      exitoPct = Math.round(
+        (hist.accuracy * hist.muestras + globalAccuracyPct * priorStrength)
+        / (hist.muestras + priorStrength)
+      )
+    } else {
+      exitoPct = Math.round(globalAccuracyPct)
+    }
+    // Weather penalty: only nublado (code 3) gets -1%
+    if (city.forecast.weather?.code === 3) {
+      exitoPct = Math.max(10, exitoPct - 1)
+    }
+    city.exito_pct = exitoPct
+  }
+
   const analysis: DailyAnalysis = {
     fecha: row.fecha_ejecucion,
     fecha_objetivo: row.fecha_objetivo,
@@ -62,6 +85,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     total_allocated: row.total_asignado ?? 0,
     global_metrics: null,
     arbitrage_alerts: [],
+    historicalErrors: {},
   }
 
   return res.status(200).json(analysis)

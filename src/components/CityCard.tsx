@@ -288,7 +288,15 @@ export default function CityCard({ data }: CityCardProps) {
       {/* Header */}
       <div className="mb-3 flex items-start justify-between">
         <div>
-          <h3 className="text-lg font-bold text-white">{data.ciudad} <span className="text-xl text-emerald-400 ml-2">{forecast.temp_corregida.toFixed(1)}°C</span></h3>
+          <h3 className="text-lg font-bold text-white">
+            {data.ciudad}
+            {forecast.weather && (
+              <span className="ml-1.5 text-base" title={`${forecast.weather.label} · ${forecast.weather.precipitation}mm`}>
+                {forecast.weather.icon}
+              </span>
+            )}
+            <span className="text-xl text-emerald-400 ml-2">{forecast.temp_corregida.toFixed(1)}°C</span>
+          </h3>
           <p className="text-xs text-gray-500">{data.slug} · {modelosCount} modelos</p>
         </div>
         <div className="flex items-center gap-2">

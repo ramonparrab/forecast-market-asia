@@ -10,6 +10,14 @@ export interface ModelTemps {
   [model: string]: number
 }
 
+export interface WeatherCondition {
+  code: number
+  precipitation: number
+  label: string
+  icon: string
+  severity: 'none' | 'low' | 'moderate' | 'severe'
+}
+
 export interface ForecastResult {
   temp_ponderada: number
   temp_corregida: number
@@ -18,6 +26,7 @@ export interface ForecastResult {
   ensemble_raw: ModelTemps
   sesgo_aplicado: number
   ensemble_members?: number[]
+  weather?: WeatherCondition
 }
 
 export interface PolymarketContract {
@@ -191,4 +200,5 @@ export interface DailyAnalysis {
   total_allocated: number
   global_metrics: GlobalMetrics | null
   arbitrage_alerts: string[]
+  historicalErrors: Record<string, number[]>
 }

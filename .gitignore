@@ -50,3 +50,4 @@ odds/vegas_cache.json
 mcp/MCP_OPTIMIZATION.md
 mcp/polyrouter/
 .vercel
+.env*

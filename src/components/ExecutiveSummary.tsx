@@ -171,15 +171,27 @@ export default function ExecutiveSummaryPanel({ analysis, metrics, previousAnaly
     setSummary(result)
   }, [analysis, metrics, previousAnalysis, previousMetrics])
 
-  // Compute system alerts
+  // Compute system alerts (grouped by type to avoid repetition)
   const alerts = useMemo(() => {
     const list: Alert[] = []
     if (!analysis) return list
+    const noNowcast: string[] = []
+    const debil: string[] = []
+    const fewModels: string[] = []
     for (const city of analysis.cities) {
       const numModels = Object.keys(city.forecast.ensemble_raw).length
-      if (numModels < 3) list.push({ type: 'error', text: `${city.ciudad}: solo ${numModels} modelos meteorológicos` })
-      if (!city.nowcast?.activo) list.push({ type: 'warning', text: `${city.ciudad}: nowcasting inactivo` })
-      if (city.forecast.consenso === 'DEBIL') list.push({ type: 'warning', text: `${city.ciudad}: consenso DÉBIL entre modelos` })
+      if (numModels < 3) fewModels.push(city.ciudad)
+      if (!city.nowcast?.activo) noNowcast.push(city.ciudad)
+      if (city.forecast.consenso === 'DEBIL') debil.push(city.ciudad)
+    }
+    if (fewModels.length) list.push({ type: 'error', text: `${fewModels.join(', ')}: pocos modelos` })
+    if (noNowcast.length) {
+      const names = noNowcast.length > 4 ? `${noNowcast.slice(0, 3).join(', ')} y ${noNowcast.length - 3} más` : noNowcast.join(', ')
+      list.push({ type: 'warning', text: `${noNowcast.length} ciudades: nowcasting inactivo (${names})` })
+    }
+    if (debil.length) {
+      const names = debil.length > 4 ? `${debil.slice(0, 3).join(', ')} y ${debil.length - 3} más` : debil.join(', ')
+      list.push({ type: 'warning', text: `${debil.length} ciudades: consenso DÉBIL (${names})` })
     }
     return list
   }, [analysis])
@@ -437,17 +449,20 @@ export default function ExecutiveSummaryPanel({ analysis, metrics, previousAnaly
           <span>🏙️</span> CIUDADES — PRONÓSTICO vs PRECISIÓN
         </h3>
         <div className="grid grid-cols-3 sm:grid-cols-5 lg:grid-cols-9 gap-2">
-          {analysis.cities.map(c => {
+          {analysis.cities.sort((a, b) => b.exito_pct - a.exito_pct).map(c => {
             const numModels = Object.keys(c.forecast.ensemble_raw).length
             const hasNowcast = c.nowcast?.activo
             const consensusOk = c.forecast.consenso !== 'DEBIL'
-            const ok = numModels >= 3 && hasNowcast && consensusOk
+            const needsAttention = c.exito_pct < 65
             return (
-              <div key={c.slug} className={`rounded-lg border p-2 text-center ${ok ? 'bg-slate-900/50 border-gray-700/30' : 'bg-red-900/20 border-red-800/30'}`}>
-                <p className="text-[10px] text-gray-400 truncate font-semibold">{c.ciudad.split(',')[0]}</p>
+              <div key={c.slug} className={`rounded-lg border p-2 text-center ${needsAttention && c.exito_pct >= 50 ? 'bg-amber-900/20 border-amber-800/30' : needsAttention ? 'bg-red-900/20 border-red-800/30' : 'bg-slate-900/50 border-gray-700/30'}`}>
+                <p className="text-[10px] text-gray-400 truncate font-semibold">
+                  {c.forecast.weather && <span className="mr-0.5">{c.forecast.weather.icon}</span>}
+                  {c.ciudad.split(',')[0]}
+                </p>
                 <p className="text-sm font-extrabold text-emerald-400">{c.forecast.temp_corregida.toFixed(1)}°</p>
                 <div className="flex items-center justify-center gap-1 mt-0.5">
-                  {!ok && <span className="text-red-400 text-[8px]">⚠</span>}
+                  {needsAttention && <span className="text-red-400 text-[8px]">⚠</span>}
                   <span className={`text-[8px] font-bold ${c.exito_pct >= 65 ? 'text-emerald-400' : c.exito_pct >= 50 ? 'text-amber-400' : 'text-red-400'}`}>
                     {c.exito_pct}%
                   </span>
@@ -457,6 +472,17 @@ export default function ExecutiveSummaryPanel({ analysis, metrics, previousAnaly
             )
           })}
         </div>
+      </div>
+
+      {/* ===== WEATHER ICON LEGEND ===== */}
+      <div className="text-[10px] text-gray-500 flex items-center gap-3 flex-wrap justify-center">
+        <span>🌤 Despejado</span>
+        <span>⛅ Nubes</span>
+        <span>🌧 Lluvia</span>
+        <span>🌨 Nieve</span>
+        <span>⛈ Tormenta</span>
+        <span className="text-gray-600">|</span>
+        <span>Los iconos junto al nombre de la ciudad indican el clima pronosticado para el mediodía local</span>
       </div>
 
       {/* ===== SUMMARY TEXT ===== */}

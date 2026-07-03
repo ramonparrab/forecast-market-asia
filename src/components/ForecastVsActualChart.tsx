@@ -7,6 +7,8 @@ import {
 
 interface Props {
   metrics: { total_muestras: number } | null
+  currentForecasts?: { slug: string; forecast: { temp_corregida: number }; ciudad: string }[]
+  fechaObjetivo?: string
 }
 
 function formatFecha(f: string): string {
@@ -23,7 +25,7 @@ interface BacktestPoint {
   fecha: string
 }
 
-export default function ForecastVsActualChart({ metrics }: Props) {
+export default function ForecastVsActualChart({ metrics, currentForecasts = [], fechaObjetivo }: Props) {
   const [data, setData] = useState<ForecastVsActual[]>([])
   const [selectedCity, setSelectedCity] = useState<string>('all')
   const [loading, setLoading] = useState(false)
@@ -252,7 +254,6 @@ export default function ForecastVsActualChart({ metrics }: Props) {
             </p>
           </div>
           {(() => {
-            // Group data by city for per-city bollinger bands
             const byCity: Record<string, any[]> = {}
             for (const d of data) {
               if (!byCity[d.slug]) byCity[d.slug] = []
@@ -260,16 +261,20 @@ export default function ForecastVsActualChart({ metrics }: Props) {
             }
             const cityEntries = Object.entries(byCity)
             if (cityEntries.length === 0) return <p className="text-xs text-gray-500">Sin datos suficientes</p>
-            return cityEntries.map(([slug, recs]) => {
+            const citiesSorted = cityEntries.map(([slug, recs]) => {
               const sorted = [...recs].sort((a, b) => a.fecha_objetivo.localeCompare(b.fecha_objetivo))
               const errors = sorted.map(r => r.error).filter(e => e !== null) as number[]
               if (errors.length < 2) return null
-              const mean = errors.reduce((s, v) => s + v, 0) / errors.length
-              const std = Math.sqrt(errors.reduce((s, v) => s + (v - mean) ** 2, 0) / errors.length)
               const errSorted = [...errors].sort((a, b) => a - b)
               const pLow = errSorted[Math.max(0, Math.floor(errSorted.length * 0.05))]
               const pHigh = errSorted[Math.min(errSorted.length - 1, Math.floor(errSorted.length * 0.95))]
+              const bandWidth = pHigh - pLow
+              return { slug, sorted, errors, errSorted, pLow, pHigh, bandWidth }
+            }).filter(Boolean).sort((a: any, b: any) => a.bandWidth - b.bandWidth)
+            if (citiesSorted.length === 0) return <p className="text-xs text-gray-500">Sin datos suficientes</p>
+            return citiesSorted.map(({ slug, sorted, errors, errSorted, pLow, pHigh }: any) => {
               const cityName = sorted[0]?.ciudad || slug
+              const currentForecast = currentForecasts?.find(cf => cf.slug === slug)
               const chartData = sorted.map(r => ({
                 fecha: r.fecha_objetivo,
                 pronosticado: r.temp_corregida,
@@ -277,9 +282,25 @@ export default function ForecastVsActualChart({ metrics }: Props) {
                 banda_sup: r.temp_corregida + pHigh,
                 banda_inf: r.temp_corregida + pLow,
               }))
+              if (currentForecast && fechaObjetivo) {
+                const proy = currentForecast.forecast.temp_corregida
+                const alreadyProjected = chartData.some(d => d.fecha === fechaObjetivo)
+                if (!alreadyProjected) {
+                  chartData.push({
+                    fecha: fechaObjetivo,
+                    pronosticado: proy,
+                    real: null as any,
+                    banda_sup: proy + pHigh,
+                    banda_inf: proy + pLow,
+                    esProyeccion: true,
+                  })
+                }
+              }
               const hasOutside = chartData.some(d => d.real !== null && (d.real > d.banda_sup || d.real < d.banda_inf))
+              const hasProjection = chartData.some(d => (d as any).esProyeccion)
               const lastForecast = chartData.length > 0 ? chartData[chartData.length - 1].pronosticado : 0
-              const allVals = chartData.flatMap(d => [d.pronosticado, d.real, d.banda_sup, d.banda_inf]).filter((v): v is number => typeof v === 'number' && !isNaN(v) && v > -50 && v < 100)
+              const mae = errors.reduce((s: number, v: number) => s + Math.abs(v), 0) / errors.length
+              const allVals = chartData.flatMap((d: any) => [d.pronosticado, d.real, d.banda_sup, d.banda_inf]).filter((v: any): v is number => typeof v === 'number' && !isNaN(v) && v > -50 && v < 100)
               const yDomain2: [number, number] = allVals.length > 0
                 ? [Math.floor(Math.min(...allVals) - 1), Math.ceil(Math.max(...allVals) + 1)]
                 : [0, 50]
@@ -287,7 +308,7 @@ export default function ForecastVsActualChart({ metrics }: Props) {
                 <div key={slug} className="mb-4 last:mb-0">
                   <div className="flex items-center justify-between mb-1">
                     <h4 className="text-xs font-bold text-white">{cityName}</h4>
-                    <span className="text-[9px] text-gray-500">Banda P5-P95: [{pLow.toFixed(2)},{pHigh.toFixed(2)}]°C · MAE={(errors.reduce((s, v) => s + Math.abs(v), 0) / errors.length).toFixed(2)}°C</span>
+                    <span className="text-[9px] text-gray-500">Banda P5-P95: [{pLow.toFixed(2)},{pHigh.toFixed(2)}]°C · MAE={mae.toFixed(2)}°C</span>
                   </div>
                   <div className="h-56">
                     <ResponsiveContainer width="100%" height="100%">
@@ -298,21 +319,20 @@ export default function ForecastVsActualChart({ metrics }: Props) {
                           return d.toLocaleDateString('es-ES', { day: 'numeric', month: 'short' })
                         }} />
                         <YAxis stroke="#64748b" tick={{ fontSize: 10 }} domain={yDomain2} label={{ value: '°C', angle: -90, position: 'insideLeft', fill: '#94a3b8', fontSize: 11 }} />
-                        <Tooltip contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #475569', borderRadius: '8px', fontSize: '11px' }} labelStyle={{ color: '#f1f5f9' }} formatter={(value: number, name: string) => {
+                        <Tooltip contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #475569', borderRadius: '8px', fontSize: '11px' }} labelStyle={{ color: '#f1f5f9' }} formatter={(value: any, name: string, entry: any) => {
                           const labels: Record<string,string> = { pronosticado: 'Pronostico', real: 'Real', banda_sup: 'Banda Sup', banda_inf: 'Banda Inf' }
-                          return [`${value.toFixed(1)}°C`, labels[name] || name]
+                          const prefix = entry?.payload?.esProyeccion ? '⚠️ ' : ''
+                          return [`${prefix}${value.toFixed(1)}°C`, labels[name] || name]
                         }} />
                         <Legend wrapperStyle={{ fontSize: '10px' }} />
-                        {/* Band boundaries */}
-                        <Line type="monotone" dataKey="banda_sup" stroke="#e879f9" strokeWidth={2} dot={false} strokeDasharray="8 4" name={`Banda P95 (+${pHigh.toFixed(1)})`} />
-                        <Line type="monotone" dataKey="banda_inf" stroke="#e879f9" strokeWidth={2} dot={false} strokeDasharray="8 4" name={`Banda P5 (${pLow.toFixed(1)})`} />
-                        {/* Forecast line */}
-                        <Line type="monotone" dataKey="pronosticado" stroke="#60a5fa" strokeWidth={2.5} dot={{ r: 3, fill: '#60a5fa' }} name="Pronostico" />
-                        {/* Actual temperature line */}
+                        <Line type="monotone" dataKey="banda_sup" stroke="#e879f9" strokeWidth={2} dot={false} strokeDasharray="8 4" name={`Banda P95 (+${pHigh.toFixed(1)})`} connectNulls={true} />
+                        <Line type="monotone" dataKey="banda_inf" stroke="#e879f9" strokeWidth={2} dot={false} strokeDasharray="8 4" name={`Banda P5 (${pLow.toFixed(1)})`} connectNulls={true} />
+                        <Line type="monotone" dataKey="pronosticado" stroke="#60a5fa" strokeWidth={2.5} dot={{ r: 3, fill: '#60a5fa' }} name="Pronostico" connectNulls={true} />
                         <Line type="monotone" dataKey="real" stroke="#34d399" strokeWidth={2.5} dot={{ r: 3, fill: '#34d399' }} name="Real" connectNulls={false} />
-                        {/* Reference line for latest forecast */}
-                        <ReferenceLine y={lastForecast} stroke="#f59e0b" strokeWidth={1.5} strokeDasharray="4 4"
-                          label={{ value: `Ultimo pron.: ${lastForecast.toFixed(1)}°C`, position: 'right', fill: '#f59e0b', fontSize: 10 }} />
+                        {hasProjection && (
+                          <ReferenceLine x={fechaObjetivo} stroke="#f59e0b" strokeWidth={1.5} strokeDasharray="4 4"
+                            label={{ value: '⚠️ Proyección', position: 'top', fill: '#f59e0b', fontSize: 9 }} />
+                        )}
                       </ComposedChart>
                     </ResponsiveContainer>
                   </div>

@@ -3,15 +3,15 @@ import { HistoricalRecord } from '@/types'
 
 // Static initial biases from 3-year backtest (fallback when no history exists)
 const SESGOS_INICIALES: Record<string, Record<string, number>> = {
-  beijing:     { Invierno: 0.8975, Otoño: 0.7959, Primavera: 0.9013, Verano: 0.6336 },
-  chengdu:     { Invierno: 0.8127, Otoño: 0.7313, Primavera: 0.8257, Verano: 1.0290 },
-  chongqing:   { Invierno: 0.8361, Otoño: 0.7502, Primavera: 0.9015, Verano: 0.7730 },
-  'hong-kong': { Invierno: 0.9213, Otoño: 0.7974, Primavera: 0.7893, Verano: 0.7446 },
-  seoul:       { Invierno: 0.7205, Otoño: 0.7132, Primavera: 0.7271, Verano: 0.8140 },
-  shanghai:    { Invierno: 0.8020, Otoño: 0.8804, Primavera: 0.7341, Verano: 0.8045 },
-  shenzhen:    { Invierno: 0.7759, Otoño: 0.7440, Primavera: 0.7905, Verano: 0.7998 },
-  tokyo:       { Invierno: 0.7943, Otoño: 0.8630, Primavera: 0.7397, Verano: 0.8896 },
-  wuhan:       { Invierno: 0.8727, Otoño: 0.7840, Primavera: 0.6502, Verano: 0.9067 },
+  beijing:     { Invierno: -0.8975, Otoño: -0.7959, Primavera: -0.9013, Verano: -0.6336 },
+  chengdu:     { Invierno: -0.8127, Otoño: -0.7313, Primavera: -0.8257, Verano: -1.0290 },
+  chongqing:   { Invierno: -0.8361, Otoño: -0.7502, Primavera: -0.9015, Verano: -0.7730 },
+  'hong-kong': { Invierno: -0.9213, Otoño: -0.7974, Primavera: -0.7893, Verano: -0.7446 },
+  seoul:       { Invierno: -0.7205, Otoño: -0.7132, Primavera: -0.7271, Verano: -0.8140 },
+  shanghai:    { Invierno: -0.8020, Otoño: -0.8804, Primavera: -0.7341, Verano: -0.8045 },
+  shenzhen:    { Invierno: -0.7759, Otoño: -0.7440, Primavera: -0.7905, Verano: -0.7998 },
+  tokyo:       { Invierno: -0.7943, Otoño: -0.8630, Primavera: -0.7397, Verano: -0.8896 },
+  wuhan:       { Invierno: -0.8727, Otoño: -0.7840, Primavera: -0.6502, Verano: -0.9067 },
 }
 
 // Exponential moving average factor (higher = more weight on recent)
@@ -22,7 +22,7 @@ const MIN_SAMPLES_DYNAMIC = 10
 
 export function getStaticBias(slug: string, mes: number): number {
   const estacion = getEstacion(mes)
-  return SESGOS_INICIALES[slug]?.[estacion] ?? 0.8
+  return SESGOS_INICIALES[slug]?.[estacion] ?? -0.8
 }
 
 /**

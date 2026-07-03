@@ -27,6 +27,50 @@ export async function fetchActualMaxTemp(
 export interface WeatherModelsResult {
   models: ModelTemps
   ensembleMembers: number[]
+  weatherCode: number
+  precipitation: number
+}
+
+const WMO_LABELS: Record<number, { label: string; icon: string; severity: 'none' | 'low' | 'moderate' | 'severe' }> = {
+  0:  { label: 'Despejado', icon: '☀️', severity: 'none' },
+  1:  { label: 'Mayormente despejado', icon: '🌤', severity: 'none' },
+  2:  { label: 'Parcialmente nublado', icon: '⛅', severity: 'none' },
+  3:  { label: 'Nublado', icon: '☁️', severity: 'none' },
+  45: { label: 'Niebla', icon: '🌫', severity: 'low' },
+  48: { label: 'Niebla con escarcha', icon: '🌫', severity: 'low' },
+  51: { label: 'Llovizna ligera', icon: '🌦', severity: 'low' },
+  53: { label: 'Llovizna moderada', icon: '🌦', severity: 'low' },
+  55: { label: 'Llovizna densa', icon: '🌧', severity: 'moderate' },
+  56: { label: 'Llovizna helada ligera', icon: '🌧', severity: 'moderate' },
+  57: { label: 'Llovizna helada densa', icon: '🌧', severity: 'moderate' },
+  61: { label: 'Lluvia ligera', icon: '🌦', severity: 'low' },
+  63: { label: 'Lluvia moderada', icon: '🌧', severity: 'moderate' },
+  65: { label: 'Lluvia fuerte', icon: '🌧', severity: 'moderate' },
+  66: { label: 'Lluvia helada ligera', icon: '🌧', severity: 'moderate' },
+  67: { label: 'Lluvia helada fuerte', icon: '🌧', severity: 'severe' },
+  71: { label: 'Nieve ligera', icon: '🌨', severity: 'moderate' },
+  73: { label: 'Nieve moderada', icon: '❄️', severity: 'moderate' },
+  75: { label: 'Nieve fuerte', icon: '❄️', severity: 'severe' },
+  77: { label: 'Granos de nieve', icon: '❄️', severity: 'moderate' },
+  80: { label: 'Chubascos ligeros', icon: '🌦', severity: 'low' },
+  81: { label: 'Chubascos moderados', icon: '🌧', severity: 'moderate' },
+  82: { label: 'Chubascos violentos', icon: '🌧', severity: 'severe' },
+  85: { label: 'Chubascos de nieve ligeros', icon: '🌨', severity: 'moderate' },
+  86: { label: 'Chubascos de nieve fuertes', icon: '❄️', severity: 'severe' },
+  95: { label: 'Tormenta', icon: '⛈', severity: 'severe' },
+  96: { label: 'Tormenta con granizo ligero', icon: '⛈', severity: 'severe' },
+  99: { label: 'Tormenta con granizo fuerte', icon: '⛈', severity: 'severe' },
+}
+
+export function getWeatherInfo(code: number, precipitation: number): { label: string; icon: string; severity: 'none' | 'low' | 'moderate' | 'severe' } {
+  const base = WMO_LABELS[code] ?? { label: 'Desconocido', icon: '❓', severity: 'none' as const }
+  if (precipitation >= 25 && (code === 61 || code === 63 || code === 80 || code === 81)) {
+    return { ...base, severity: 'severe' as const }
+  }
+  if (precipitation >= 10 && code >= 61 && code <= 67) {
+    return { ...base, severity: 'moderate' as const }
+  }
+  return base
 }
 
 /**
@@ -48,7 +92,7 @@ export async function fetchWeatherModels(
   const ensembleMembers: number[] = []
 
   const modelsParam = toTry.join(',')
-  const baseUrl = `${OPENMETEO_BASE}?latitude=${lat}&longitude=${lon}&daily=temperature_2m_max&temperature_unit=celsius&start_date=${fechaISO}&end_date=${fechaISO}&models=${modelsParam}`
+  const baseUrl = `${OPENMETEO_BASE}?latitude=${lat}&longitude=${lon}&daily=temperature_2m_max,weather_code,precipitation_sum,precipitation_probability_max&temperature_unit=celsius&start_date=${fechaISO}&end_date=${fechaISO}&models=${modelsParam}&timezone=auto`
 
   // Retry logic: try up to 3 times with exponential backoff
   let lastError: Error | null = null
@@ -77,9 +121,13 @@ export async function fetchWeatherModels(
         }
       }
 
+      // Extract weather data (with models param, Open-Meteo returns model-specific fields)
+      const weatherCode = daily.weather_code_best_match?.[0] ?? daily.weather_code?.[0] ?? 0
+      const precipitation = daily.precipitation_sum_best_match?.[0] ?? daily.precipitation_sum?.[0] ?? 0
+
       // Success - if we got at least 1 model, return
       if (Object.keys(results).length > 0) {
-        return { models: results, ensembleMembers }
+        return { models: results, ensembleMembers, weatherCode, precipitation }
       }
     } catch (e) {
       lastError = e as Error
@@ -95,5 +143,5 @@ export async function fetchWeatherModels(
     console.error(`Open-Meteo FAILED for lat=${lat} lon=${lon} after 3 attempts:`, lastError?.message)
   }
 
-  return { models: results, ensembleMembers }
+  return { models: results, ensembleMembers, weatherCode: 0, precipitation: 0 }
 }
