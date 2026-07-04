@@ -461,6 +461,7 @@ export default function ExecutiveSummaryPanel({ analysis, metrics, previousAnaly
                   {c.ciudad.split(',')[0]}
                 </p>
                 <p className="text-sm font-extrabold text-emerald-400">{c.forecast.temp_corregida.toFixed(1)}°</p>
+                <p className="text-[9px] text-blue-300 font-semibold">{Math.round(c.forecast.temp_corregida)}° entero</p>
                 <div className="flex items-center justify-center gap-1 mt-0.5">
                   {needsAttention && <span className="text-red-400 text-[8px]">⚠</span>}
                   <span className={`text-[8px] font-bold ${c.exito_pct >= 55 ? 'text-emerald-400' : c.exito_pct >= 45 ? 'text-amber-400' : 'text-red-400'}`}>
