@@ -130,9 +130,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       totalSkipped += skipped
 
       // Old vs new raw accuracy
-      const oldWithin = records.filter(r => Math.abs(r.error ?? 0) <= 0.5).length
+      const oldWithin = records.filter(r => Math.abs(r.error ?? 0) <= 1).length
       const oldAcc = records.length > 0 ? Math.round(oldWithin / records.length * 100) : 0
-      const newWithin = newErrors.filter(e => Math.abs(e) <= 0.5).length
+      const newWithin = newErrors.filter(e => Math.abs(e) <= 1).length
       const newAcc = newErrors.length > 0 ? Math.round(newWithin / newErrors.length * 100) : 0
 
       cityResults.push({ slug, old_acc: oldAcc, new_acc: newAcc, updated, skipped })

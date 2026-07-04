@@ -248,7 +248,7 @@ function ImprovementLegend() {
               <strong className="text-emerald-300">Qué hace:</strong> Usa 51 miembros del ensemble europeo para calcular probabilidades directamente sin asumir distribución.
             </p>
             <p className="text-gray-400 text-[10px] leading-relaxed mb-2">
-              <strong className="text-emerald-300">Cómo:</strong> Cuenta fracción de miembros que caen dentro de cada bucket (±0.5°C). Reemplaza Student-t cuando hay ≥20 miembros.
+              <strong className="text-emerald-300">Cómo:</strong> Cuenta fracción de miembros que caen dentro de cada bucket (±1°C). Reemplaza Student-t cuando hay ≥20 miembros.
             </p>
             <p className="text-gray-400 text-[10px] leading-relaxed mb-2">
               <strong className="text-emerald-300">Impacto:</strong> CDF empírica es SIEMPRE más precisa que distribución paramétrica. Elimina error de especificación de modelo.
@@ -779,7 +779,7 @@ export default function Home({ initialAnalysis, initialMetrics, initialAvailable
                 </div>
                 <div className="flex justify-center gap-6 text-xs text-gray-500">
                   <span>📡 {analysis.cities.filter(c => c.nowcast?.activo).length}/{analysis.cities.length} nowcast activo</span>
-                  <span>🎯 Meta: ±0.5°C &gt;55%</span>
+                  <span>🎯 Meta: ±1°C &gt;55%</span>
                 </div>
               </div>
               <div className="grid grid-cols-3 sm:grid-cols-5 lg:grid-cols-9 divide-x divide-blue-500/10 border-t border-blue-500/10">

@@ -35,7 +35,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         overall_mae: backtestSummary.overall_mae,
         overall_rmse: backtestSummary.overall_rmse,
         overall_bias: backtestSummary.overall_bias,
-        accuracy_05c: backtestSummary.overall_accuracy_05c,
+        accuracy_1c: backtestSummary.overall_accuracy_1c,
         total_dias: backtestSummary.total_dias,
         por_ciudad: porCiudadBacktest,
       }

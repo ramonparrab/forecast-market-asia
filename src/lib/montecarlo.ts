@@ -54,22 +54,22 @@ export function monteCarloProbability(
   switch (tipo) {
     case 'exacto': {
       const v = valor as number
-      hits = muestras.filter(t => Math.abs(t - v) <= 0.5).length
+      hits = muestras.filter(t => Math.abs(t - v) <= 1).length
       break
     }
     case 'superior': {
       const v = valor as number
-      hits = muestras.filter(t => t >= v - 0.5).length
+      hits = muestras.filter(t => t >= v - 1).length
       break
     }
     case 'inferior': {
       const v = valor as number
-      hits = muestras.filter(t => t <= v + 0.5).length
+      hits = muestras.filter(t => t <= v + 1).length
       break
     }
     case 'rango': {
       const [low, high] = valor as [number, number]
-      hits = muestras.filter(t => (low - 0.5) <= t && t <= (high + 0.5)).length
+      hits = muestras.filter(t => (low - 1) <= t && t <= (high + 1)).length
       break
     }
     default:

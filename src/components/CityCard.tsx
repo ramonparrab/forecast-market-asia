@@ -194,7 +194,7 @@ function ExitoPctBadge({ pct, isReal }: { pct: number; isReal?: boolean }) {
       {isReal ? (
         <>
           <p className="text-emerald-300 mb-2">✅ Basado en pronósticos REALES vs temperatura real en Polymarket</p>
-          <p className="text-gray-400 text-[10px]">Se calcula: % de pronósticos que estuvieron dentro de ±0.5°C de la temperatura real del cierre.</p>
+          <p className="text-gray-400 text-[10px]">Se calcula: % de pronósticos que estuvieron dentro de ±1°C de la temperatura real del cierre.</p>
           <p className="text-blue-300 text-[10px] mt-2">Con cada historial adicional, esta precisión MEJORA.</p>
         </>
       ) : (
@@ -313,7 +313,7 @@ export default function CityCard({ data }: CityCardProps) {
         'bg-red-500/5 border border-red-500/10'
       }`}>
         <div className="flex items-center justify-between mb-1">
-          <span className="text-gray-500">Precisión ±0.5°C</span>
+          <span className="text-gray-500">Precisión ±1°C</span>
           <ExitoPctBadge pct={data.exito_pct} isReal={data.totalRecords !== undefined && data.totalRecords >= 5} />
         </div>
         <p className="text-gray-400 leading-relaxed">{data.explicacion}</p>

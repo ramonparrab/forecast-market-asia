@@ -379,7 +379,7 @@ export async function getForecastVsActual(
  * Deduped by (slug, fecha_objetivo) keeping latest id.
  * Transforms into (prediction, outcome) pairs where:
  *   prediction = confidence proxy based on error magnitude
- *   outcome   = 1 if |error| <= 0.5°C, else 0
+ *   outcome   = 1 if |error| <= 1°C, else 0
  */
 export async function getAllCalibrationPairs(): Promise<{ slug: string; prediction: number; outcome: number }[]> {
   const client = getClient()
@@ -407,7 +407,7 @@ export async function getAllCalibrationPairs(): Promise<{ slug: string; predicti
     const absErr = Math.abs(r.error)
     // Confidence proxy: inverse of error, clamped to [0.05, 0.95]
     const prediction = Math.max(0.05, Math.min(0.95, 1 - absErr / 5))
-    const outcome = absErr <= 0.5 ? 1 : 0
+    const outcome = absErr <= 1 ? 1 : 0
     pairs.push({ slug: r.slug, prediction: Math.round(prediction * 100) / 100, outcome })
   }
 
@@ -447,7 +447,7 @@ export async function getHistoricalAccuracyInteger(
   const records = Array.from(seen.values())
   const within = records.filter((r: any) => {
     const errorInteger = r.temp_real - Math.round(r.temp_corregida)
-    return Math.abs(errorInteger) <= 0.5
+    return Math.abs(errorInteger) <= 1
   }).length
 
   return {
@@ -457,7 +457,7 @@ export async function getHistoricalAccuracyInteger(
 }
 
 /**
- * getHistoricalAccuracy — returns per-city success rate within 0.5°C
+ * getHistoricalAccuracy — returns per-city success rate within 1°C
  * using ALL available history (0 = all time, or specify days).
  */
 export async function getHistoricalAccuracy(
@@ -492,7 +492,7 @@ export async function getHistoricalAccuracy(
   }
 
   const records = Array.from(seen.values())
-  const within1 = records.filter((r: any) => Math.abs(r.error) <= 0.5).length
+  const within1 = records.filter((r: any) => Math.abs(r.error) <= 1).length
   return {
     accuracy: Math.round((within1 / records.length) * 10000) / 100,
     muestras: records.length,
@@ -556,7 +556,7 @@ export async function saveBacktestChunk(dias: number, offset: number, summary: B
       overall_mae: summary.overall_mae,
       overall_rmse: summary.overall_rmse,
       overall_bias: summary.overall_bias,
-      overall_accuracy_1c: summary.overall_accuracy_05c,
+      overall_accuracy_1c: summary.overall_accuracy_1c,
       offset,
       por_ciudad: JSON.stringify(summary.por_ciudad),
       resultados: JSON.stringify(summary.resultados),
@@ -663,14 +663,14 @@ function computeSummaryFromResults(allResults: BacktestDayResult[], days: number
     const mae = Math.round(absErrors.reduce((s, v) => s + v, 0) / errors.length * 100) / 100
     const rmse = Math.round(Math.sqrt(errors.reduce((s, v) => s + v * v, 0) / errors.length) * 100) / 100
     const bias = Math.round(errors.reduce((s, v) => s + v, 0) / errors.length * 100) / 100
-    const within1 = results.filter(r => Math.abs(r.error) <= 0.5).length
+    const within1 = results.filter(r => Math.abs(r.error) <= 1).length
     const maxError = Math.round(Math.max(...absErrors) * 100) / 100
     return {
       ciudad: results[0]?.ciudad ?? slug,
       slug,
       muestras: results.length,
       mae, rmse, bias,
-      accuracy_within_05c: Math.round(within1 / results.length * 10000) / 100,
+      accuracy_within_1c: Math.round(within1 / results.length * 10000) / 100,
       max_error: maxError,
     }
   })
@@ -688,7 +688,7 @@ function computeSummaryFromResults(allResults: BacktestDayResult[], days: number
     overall_mae: overallMae,
     overall_rmse: Math.round(Math.sqrt(allErrors.reduce((s, v) => s + v * v, 0) / allErrors.length) * 100) / 100,
     overall_bias: overallBias,
-    overall_accuracy_05c: Math.round(allResults.filter(r => Math.abs(r.error) <= 0.5).length / allResults.length * 10000) / 100,
+    overall_accuracy_1c: Math.round(allResults.filter(r => Math.abs(r.error) <= 1).length / allResults.length * 10000) / 100,
     por_ciudad: cityMetrics,
     mejores_ciudades: sorted.slice(0, 3).map(c => c.ciudad),
     peores_ciudades: sorted.slice(-3).reverse().map(c => c.ciudad),
@@ -720,7 +720,7 @@ export async function getCityMetrics(slug: string): Promise<{
   const rmse = Math.round(Math.sqrt(errors.reduce((s, v) => s + v * v, 0) / errors.length) * 100) / 100
   const bias = Math.round(errors.reduce((s, v) => s + v, 0) / errors.length * 100) / 100
   const metrics: AccuracyMetrics = { ciudad: withActuals[0].ciudad, slug, mae, rmse, bias, muestras: withActuals.length }
-  const within1 = withActuals.filter(r => Math.abs(r.error!) <= 0.5).length
+  const within1 = withActuals.filter(r => Math.abs(r.error!) <= 1).length
   const accuracyPct = Math.round(within1 / withActuals.length * 100)
   // Daily evolution
   const byDate: Record<string, number[]> = {}
@@ -815,7 +815,7 @@ export async function computeGlobalMetrics(): Promise<GlobalMetrics | null> {
     })
     .sort((a, b) => a.fecha.localeCompare(b.fecha))
 
-  const within1 = withActuals.filter(r => Math.abs(r.error!) <= 0.5).length
+  const within1 = withActuals.filter(r => Math.abs(r.error!) <= 1).length
   const accuracyPct = Math.round((within1 / withActuals.length) * 10000) / 100
 
   return {

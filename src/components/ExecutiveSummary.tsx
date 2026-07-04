@@ -319,7 +319,7 @@ export default function ExecutiveSummaryPanel({ analysis, metrics, previousAnaly
       <div className="grid gap-3 sm:grid-cols-2">
         <div className="rounded-xl bg-slate-800/50 border border-gray-700/30 p-4">
           <div className="flex items-center justify-between mb-2">
-            <p className="text-xs text-gray-400 font-semibold">PRECISIÓN GLOBAL ±0.5°C</p>
+            <p className="text-xs text-gray-400 font-semibold">PRECISIÓN GLOBAL ±1°C</p>
             {summary && <DeltaBadge delta={summary.precision_global_delta} />}
           </div>
           <div className="flex items-baseline gap-3">

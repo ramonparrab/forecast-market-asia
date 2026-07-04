@@ -59,7 +59,7 @@ export interface CityAnalysis {
   forecast: ForecastResult
   arbitraje: { desvio: number; nivel: string }
   nowcast: NowcastInfo
-  // Probability of forecast being within ±0.5°C of actual (the ONLY metric that matters for betting)
+  // Probability of forecast being within ±1°C of actual (the ONLY metric that matters for betting)
   exito_pct: number
   // Polymarket integer-round precision (forecast rounded to integer, matching Polymarket resolution)
   exito_pct_integer: number
@@ -152,7 +152,7 @@ export interface GlobalMetrics {
     overall_mae: number
     overall_rmse: number
     overall_bias: number
-    accuracy_05c: number
+    accuracy_1c: number
     total_dias: number
     por_ciudad: AccuracyMetrics[]
   }
