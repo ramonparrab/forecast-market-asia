@@ -9,7 +9,7 @@ interface WeatherGroup {
   mae: number
   rmse: number
   bias: number
-  accuracy_1c: number
+  accuracy_05c: number
   mae_minus_global: number
   penalty_suggestion: number
 }
@@ -122,7 +122,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       const mae = errs.reduce((s, v) => s + Math.abs(v), 0) / n
       const rmse = Math.sqrt(errs.reduce((s, v) => s + v * v, 0) / n)
       const bias = errs.reduce((s, v) => s + v, 0) / n
-      const within1 = errs.filter(e => Math.abs(e) <= 1).length / n * 100
+      const within05 = errs.filter(e => Math.abs(e) <= 0.5).length / n * 100
       const diff = mae - globalMAE
       // Only suggest penalty if MAE is worse than global
       const penalty = diff > 0.1 ? Math.round(Math.min(diff * 10, 15)) : 0
@@ -134,7 +134,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         mae: Math.round(mae * 100) / 100,
         rmse: Math.round(rmse * 100) / 100,
         bias: Math.round(bias * 100) / 100,
-        accuracy_1c: Math.round(within1 * 100) / 100,
+        accuracy_05c: Math.round(within05 * 100) / 100,
         mae_minus_global: Math.round(diff * 100) / 100,
         penalty_suggestion: penalty,
       }
@@ -144,7 +144,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   return res.status(200).json({
     records: deduped.length,
     global_mae: Math.round(globalMAE * 100) / 100,
-    global_accuracy_1c: Math.round(allErrors.filter(e => Math.abs(e) <= 1).length / allErrors.length * 10000) / 100,
+    global_accuracy_05c: Math.round(allErrors.filter(e => Math.abs(e) <= 0.5).length / allErrors.length * 10000) / 100,
     unique_dates: Array.from(new Set(deduped.map(r => r.fecha_objetivo))).length,
     unique_cities: Array.from(new Set(deduped.map(r => r.slug))).length,
     weather_impact: weatherImpact,

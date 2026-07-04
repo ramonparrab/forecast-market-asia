@@ -161,7 +161,7 @@ export default function SignalsPanel() {
           <div className="flex items-center gap-4 text-xs">
             <div className="text-center">
               <p className="text-2xl font-bold text-emerald-400">{pkg.global_accuracy_pct.toFixed(1)}%</p>
-              <p className="text-gray-500">Precisión global ±1°C</p>
+              <p className="text-gray-500">Precisión global ±0.5°C</p>
             </div>
             <div className="text-center">
               <p className="text-2xl font-bold text-blue-400">{pkg.global_mae.toFixed(2)}°C</p>

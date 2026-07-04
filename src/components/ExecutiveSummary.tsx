@@ -319,7 +319,7 @@ export default function ExecutiveSummaryPanel({ analysis, metrics, previousAnaly
       <div className="grid gap-3 sm:grid-cols-2">
         <div className="rounded-xl bg-slate-800/50 border border-gray-700/30 p-4">
           <div className="flex items-center justify-between mb-2">
-            <p className="text-xs text-gray-400 font-semibold">PRECISIÓN GLOBAL ±1°C</p>
+            <p className="text-xs text-gray-400 font-semibold">PRECISIÓN GLOBAL ±0.5°C</p>
             {summary && <DeltaBadge delta={summary.precision_global_delta} />}
           </div>
           <div className="flex items-baseline gap-3">
@@ -453,9 +453,9 @@ export default function ExecutiveSummaryPanel({ analysis, metrics, previousAnaly
             const numModels = Object.keys(c.forecast.ensemble_raw).length
             const hasNowcast = c.nowcast?.activo
             const consensusOk = c.forecast.consenso !== 'DEBIL'
-            const needsAttention = c.exito_pct < 65
+            const needsAttention = c.exito_pct < 55
             return (
-              <div key={c.slug} className={`rounded-lg border p-2 text-center ${needsAttention && c.exito_pct >= 50 ? 'bg-amber-900/20 border-amber-800/30' : needsAttention ? 'bg-red-900/20 border-red-800/30' : 'bg-slate-900/50 border-gray-700/30'}`}>
+              <div key={c.slug} className={`rounded-lg border p-2 text-center ${needsAttention && c.exito_pct >= 45 ? 'bg-amber-900/20 border-amber-800/30' : needsAttention ? 'bg-red-900/20 border-red-800/30' : 'bg-slate-900/50 border-gray-700/30'}`}>
                 <p className="text-[10px] text-gray-400 truncate font-semibold">
                   {c.forecast.weather && <span className="mr-0.5">{c.forecast.weather.icon}</span>}
                   {c.ciudad.split(',')[0]}
@@ -463,7 +463,7 @@ export default function ExecutiveSummaryPanel({ analysis, metrics, previousAnaly
                 <p className="text-sm font-extrabold text-emerald-400">{c.forecast.temp_corregida.toFixed(1)}°</p>
                 <div className="flex items-center justify-center gap-1 mt-0.5">
                   {needsAttention && <span className="text-red-400 text-[8px]">⚠</span>}
-                  <span className={`text-[8px] font-bold ${c.exito_pct >= 65 ? 'text-emerald-400' : c.exito_pct >= 50 ? 'text-amber-400' : 'text-red-400'}`}>
+                  <span className={`text-[8px] font-bold ${c.exito_pct >= 55 ? 'text-emerald-400' : c.exito_pct >= 45 ? 'text-amber-400' : 'text-red-400'}`}>
                     {c.exito_pct}%
                   </span>
                   <span className="text-[7px] text-gray-600">{numModels}m</span>

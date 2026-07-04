@@ -199,7 +199,7 @@ export async function runBacktest(days: number = 90, offsetDays: number = 0): Pr
     const mae = Math.round(absErrors.reduce((s, v) => s + v, 0) / errors.length * 100) / 100
     const rmse = Math.round(Math.sqrt(errors.reduce((s, v) => s + v * v, 0) / errors.length) * 100) / 100
     const bias = Math.round(errors.reduce((s, v) => s + v, 0) / errors.length * 100) / 100
-    const within1 = results.filter(r => Math.abs(r.error) <= 1).length
+    const within1 = results.filter(r => Math.abs(r.error) <= 0.5).length
     const maxError = Math.round(Math.max(...absErrors) * 100) / 100
 
     return {
@@ -220,7 +220,7 @@ export async function runBacktest(days: number = 90, offsetDays: number = 0): Pr
   const overallMae = Math.round(allAbsErrors.reduce((s, v) => s + v, 0) / allErrors.length * 100) / 100
   const overallRmse = Math.round(Math.sqrt(allErrors.reduce((s, v) => s + v * v, 0) / allErrors.length) * 100) / 100
   const overallBias = Math.round(allErrors.reduce((s, v) => s + v, 0) / allErrors.length * 100) / 100
-  const within1 = allResults.filter(r => Math.abs(r.error) <= 1).length
+  const within1 = allResults.filter(r => Math.abs(r.error) <= 0.5).length
 
   // Best/worst cities by MAE
   const sorted = [...cityMetrics].sort((a, b) => a.mae - b.mae)
@@ -320,7 +320,7 @@ export async function walkForwardBacktest(
 
         const error = actualTemp - forecast.temp_corregida
         const absError = Math.abs(error)
-        const entry: WFEntry = { error, absError, within2: absError <= 1, within4: absError <= 4 }
+        const entry: WFEntry = { error, absError, within2: absError <= 0.5, within4: absError <= 4 }
         cityEntries.push(entry)
         overallEntries.push(entry)
       }

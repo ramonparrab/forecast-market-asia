@@ -208,8 +208,8 @@ function ExitoPctBadge({ pct, isReal }: { pct: number; isReal?: boolean }) {
   )
 
   if (pct >= 80) return <Tooltip width="w-80" content={tooltipContent}><span className="text-emerald-400 font-bold">{pct}%</span></Tooltip>
-  if (pct >= 65) return <Tooltip width="w-80" content={tooltipContent}><span className="text-green-400 font-bold">{pct}%</span></Tooltip>
-  if (pct >= 50) return <Tooltip width="w-80" content={tooltipContent}><span className="text-amber-400 font-bold">{pct}%</span></Tooltip>
+  if (pct >= 55) return <Tooltip width="w-80" content={tooltipContent}><span className="text-green-400 font-bold">{pct}%</span></Tooltip>
+  if (pct >= 45) return <Tooltip width="w-80" content={tooltipContent}><span className="text-amber-400 font-bold">{pct}%</span></Tooltip>
   return <Tooltip width="w-80" content={tooltipContent}><span className="text-red-400 font-bold">{pct}%</span></Tooltip>
 }
 
@@ -278,8 +278,8 @@ export default function CityCard({ data }: CityCardProps) {
         <div
           className={`h-full transition-all duration-500 ${
             data.exito_pct >= 80 ? 'bg-emerald-500' :
-            data.exito_pct >= 65 ? 'bg-green-500' :
-            data.exito_pct >= 50 ? 'bg-amber-500' : 'bg-red-500'
+            data.exito_pct >= 55 ? 'bg-green-500' :
+            data.exito_pct >= 45 ? 'bg-amber-500' : 'bg-red-500'
           }`}
           style={{ width: `${data.exito_pct}%` }}
         />
@@ -308,12 +308,12 @@ export default function CityCard({ data }: CityCardProps) {
 
       {/* Success % + Explanation */}
       <div className={`mb-3 rounded-lg p-2.5 text-xs ${
-        data.exito_pct >= 65 ? 'bg-emerald-500/5 border border-emerald-500/10' :
-        data.exito_pct >= 50 ? 'bg-amber-500/5 border border-amber-500/10' :
+        data.exito_pct >= 55 ? 'bg-emerald-500/5 border border-emerald-500/10' :
+        data.exito_pct >= 45 ? 'bg-amber-500/5 border border-amber-500/10' :
         'bg-red-500/5 border border-red-500/10'
       }`}>
         <div className="flex items-center justify-between mb-1">
-          <span className="text-gray-500">Precisión ±1°C</span>
+          <span className="text-gray-500">Precisión ±0.5°C</span>
           <ExitoPctBadge pct={data.exito_pct} isReal={data.totalRecords !== undefined && data.totalRecords >= 5} />
         </div>
         <p className="text-gray-400 leading-relaxed">{data.explicacion}</p>

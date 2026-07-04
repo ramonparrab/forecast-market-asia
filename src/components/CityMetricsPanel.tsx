@@ -72,7 +72,7 @@ export default function CityMetricsPanel() {
         <SummaryCard label="MAE Global" value={`${metrics.overall_mae}°C`} color="text-blue-400" sub={`${metrics.total_muestras} muestras`} />
         <SummaryCard label="RMSE Global" value={`${metrics.overall_rmse}°C`} color="text-amber-400" />
         <SummaryCard label="Bias Global" value={`${metrics.overall_bias > 0 ? '+' : ''}${metrics.overall_bias}°C`} color={Math.abs(metrics.overall_bias) < 0.3 ? 'text-emerald-400' : 'text-red-400'} />
-        <SummaryCard label="Acierto ±1°C" value={`${metrics.accuracy_pct}%`} color={metrics.accuracy_pct >= 65 ? 'text-emerald-400' : 'text-amber-400'} sub="Meta: >65%" />
+        <SummaryCard label="Acierto ±0.5°C" value={`${metrics.accuracy_pct}%`} color={metrics.accuracy_pct >= 55 ? 'text-emerald-400' : 'text-amber-400'} sub="Meta: >55%" />
       </div>
 
       <div className="card">

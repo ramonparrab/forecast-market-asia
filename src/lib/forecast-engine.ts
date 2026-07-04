@@ -84,9 +84,8 @@ async function analyzeCity(
   // 3. Nowcasting — blend live METAR observation into forecast
   const nowcastResult = await nowcastTemperature(city.slug, city.lat, city.lon, forecast.temp_corregida)
   const tempFinal = nowcastResult.temp
-  // Update forecast with nowcasted temperature
+  // Update forecast with nowcasted temperature (temp_ponderada preserves raw ensemble)
   forecast.temp_corregida = tempFinal
-  forecast.temp_ponderada = tempFinal
 
   // 4. Polymarket prices
   let contracts: PolymarketContract[] = []

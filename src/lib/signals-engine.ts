@@ -174,7 +174,7 @@ function generarRecomendacion(signal: {
     return `${ciudad}: Señal de alta confianza. Precisión histórica ${signal.historical_accuracy_pct.toFixed(0)}%. Pronóstico ${signal.forecast_c.toFixed(1)}°C con consenso ${signal.confidence.label}.`
   }
   if (signal.confidence.label === 'BAJA' || signal.confidence.label === 'MUY BAJA') {
-    return `${ciudad}: Señal de baja confianza. Solo 1 de cada ${signal.historical_accuracy_pct > 0 ? Math.round(100 / signal.historical_accuracy_pct) : '?'} pronósticos acierta dentro de ±1°C. Recomendación: esperar confirmación.`
+    return `${ciudad}: Señal de baja confianza. Solo 1 de cada ${signal.historical_accuracy_pct > 0 ? Math.round(100 / signal.historical_accuracy_pct) : '?'} pronósticos acierta dentro de ±0.5°C. Recomendación: esperar confirmación.`
   }
   return `${ciudad}: Pronóstico ${signal.forecast_c.toFixed(1)}°C, Banda [${signal.band.p5.toFixed(1)}, ${signal.band.p95.toFixed(1)}]. Precisión ${signal.historical_accuracy_pct.toFixed(0)}%.`
 }
@@ -274,7 +274,7 @@ export function buildSignalsPackage(
     signals,
     metadata: {
       methodology: 'Ensemble ponderado de 6 modelos meteorológicos (ECMWF, GFS, ICON, JMA, MeteoFrance, best_match) con corrección dinámica de sesgo (EMA α=0.3), contracción bayesiana para precisión histórica, y bandas de error P5-P95 sobre errores históricos reales.',
-      accuracy_metric: '±1°C del valor real de cierre del mercado. Precisión calculada con contracción bayesiana (prior global + observaciones por ciudad).',
+      accuracy_metric: '±0.5°C del valor real de cierre del mercado. Precisión calculada con contracción bayesiana (prior global + observaciones por ciudad).',
       data_sources: [
         'Open-Meteo API (6 modelos meteorológicos)',
         'METAR airports (nowcasting en vivo)',

@@ -124,13 +124,34 @@ export async function getServerSideProps() {
       console.log(`[HINDCAST] Guardados ${hindcastRecords.length} registros (${HINDCAST_DAYS} días x ${backtest.total_ciudades} ciudades)`)
     }
 
-    // ===== STEP 3: Obtener fechas disponibles y métricas =====
+    // ===== STEP 3: Recalcular exito_pct (lectura fresca de BD, no del daily_runs cacheado) =====
+    const { getHistoricalAccuracy, computeGlobalMetrics } = await import('@/lib/supabase')
+    const metrics = await computeGlobalMetrics()
+    const globalAccuracyPct = metrics?.accuracy_pct ?? 50
+    if (analysis?.cities) {
+      for (const city of analysis.cities) {
+        const hist = await getHistoricalAccuracy(city.slug)
+        let exitoPct: number
+        if (hist.muestras >= 5) {
+          const priorStrength = 10
+          exitoPct = Math.round(
+            (hist.accuracy * hist.muestras + globalAccuracyPct * priorStrength)
+            / (hist.muestras + priorStrength)
+          )
+        } else {
+          exitoPct = Math.round(globalAccuracyPct)
+        }
+        if (city.forecast.weather?.code === 3) {
+          exitoPct = Math.max(10, exitoPct - 1)
+        }
+        city.exito_pct = exitoPct
+      }
+    }
+
+    // ===== STEP 4: Obtener fechas disponibles =====
     const { data: datesData } = await client.from('daily_runs' as any).select('fecha_objetivo').order('fecha_objetivo', { ascending: false } as any).limit(90)
     const raw = ((datesData as any[] | undefined)?.map(r => r.fecha_objetivo) ?? [])
     const availableDates = Array.from(new Set<string>(raw))
-
-    const { computeGlobalMetrics } = await import('@/lib/supabase')
-    const metrics = await computeGlobalMetrics()
 
     return {
       props: {
@@ -152,8 +173,8 @@ type View = 'executive' | 'dashboard' | 'table' | 'metrics' | 'comparison' | 'ba
 function getConfidence(city: CityAnalysis): { label: string; color: string; bg: string } {
   const pct = city.exito_pct
   if (pct >= 80) return { label: 'MUY ALTA', color: 'text-emerald-400', bg: 'bg-emerald-500/10' }
-  if (pct >= 65) return { label: 'ALTA', color: 'text-green-400', bg: 'bg-green-500/10' }
-  if (pct >= 50) return { label: 'MEDIA', color: 'text-amber-400', bg: 'bg-amber-500/10' }
+  if (pct >= 55) return { label: 'ALTA', color: 'text-green-400', bg: 'bg-green-500/10' }
+  if (pct >= 45) return { label: 'MEDIA', color: 'text-amber-400', bg: 'bg-amber-500/10' }
   return { label: 'BAJA', color: 'text-red-400', bg: 'bg-red-500/10' }
 }
 
@@ -404,9 +425,9 @@ function ImprovementLegend() {
 
 function CitySuccessSummary({ cities }: { cities: CityAnalysis[] }) {
   if (cities.length === 0) return null
-  const high = cities.filter(c => c.exito_pct >= 65).length
-  const medium = cities.filter(c => c.exito_pct >= 50 && c.exito_pct < 65).length
-  const low = cities.filter(c => c.exito_pct < 50).length
+  const high = cities.filter(c => c.exito_pct >= 55).length
+  const medium = cities.filter(c => c.exito_pct >= 45 && c.exito_pct < 55).length
+  const low = cities.filter(c => c.exito_pct < 45).length
   const best = cities.reduce((a, b) => a.exito_pct > b.exito_pct ? a : b)
   const worst = cities.reduce((a, b) => a.exito_pct < b.exito_pct ? a : b)
   const bestConf = getConfidence(best)
@@ -416,15 +437,15 @@ function CitySuccessSummary({ cities }: { cities: CityAnalysis[] }) {
     <div className="grid gap-3 sm:grid-cols-3 mb-6">
       <div className="rounded-xl bg-emerald-500/5 border border-emerald-500/20 p-4 text-center">
         <p className="text-2xl font-bold text-emerald-400">{high}</p>
-        <p className="text-xs text-gray-400">Ciudades con precisión <span className="text-emerald-400">ALTA</span> (≥65%)</p>
+        <p className="text-xs text-gray-400">Ciudades con precisión <span className="text-emerald-400">ALTA</span> (≥55%)</p>
       </div>
       <div className="rounded-xl bg-amber-500/5 border border-amber-500/20 p-4 text-center">
         <p className="text-2xl font-bold text-amber-400">{medium}</p>
-        <p className="text-xs text-gray-400">Ciudades con precisión <span className="text-amber-400">MEDIA</span> (50-64%)</p>
+        <p className="text-xs text-gray-400">Ciudades con precisión <span className="text-amber-400">MEDIA</span> (45-54%)</p>
       </div>
       <div className="rounded-xl bg-red-500/5 border border-red-500/20 p-4 text-center">
         <p className="text-2xl font-bold text-red-400">{low}</p>
-        <p className="text-xs text-gray-400">Ciudades con precisión <span className="text-red-400">BAJA</span> (&lt;50%)</p>
+        <p className="text-xs text-gray-400">Ciudades con precisión <span className="text-red-400">BAJA</span> (&lt;45%)</p>
       </div>
       <div className="sm:col-span-3 rounded-xl bg-slate-800/30 p-3 text-xs text-gray-400 text-center">
         <span className="text-emerald-400 font-medium">🏆 Mejor: {best.ciudad}</span>
@@ -749,7 +770,7 @@ export default function Home({ initialAnalysis, initialMetrics, initialAvailable
                 </div>
                 <div className="flex justify-center gap-6 text-xs text-gray-500">
                   <span>📡 {analysis.cities.filter(c => c.nowcast?.activo).length}/{analysis.cities.length} nowcast activo</span>
-                  <span>🎯 Meta: ±1°C &gt;65%</span>
+                  <span>🎯 Meta: ±0.5°C &gt;55%</span>
                 </div>
               </div>
               <div className="grid grid-cols-3 sm:grid-cols-5 lg:grid-cols-9 divide-x divide-blue-500/10 border-t border-blue-500/10">

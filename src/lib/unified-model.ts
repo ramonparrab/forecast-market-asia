@@ -85,7 +85,7 @@ function getConfidenceLabel(pct: number): 'FUERTE' | 'MEDIA' | 'DEBIL' | 'EVITAR
 }
 
 function getActionSignal(edge: number, exitoPct: number, consenso: string): BetAction['signal'] {
-  if (edge > 10 && exitoPct >= 65 && (consenso === 'MUY FUERTE' || consenso === 'FUERTE')) return 'EXCELENTE'
+  if (edge > 10 && exitoPct >= 55 && (consenso === 'MUY FUERTE' || consenso === 'FUERTE')) return 'EXCELENTE'
   if (edge > 6 && exitoPct >= 55) return 'BUENA'
   if (edge > 3) return 'NEUTRAL'
   return 'EVITAR'

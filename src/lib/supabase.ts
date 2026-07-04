@@ -255,6 +255,32 @@ export async function fixBiasSign(
   return true
 }
 
+export async function updateForecastPrecision(
+  slug: string,
+  fecha: string,
+  tempPonderada: number,
+  tempCorregida: number,
+  error: number
+): Promise<boolean> {
+  const client = getClient()
+  if (!client) return false
+  const { error: updateErr } = await (client
+    .from('forecast_history' as any) as any)
+    .update({
+      temp_pronosticada: Math.round(tempPonderada * 100) / 100,
+      temp_corregida: Math.round(tempCorregida * 100) / 100,
+      error: Math.round(error * 100) / 100,
+    })
+    .eq('slug', slug)
+    .eq('fecha_objetivo', fecha)
+
+  if (updateErr) {
+    console.error(`Error updating precision for ${slug} ${fecha}:`, updateErr)
+    return false
+  }
+  return true
+}
+
 export async function getRecordsWithoutActuals(
   limit = 50
 ): Promise<{ id: number; slug: string; ciudad: string; fecha_objetivo: string; lat: number; lon: number }[]> {
@@ -329,7 +355,7 @@ export async function getForecastVsActual(
  * Deduped by (slug, fecha_objetivo) keeping latest id.
  * Transforms into (prediction, outcome) pairs where:
  *   prediction = confidence proxy based on error magnitude
- *   outcome   = 1 if |error| <= 1°C, else 0
+ *   outcome   = 1 if |error| <= 0.5°C, else 0
  */
 export async function getAllCalibrationPairs(): Promise<{ slug: string; prediction: number; outcome: number }[]> {
   const client = getClient()
@@ -357,7 +383,7 @@ export async function getAllCalibrationPairs(): Promise<{ slug: string; predicti
     const absErr = Math.abs(r.error)
     // Confidence proxy: inverse of error, clamped to [0.05, 0.95]
     const prediction = Math.max(0.05, Math.min(0.95, 1 - absErr / 5))
-    const outcome = absErr <= 1 ? 1 : 0
+    const outcome = absErr <= 0.5 ? 1 : 0
     pairs.push({ slug: r.slug, prediction: Math.round(prediction * 100) / 100, outcome })
   }
 
@@ -365,7 +391,7 @@ export async function getAllCalibrationPairs(): Promise<{ slug: string; predicti
 }
 
 /**
- * getHistoricalAccuracy — returns per-city success rate within 1°C
+ * getHistoricalAccuracy — returns per-city success rate within 0.5°C
  * using ALL available history (0 = all time, or specify days).
  */
 export async function getHistoricalAccuracy(
@@ -400,7 +426,7 @@ export async function getHistoricalAccuracy(
   }
 
   const records = Array.from(seen.values())
-  const within1 = records.filter((r: any) => Math.abs(r.error) <= 1).length
+  const within1 = records.filter((r: any) => Math.abs(r.error) <= 0.5).length
   return {
     accuracy: Math.round((within1 / records.length) * 10000) / 100,
     muestras: records.length,
@@ -571,7 +597,7 @@ function computeSummaryFromResults(allResults: BacktestDayResult[], days: number
     const mae = Math.round(absErrors.reduce((s, v) => s + v, 0) / errors.length * 100) / 100
     const rmse = Math.round(Math.sqrt(errors.reduce((s, v) => s + v * v, 0) / errors.length) * 100) / 100
     const bias = Math.round(errors.reduce((s, v) => s + v, 0) / errors.length * 100) / 100
-    const within1 = results.filter(r => Math.abs(r.error) <= 1).length
+    const within1 = results.filter(r => Math.abs(r.error) <= 0.5).length
     const maxError = Math.round(Math.max(...absErrors) * 100) / 100
     return {
       ciudad: results[0]?.ciudad ?? slug,
@@ -596,7 +622,7 @@ function computeSummaryFromResults(allResults: BacktestDayResult[], days: number
     overall_mae: overallMae,
     overall_rmse: Math.round(Math.sqrt(allErrors.reduce((s, v) => s + v * v, 0) / allErrors.length) * 100) / 100,
     overall_bias: overallBias,
-    overall_accuracy_1c: Math.round(allResults.filter(r => Math.abs(r.error) <= 1).length / allResults.length * 10000) / 100,
+    overall_accuracy_1c: Math.round(allResults.filter(r => Math.abs(r.error) <= 0.5).length / allResults.length * 10000) / 100,
     por_ciudad: cityMetrics,
     mejores_ciudades: sorted.slice(0, 3).map(c => c.ciudad),
     peores_ciudades: sorted.slice(-3).reverse().map(c => c.ciudad),
@@ -628,7 +654,7 @@ export async function getCityMetrics(slug: string): Promise<{
   const rmse = Math.round(Math.sqrt(errors.reduce((s, v) => s + v * v, 0) / errors.length) * 100) / 100
   const bias = Math.round(errors.reduce((s, v) => s + v, 0) / errors.length * 100) / 100
   const metrics: AccuracyMetrics = { ciudad: withActuals[0].ciudad, slug, mae, rmse, bias, muestras: withActuals.length }
-  const within1 = withActuals.filter(r => Math.abs(r.error!) <= 1).length
+  const within1 = withActuals.filter(r => Math.abs(r.error!) <= 0.5).length
   const accuracyPct = Math.round(within1 / withActuals.length * 100)
   // Daily evolution
   const byDate: Record<string, number[]> = {}
@@ -723,7 +749,7 @@ export async function computeGlobalMetrics(): Promise<GlobalMetrics | null> {
     })
     .sort((a, b) => a.fecha.localeCompare(b.fecha))
 
-  const within1 = withActuals.filter(r => Math.abs(r.error!) <= 1).length
+  const within1 = withActuals.filter(r => Math.abs(r.error!) <= 0.5).length
   const accuracyPct = Math.round((within1 / withActuals.length) * 10000) / 100
 
   return {
@@ -736,4 +762,62 @@ export async function computeGlobalMetrics(): Promise<GlobalMetrics | null> {
     por_ciudad: porCiudad,
     evolucion_diaria: evolucion,
   }
+}
+
+export async function recoverEnsembleFromDailyRuns(): Promise<{ fixed: number; skipped: number; errors: number }> {
+  const client = getClient()
+  if (!client) return { fixed: 0, skipped: 0, errors: 1 }
+
+  const { data, error } = await client
+    .from('daily_runs' as any)
+    .select('*')
+    .not('resultados', 'is', null)
+    .order('fecha_objetivo', { ascending: true } as any)
+
+  const runs = (data as any[]) || []
+  if (error || runs.length === 0) {
+    console.error('[recoverEnsemble] No daily_runs found:', error)
+    return { fixed: 0, skipped: 0, errors: 1 }
+  }
+
+  let fixed = 0
+  let skipped = 0
+  let errors = 0
+
+  for (const run of runs) {
+    const fechaObjetivo = run.fecha_objetivo
+    let resultados: any[]
+    try {
+      resultados = typeof run.resultados === 'string' ? JSON.parse(run.resultados) : run.resultados
+    } catch {
+      errors++
+      continue
+    }
+    if (!Array.isArray(resultados)) { errors++; continue }
+
+    for (const city of resultados) {
+      const slug = city.slug
+      const raw = city.forecast?.ensemble_raw
+      if (!raw || typeof raw !== 'object') { skipped++; continue }
+
+      const modelTemps = Object.values(raw as Record<string, number>).filter(v => typeof v === 'number')
+      if (modelTemps.length === 0) { skipped++; continue }
+
+      const ensembleAvg = Math.round(modelTemps.reduce((s: number, v: number) => s + v, 0) / modelTemps.length * 100) / 100
+
+      const { error: updateErr } = await (client
+        .from('forecast_history' as any) as any)
+        .update({ temp_pronosticada: ensembleAvg })
+        .eq('slug', slug)
+        .eq('fecha_objetivo', fechaObjetivo)
+
+      if (updateErr) {
+        errors++
+      } else {
+        fixed++
+      }
+    }
+  }
+
+  return { fixed, skipped, errors }
 }
