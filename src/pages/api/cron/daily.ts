@@ -1,6 +1,7 @@
 import { NextApiRequest, NextApiResponse } from 'next'
 import { runDailyAnalysis } from '@/lib/forecast-engine'
 import { saveDailyRun, saveForecastRecords, getRecordsWithoutActuals, updateActualTemperature, getHistoricalRecords, saveBacktestBias } from '@/lib/supabase'
+import { fetchStationMaxTemp } from '@/lib/station-weather'
 import { fetchActualMaxTemp } from '@/lib/openmeteo'
 import { CIUDADES_ASIA } from '@/lib/cities'
 import { computeBacktestBiasFromResults } from '@/lib/backtest-bias'
@@ -31,13 +32,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const backfillErrors: string[] = []
 
     for (const record of pendingRecords) {
-      if (!record.lat || !record.lon) {
-        backfillErrors.push(`${record.slug} ${record.fecha_objetivo}: no lat/lon`)
-        continue
+      // Try Weather.com first (exact Polymarket/WU resolution), fallback to Open-Meteo
+      let tempReal = await fetchStationMaxTemp(record.slug, record.fecha_objetivo)
+      if (tempReal === null && record.lat && record.lon) {
+        tempReal = await fetchActualMaxTemp(record.lat, record.lon, record.fecha_objetivo)
       }
-      const tempReal = await fetchActualMaxTemp(record.lat, record.lon, record.fecha_objetivo)
       if (tempReal === null) {
-        backfillErrors.push(`${record.slug} ${record.fecha_objetivo}: Open-Meteo sin datos`)
+        backfillErrors.push(`${record.slug} ${record.fecha_objetivo}: sin datos de estación`)
         continue
       }
       const ok = await updateActualTemperature(record.id, tempReal)

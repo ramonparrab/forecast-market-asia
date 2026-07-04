@@ -14,7 +14,7 @@ const STATION_MAP: Record<string, string> = {
   seoul: 'RKSI',
   beijing: 'ZBAA',
   shanghai: 'ZSPD',
-  'hong-kong': 'VHHH',
+  'hong-kong': 'HKO',
   tokyo: 'RJTT',
   shenzhen: 'ZGSZ',
   wuhan: 'ZHHH',

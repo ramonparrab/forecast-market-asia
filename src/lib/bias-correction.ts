@@ -41,18 +41,18 @@ export function computeDynamicBias(
     return staticBias
   }
 
-  // Take most recent errors up to maxSamples
-  const recent = recentErrors.slice(-maxSamples)
-  const errors = recent.map(r => r.error)
+  // Take most recent errors, reverse to chronological order (old→new)
+  const chrono = recentErrors.slice(0, maxSamples).reverse()
+  const errors = chrono.map(r => r.error)
 
-  // EMA
+  // EMA from old to new: newest errors get highest weight
   let ema = errors[0]
   for (let i = 1; i < errors.length; i++) {
     ema = EMA_ALPHA * errors[i] + (1 - EMA_ALPHA) * ema
   }
 
-  // Blend with static bias when not enough data
-  const weight = Math.min(1, recentErrors.length / 50)
+  // Full weight at 20 samples (converges faster)
+  const weight = Math.min(1, recentErrors.length / 20)
   return weight * ema + (1 - weight) * staticBias
 }
 

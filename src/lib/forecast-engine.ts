@@ -30,16 +30,6 @@ function getStatus(edge: number): string {
   return 'EVITAR'
 }
 
-function getMockContracts(slug: string): PolymarketContract[] {
-  return [22, 24, 26, 28, 30, 32, 34, 36].map((temp, i) => ({
-    token_id: `mock-${slug}-${temp}`,
-    texto: `${temp}°C ${30 + i * 8}%`,
-    tipo: 'exacto' as const,
-    valor: temp,
-    prob_mkt: 30 + i * 8,
-  }))
-}
-
 async function analyzeCity(
   city: typeof CIUDADES_ASIA[number],
   fechaISO: string,
@@ -84,16 +74,14 @@ async function analyzeCity(
   // 3. Nowcasting — blend live METAR observation into forecast
   const nowcastResult = await nowcastTemperature(city.slug, city.lat, city.lon, forecast.temp_corregida)
   const tempFinal = nowcastResult.temp
-  // Update forecast with nowcasted temperature (temp_ponderada preserves raw ensemble)
-  forecast.temp_corregida = tempFinal
+  // Apply dynamic bias correction AFTER nowcast
+  const tempWithBias = tempFinal + (forecast.sesgo_aplicado ?? 0)
+  forecast.temp_corregida = Math.round(Math.max(0, tempWithBias) * 100) / 100
 
   // 4. Polymarket prices
   let contracts: PolymarketContract[] = []
   if (fetchPrices) {
     contracts = await fetchPolymarketPrices(city.slug, fechaObjetivo)
-  }
-  if (contracts.length === 0) {
-    contracts = getMockContracts(city.slug)
   }
 
   // Calculate success probability using real historical accuracy

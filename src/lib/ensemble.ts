@@ -65,12 +65,12 @@ export function computeEnsemble(input: EnsembleInput): ForecastResult {
   }
   tempPonderada /= pesoTotal
 
-  // Dynamic bias correction
+  // Dynamic bias correction (applied after nowcast, so just track sesgo)
   const sesgo = computeDynamicBias(slug, mes, recentErrors)
-  let tempCorregida = Math.max(0, tempPonderada + sesgo)
+  let tempCorregida = tempPonderada
 
   if (input.backtestBiasCorrection !== undefined && Math.abs(input.backtestBiasCorrection) >= 0.15) {
-    tempCorregida = Math.max(0, tempCorregida + input.backtestBiasCorrection)
+    tempCorregida = tempCorregida + input.backtestBiasCorrection
   }
 
   // Spread & volatility (using Z-score filtered models)

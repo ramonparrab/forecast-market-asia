@@ -4,7 +4,7 @@ export const CIUDADES_ASIA: City[] = [
   { slug: 'seoul',     nombre: 'Seúl',      lat: 37.46, lon: 126.44, estacion: 'Incheon Intl' },
   { slug: 'beijing',   nombre: 'Beijing',   lat: 40.08, lon: 116.58, estacion: 'Capital Intl' },
   { slug: 'shanghai',  nombre: 'Shanghái',  lat: 31.14, lon: 121.80, estacion: 'Pudong Intl' },
-  { slug: 'hong-kong', nombre: 'Hong Kong', lat: 22.30, lon: 114.17, estacion: 'Hong Kong Observatory' },
+  { slug: 'hong-kong', nombre: 'Hong Kong', lat: 22.302, lon: 114.174, estacion: 'Hong Kong Observatory' },
   { slug: 'tokyo',     nombre: 'Tokio',     lat: 35.55, lon: 139.78, estacion: 'Haneda' },
   { slug: 'shenzhen',  nombre: 'Shenzhen',  lat: 22.64, lon: 113.80, estacion: "Bao'an Intl" },
   { slug: 'wuhan',     nombre: 'Wuhan',     lat: 30.78, lon: 114.21, estacion: 'Tianhe Intl' },

@@ -1,13 +1,13 @@
 import { NextApiRequest, NextApiResponse } from 'next'
 import { getRecordsWithoutActuals, updateActualTemperature } from '@/lib/supabase'
+import { fetchStationMaxTemp } from '@/lib/station-weather'
 import { fetchActualMaxTemp } from '@/lib/openmeteo'
 
 /**
  * POST /api/backfill
  * Fetches actual temperatures for historical forecast records
- * that have temp_real = NULL.
- * 
- * Pipeline: records sin temp_real → fetch Open-Meteo histórico → update Supabase
+ * using Weather.com (TWC) data, the exact backend Polymarket resolves against
+ * via Weather Underground. Falls back to Open-Meteo ERA5 for cities without station mapping.
  */
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') {
@@ -34,15 +34,21 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const results: { slug: string; fecha: string; temp_real: number | null; error: string | null }[] = []
 
     for (const record of records) {
-      if (!record.lat || !record.lon) {
-        results.push({ slug: record.slug, fecha: record.fecha_objetivo, temp_real: null, error: 'No lat/lon' })
-        errors++
-        continue
+      // Try station-based first (matches Polymarket resolution)
+      let tempReal = await fetchStationMaxTemp(record.slug, record.fecha_objetivo)
+
+      // Fallback to Open-Meteo ERA5 if station data unavailable
+      if (tempReal === null) {
+        if (!record.lat || !record.lon) {
+          results.push({ slug: record.slug, fecha: record.fecha_objetivo, temp_real: null, error: 'No station data and no lat/lon' })
+          errors++
+          continue
+        }
+        tempReal = await fetchActualMaxTemp(record.lat, record.lon, record.fecha_objetivo)
       }
 
-      const tempReal = await fetchActualMaxTemp(record.lat, record.lon, record.fecha_objetivo)
       if (tempReal === null) {
-        results.push({ slug: record.slug, fecha: record.fecha_objetivo, temp_real: null, error: 'Open-Meteo no respondió' })
+        results.push({ slug: record.slug, fecha: record.fecha_objetivo, temp_real: null, error: 'No data from any source' })
         errors++
         continue
       }

@@ -10,6 +10,8 @@ interface GammaMarket {
   volumeNum?: number
   bestBid?: string
   bestAsk?: string
+  question?: string
+  groupItemTitle?: string
 }
 
 interface GammaPrice {
@@ -17,9 +19,12 @@ interface GammaPrice {
   tokenID?: string
 }
 
+const MONTHS = ['january','february','march','april','may','june',
+                'july','august','september','october','november','december']
+
 /**
  * Fetch Polymarket contracts for a given city/date using Gamma API.
- * This replaces the fragile Playwright scraping.
+ * Builds the exact event slug instead of searching by title.
  */
 export async function fetchPolymarketPrices(
   slug: string,
@@ -28,34 +33,39 @@ export async function fetchPolymarketPrices(
   const contracts: PolymarketContract[] = []
 
   try {
-    // Search for the event
-    const query = encodeURIComponent(`highest temperature in ${slug} on ${fechaObjetivo}`)
-    const searchUrl = `${GAMMA_API}/events?tag=weather&closed=false&limit=5&title=${query}`
+    // Build exact event slug: highest-temperature-in-{city}-on-{month}-{day}-{year}
+    const date = new Date(fechaObjetivo + 'T12:00:00Z')
+    const monthName = MONTHS[date.getUTCMonth()]
+    const day = date.getUTCDate()
+    const year = date.getUTCFullYear()
+    const eventSlug = `highest-temperature-in-${slug}-on-${monthName}-${day}-${year}`
 
-    const searchResp = await fetch(searchUrl, { signal: AbortSignal.timeout(15000) })
-    if (!searchResp.ok) throw new Error(`Search returned ${searchResp.status}`)
+    // Query event by slug — the response includes embedded markets
+    const eventsUrl = `${GAMMA_API}/events?slug=${encodeURIComponent(eventSlug)}`
+    const eventsResp = await fetch(eventsUrl, { signal: AbortSignal.timeout(15000) })
+    if (!eventsResp.ok) throw new Error(`Events returned ${eventsResp.status}`)
 
-    const events = await searchResp.json()
+    const events = await eventsResp.json()
     if (!events || events.length === 0) {
-      console.warn(`No Polymarket event found for ${slug} on ${fechaObjetivo}`)
+      console.warn(`No Polymarket event found for ${eventSlug}`)
       return []
     }
 
     const event = events[0]
-    const eventSlug = event.slug
-
-    // Get markets for this event
-    const marketsUrl = `${GAMMA_API}/markets?tag=weather&limit=50&closed=false&slug=${eventSlug}`
-    const marketsResp = await fetch(marketsUrl, { signal: AbortSignal.timeout(15000) })
-    if (!marketsResp.ok) throw new Error(`Markets returned ${marketsResp.status}`)
-
-    const markets: GammaMarket[] = await marketsResp.json()
+    const markets: GammaMarket[] = event.markets || []
 
     for (const market of markets) {
-      if (!market.outcomePrices || market.outcomePrices.length < 2) continue
+      // outcomePrices is a stringified JSON array from Gamma API, parse if needed
+      let outcomePrices: string[]
+      if (typeof market.outcomePrices === 'string') {
+        try { outcomePrices = JSON.parse(market.outcomePrices) } catch { continue }
+      } else {
+        outcomePrices = market.outcomePrices as string[]
+      }
+      if (!outcomePrices || outcomePrices.length < 2) continue
 
-      const yesPrice = parseFloat(market.outcomePrices[0])
-      const noPrice = parseFloat(market.outcomePrices[1])
+      const yesPrice = parseFloat(outcomePrices[0])
+      const noPrice = parseFloat(outcomePrices[1])
 
       // Mid price without vig: (yes + (1 - no)) / 2
       const midPrice = (yesPrice + (1 - noPrice)) / 2
@@ -63,9 +73,9 @@ export async function fetchPolymarketPrices(
 
       if (probMkt <= 0 || probMkt > 100) continue
 
-      // Parse outcome to get temperature description
-      const outcome = market.outcomes[0] || ''
-      const texto = outcome.trim()
+      // Use groupItemTitle for temperature description (outcomes are always ["Yes","No"])
+      const texto = (market as any).groupItemTitle || market.question || ''
+      if (!texto) continue
 
       // Determine contract type
       const lower = texto.toLowerCase()

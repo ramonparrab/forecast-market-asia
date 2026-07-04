@@ -5,14 +5,22 @@ import { BacktestSummary, BacktestDayResult, BacktestCityMetrics } from './backt
 
 const supabaseUrl = (process.env.NEXT_PUBLIC_SUPABASE_URL || '').replace(/\/rest\/v1\/?$/, '')
 const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
+const serviceKey = process.env.SUPABASE_SERVICE_KEY || ''
 
 let supabase: ReturnType<typeof createClient> | null = null
 
-function getClient() {
+export function getClient() {
   if (!supabase && supabaseUrl && supabaseKey) {
     supabase = createClient(supabaseUrl, supabaseKey)
   }
   return supabase
+}
+
+export function getServiceClient() {
+  if (supabaseUrl && serviceKey) {
+    return createClient(supabaseUrl, serviceKey)
+  }
+  return getClient()
 }
 
 export async function saveDailyRun(run: DailyRun): Promise<number | null> {
@@ -44,8 +52,17 @@ export async function saveDailyRun(run: DailyRun): Promise<number | null> {
 }
 
 export async function saveForecastRecords(records: HistoricalRecord[]): Promise<void> {
-  const client = getClient()
+  const client = getServiceClient()
   if (!client || records.length === 0) return
+
+  // Delete existing records for these (slug, fecha_objetivo) combos to avoid duplicates
+  for (const r of records) {
+    await client
+      .from('forecast_history' as any)
+      .delete()
+      .eq('slug', r.slug)
+      .eq('fecha_objetivo', r.fecha_objetivo)
+  }
 
   const { error } = await client
     .from('forecast_history' as any)
@@ -77,7 +94,7 @@ export async function getRecentErrors(
   const q = client
     .from('forecast_history' as any)
     .select('error')
-    .is('error', 'not.null' as any)
+    .not('error', 'is', null as any)
     .order('fecha_ejecucion', { ascending: false } as any)
     .limit(limit)
 
@@ -100,7 +117,7 @@ export async function getRecentModelErrors(
   const { data, error } = await client
     .from('forecast_history' as any)
     .select('slug, error')
-    .is('error', 'not.null' as any)
+    .not('error', 'is', null as any)
     .order('fecha_ejecucion', { ascending: false } as any)
     .limit(limit * 9)
 
@@ -121,12 +138,19 @@ export async function getAllHistoricalErrors(): Promise<Record<string, number[]>
   if (!client) return {}
   const { data, error } = await client
     .from('forecast_history' as any)
-    .select('slug, error')
+    .select('id, slug, fecha_objetivo, error')
     .not('error', 'is', null)
-    .order('fecha_ejecucion', { ascending: false } as any)
+    .order('id', { ascending: false } as any)
   if (error || !data) return {}
-  const grouped: Record<string, number[]> = {}
+  const seen = new Map<string, any>()
   for (const row of (data as any[])) {
+    const key = `${row.slug}|${row.fecha_objetivo}`
+    if (!seen.has(key) || row.id > seen.get(key).id) {
+      seen.set(key, row)
+    }
+  }
+  const grouped: Record<string, number[]> = {}
+  for (const row of Array.from(seen.values())) {
     if (!grouped[row.slug]) grouped[row.slug] = []
     if (grouped[row.slug].length < 100) {
       grouped[row.slug].push(row.error)
