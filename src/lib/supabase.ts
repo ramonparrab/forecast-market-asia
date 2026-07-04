@@ -514,7 +514,7 @@ export async function saveBacktestChunk(dias: number, offset: number, summary: B
       overall_mae: summary.overall_mae,
       overall_rmse: summary.overall_rmse,
       overall_bias: summary.overall_bias,
-      overall_accuracy_1c: summary.overall_accuracy_1c,
+      overall_accuracy_1c: summary.overall_accuracy_05c,
       offset,
       por_ciudad: JSON.stringify(summary.por_ciudad),
       resultados: JSON.stringify(summary.resultados),
@@ -628,7 +628,7 @@ function computeSummaryFromResults(allResults: BacktestDayResult[], days: number
       slug,
       muestras: results.length,
       mae, rmse, bias,
-      accuracy_within_1c: Math.round(within1 / results.length * 10000) / 100,
+      accuracy_within_05c: Math.round(within1 / results.length * 10000) / 100,
       max_error: maxError,
     }
   })
@@ -646,7 +646,7 @@ function computeSummaryFromResults(allResults: BacktestDayResult[], days: number
     overall_mae: overallMae,
     overall_rmse: Math.round(Math.sqrt(allErrors.reduce((s, v) => s + v * v, 0) / allErrors.length) * 100) / 100,
     overall_bias: overallBias,
-    overall_accuracy_1c: Math.round(allResults.filter(r => Math.abs(r.error) <= 0.5).length / allResults.length * 10000) / 100,
+    overall_accuracy_05c: Math.round(allResults.filter(r => Math.abs(r.error) <= 0.5).length / allResults.length * 10000) / 100,
     por_ciudad: cityMetrics,
     mejores_ciudades: sorted.slice(0, 3).map(c => c.ciudad),
     peores_ciudades: sorted.slice(-3).reverse().map(c => c.ciudad),

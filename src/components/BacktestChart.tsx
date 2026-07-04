@@ -131,7 +131,7 @@ export default function BacktestChart() {
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <SummaryCard label="MAE Global" value={`${data.overall_mae}°C`} desc="Error absoluto medio" color="text-blue-400" />
             <SummaryCard label="RMSE Global" value={`${data.overall_rmse}°C`} desc="Raíz del error cuadrático" color="text-amber-400" />
-            <SummaryCard label="Acierto ±1°C" value={`${data.overall_accuracy_1c}%`} desc={`${data.total_muestras} muestras`} color="text-emerald-400" />
+            <SummaryCard label="Acierto ±0.5°C" value={`${data.overall_accuracy_05c}%`} desc={`${data.total_muestras} muestras`} color="text-emerald-400" />
             <SummaryCard label="Bias" value={`${data.overall_bias > 0 ? '+' : ''}${data.overall_bias}°C`} desc={data.overall_bias > 0 ? 'Sobre-estimación' : 'Sub-estimación'} color={Math.abs(data.overall_bias) < 0.3 ? 'text-emerald-400' : 'text-red-400'} />
           </div>
 
@@ -207,7 +207,7 @@ export default function BacktestChart() {
             <div className="grid gap-2 sm:grid-cols-2">
               <div><strong className="text-gray-400">MAE:</strong> Error absoluto medio en °C.</div>
               <div><strong className="text-gray-400">RMSE:</strong> Penaliza errores grandes. Si RMSE &gt; MAE×1.5 hay outliers.</div>
-              <div><strong className="text-gray-400">Acierto ±1°C:</strong> % de días con error &lt; 1°C. Objetivo &gt;60%.</div>
+              <div><strong className="text-gray-400">Acierto ±0.5°C:</strong> % de días con error ≤ 0.5°C. Objetivo &gt;55%.</div>
               <div><strong className="text-gray-400">Bias:</strong> Error sistemático. Positivo = sobre-estimamos.</div>
             </div>
           </div>
@@ -228,7 +228,7 @@ function SummaryCard({ label, value, desc, color }: { label: string; value: stri
 }
 
 function CityBacktestCard({ city }: { city: BacktestCityMetrics }) {
-  const accuracyColor = city.accuracy_within_1c >= 70 ? 'text-emerald-400' : city.accuracy_within_1c >= 50 ? 'text-amber-400' : 'text-red-400'
+  const accuracyColor = city.accuracy_within_05c >= 40 ? 'text-emerald-400' : city.accuracy_within_05c >= 25 ? 'text-amber-400' : 'text-red-400'
   const maeColor = city.mae <= 1.5 ? 'text-emerald-400' : city.mae <= 2.5 ? 'text-amber-400' : 'text-red-400'
   return (
     <div className="rounded-xl bg-slate-900/50 border border-gray-700/30 p-4">
@@ -239,7 +239,7 @@ function CityBacktestCard({ city }: { city: BacktestCityMetrics }) {
       <div className="grid grid-cols-2 gap-2 text-xs">
         <div><span className="text-gray-500">RMSE:</span> <span className="text-gray-300">{city.rmse}°C</span></div>
         <div><span className="text-gray-500">Bias:</span> <span className="text-gray-300">{city.bias > 0 ? '+' : ''}{city.bias}°</span></div>
-        <div><span className="text-gray-500">±1°C:</span> <span className={accuracyColor}>{city.accuracy_within_1c}%</span></div>
+        <div><span className="text-gray-500">±0.5°C:</span> <span className={accuracyColor}>{city.accuracy_within_05c}%</span></div>
         <div><span className="text-gray-500">Max error:</span> <span className="text-red-400">{city.max_error}°C</span></div>
         <div><span className="text-gray-500">Muestras:</span> <span className="text-gray-400">{city.muestras} días</span></div>
       </div>

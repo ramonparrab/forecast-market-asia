@@ -194,7 +194,7 @@ function ExitoPctBadge({ pct, isReal }: { pct: number; isReal?: boolean }) {
       {isReal ? (
         <>
           <p className="text-emerald-300 mb-2">✅ Basado en pronósticos REALES vs temperatura real en Polymarket</p>
-          <p className="text-gray-400 text-[10px]">Se calcula: % de pronósticos que estuvieron dentro de ±2°C de la temperatura real del cierre.</p>
+          <p className="text-gray-400 text-[10px]">Se calcula: % de pronósticos que estuvieron dentro de ±0.5°C de la temperatura real del cierre.</p>
           <p className="text-blue-300 text-[10px] mt-2">Con cada historial adicional, esta precisión MEJORA.</p>
         </>
       ) : (

@@ -39,7 +39,7 @@ export interface BacktestCityMetrics {
   mae: number
   rmse: number
   bias: number
-  accuracy_within_1c: number // %
+  accuracy_within_05c: number // % ±0.5°C
   max_error: number
 }
 
@@ -50,7 +50,7 @@ export interface BacktestSummary {
   overall_mae: number
   overall_rmse: number
   overall_bias: number
-  overall_accuracy_1c: number
+  overall_accuracy_05c: number
   por_ciudad: BacktestCityMetrics[]
   mejores_ciudades: string[]
   peores_ciudades: string[]
@@ -209,7 +209,7 @@ export async function runBacktest(days: number = 90, offsetDays: number = 0): Pr
       mae,
       rmse,
       bias,
-      accuracy_within_1c: Math.round(within1 / results.length * 10000) / 100,
+      accuracy_within_05c: Math.round(within1 / results.length * 10000) / 100,
       max_error: maxError,
     }
   })
@@ -234,7 +234,7 @@ export async function runBacktest(days: number = 90, offsetDays: number = 0): Pr
     overall_mae: overallMae,
     overall_rmse: overallRmse,
     overall_bias: overallBias,
-    overall_accuracy_1c: Math.round(within1 / allResults.length * 10000) / 100,
+    overall_accuracy_05c: Math.round(within1 / allResults.length * 10000) / 100,
     por_ciudad: cityMetrics,
     mejores_ciudades: mejoresCiudades,
     peores_ciudades: peoresCiudades,

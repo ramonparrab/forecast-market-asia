@@ -384,7 +384,7 @@ function SignalCard({
       <div className="grid grid-cols-3 gap-2 mb-3">
         <div className="rounded bg-slate-800/50 p-1.5 text-center">
           <p className="text-xs font-bold text-emerald-400">{signal.historical_accuracy_pct.toFixed(0)}%</p>
-          <p className="text-[8px] text-gray-500">Precisión ±1°C</p>
+          <p className="text-[8px] text-gray-500">Precisión ±0.5°C</p>
         </div>
         <div className="rounded bg-slate-800/50 p-1.5 text-center">
           <p className="text-xs font-bold text-blue-400">{signal.historical_samples}</p>
