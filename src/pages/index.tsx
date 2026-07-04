@@ -125,7 +125,7 @@ export async function getServerSideProps() {
     }
 
     // ===== STEP 3: Recalcular exito_pct (lectura fresca de BD, no del daily_runs cacheado) =====
-    const { getHistoricalAccuracy, computeGlobalMetrics } = await import('@/lib/supabase')
+    const { getHistoricalAccuracy, getHistoricalAccuracyInteger, computeGlobalMetrics } = await import('@/lib/supabase')
     const metrics = await computeGlobalMetrics()
     const globalAccuracyPct = metrics?.accuracy_pct ?? 50
     if (analysis?.cities) {
@@ -145,6 +145,17 @@ export async function getServerSideProps() {
           exitoPct = Math.max(10, exitoPct - 1)
         }
         city.exito_pct = exitoPct
+
+        // Polymarket integer precision
+        const histInt = await getHistoricalAccuracyInteger(city.slug)
+        if (histInt.muestras >= 5) {
+          city.exito_pct_integer = Math.round(
+            (histInt.accuracy * histInt.muestras + globalAccuracyPct * 10)
+            / (histInt.muestras + 10)
+          )
+        } else {
+          city.exito_pct_integer = Math.round(globalAccuracyPct)
+        }
       }
     }
 

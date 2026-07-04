@@ -414,6 +414,48 @@ export async function getAllCalibrationPairs(): Promise<{ slug: string; predicti
   return pairs
 }
 
+export async function getHistoricalAccuracyInteger(
+  slug: string,
+  days = 0
+): Promise<{ accuracy: number; muestras: number }> {
+  const client = getClient()
+  if (!client) return { accuracy: 0, muestras: 0 }
+
+  let q = client
+    .from('forecast_history' as any)
+    .select('id, slug, fecha_objetivo, temp_corregida, temp_real')
+    .eq('slug', slug)
+    .not('temp_real', 'is', null)
+
+  if (days > 0) {
+    const since = new Date()
+    since.setDate(since.getDate() - days)
+    q = q.gte('fecha_ejecucion', since.toISOString())
+  }
+
+  const { data, error } = await q
+  if (error || !data || (data as any[]).length === 0) return { accuracy: 0, muestras: 0 }
+
+  const seen = new Map<string, any>()
+  for (const r of (data as any[])) {
+    const key = `${r.slug}|${r.fecha_objetivo}`
+    if (!seen.has(key) || r.id > seen.get(key).id) {
+      seen.set(key, r)
+    }
+  }
+
+  const records = Array.from(seen.values())
+  const within = records.filter((r: any) => {
+    const errorInteger = r.temp_real - Math.round(r.temp_corregida)
+    return Math.abs(errorInteger) <= 0.5
+  }).length
+
+  return {
+    accuracy: Math.round((within / records.length) * 10000) / 100,
+    muestras: records.length,
+  }
+}
+
 /**
  * getHistoricalAccuracy — returns per-city success rate within 0.5°C
  * using ALL available history (0 = all time, or specify days).

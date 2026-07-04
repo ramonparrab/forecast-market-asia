@@ -236,7 +236,7 @@ export function buildCitySignal(
 }
 
 interface CitySignalInput {
-  ciudad: string; slug: string; exito_pct: number
+  ciudad: string; slug: string; exito_pct: number; exito_pct_integer: number
   forecast: { temp_corregida: number; temp_ponderada: number; sesgo_aplicado: number }
   volatilidad: number; spread: number; consenso: string
   nowcast?: { activo: boolean }

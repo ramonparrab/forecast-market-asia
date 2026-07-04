@@ -78,6 +78,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       exitoPct = Math.max(10, exitoPct - 1)
     }
     city.exito_pct = exitoPct
+    city.exito_pct_integer = exitoPct
   }
 
   const analysis: DailyAnalysis = {

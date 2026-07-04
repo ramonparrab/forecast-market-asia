@@ -195,6 +195,7 @@ async function analyzeCity(
       peso: 0,
       status: getStatus(edge),
       exito_pct: exitoPct,
+      exito_pct_integer: exitoPct,
       explicacion,
     }
   })
@@ -214,6 +215,7 @@ async function analyzeCity(
         hora_local: (new Date().getUTCHours() + Math.round(city.lon / 15) + 24) % 24,
       },
       exito_pct: exitoPct,
+      exito_pct_integer: exitoPct,
       explicacion,
       totalRecords: histSamples,
     },

@@ -29,6 +29,7 @@ export interface BetAction {
   prob_mercado: number
   consenso: string
   exito_pct: number
+  exito_pct_integer: number
   signal: 'EXCELENTE' | 'BUENA' | 'NEUTRAL' | 'EVITAR'
   razon: string
   riesgo: 'BAJO' | 'MEDIO' | 'ALTO'
@@ -210,6 +211,7 @@ function computeActionPlan(
       prob_mercado: rec.mkt_pct,
       consenso: rec.consenso,
       exito_pct: exitoPct,
+      exito_pct_integer: exitoPct,
       signal,
       razon,
       riesgo,

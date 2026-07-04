@@ -469,6 +469,11 @@ export default function ExecutiveSummaryPanel({ analysis, metrics, previousAnaly
                   </span>
                   <span className="text-[7px] text-gray-600">{numModels}m</span>
                 </div>
+                <div className="flex items-center justify-center gap-1">
+                  <span className={`text-[7px] font-semibold ${c.exito_pct_integer >= 55 ? 'text-blue-400' : c.exito_pct_integer >= 45 ? 'text-amber-400' : 'text-red-400'}`}>
+                    {c.exito_pct_integer}% entero
+                  </span>
+                </div>
               </div>
             )
           })}

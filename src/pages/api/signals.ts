@@ -24,6 +24,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       ciudad: c.ciudad,
       slug: c.slug,
       exito_pct: c.exito_pct,
+      exito_pct_integer: c.exito_pct_integer,
       forecast: c.forecast,
       volatilidad: c.forecast.volatilidad ?? 0,
       spread: Math.max(...Object.values(c.forecast.ensemble_raw)) - Math.min(...Object.values(c.forecast.ensemble_raw)),

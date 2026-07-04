@@ -61,6 +61,8 @@ export interface CityAnalysis {
   nowcast: NowcastInfo
   // Probability of forecast being within ±0.5°C of actual (the ONLY metric that matters for betting)
   exito_pct: number
+  // Polymarket integer-round precision (forecast rounded to integer, matching Polymarket resolution)
+  exito_pct_integer: number
   explicacion: string
   // Liquidity summary
   liquidity_avg?: 'ALTA' | 'MEDIA' | 'BAJA'
@@ -87,6 +89,7 @@ export interface BetRecommendation {
   peso: number
   status: string
   exito_pct?: number
+  exito_pct_integer?: number
   explicacion?: string
 }
 
