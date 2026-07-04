@@ -17,10 +17,48 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(405).json({ error: 'Method not allowed' })
   }
 
+  const restore = req.query.restore === 'true'
+
   try {
     const client = getServiceClient()
     if (!client) return res.status(500).json({ error: 'No Supabase client' })
 
+    // Step 1: If restore=true, reset temp_corregida = temp_pronosticada first
+    if (restore) {
+      const { error: restoreErr } = await (client as any)
+        .from('forecast_history')
+        .update({
+          temp_corregida: (client as any).rpc('round', {
+            value: (client as any).sql`temp_real - temp_pronosticada`,
+            precision: 2,
+          }),
+          error: null,
+        })
+        .not('temp_real', 'is', null)
+        .not('temp_pronosticada', 'is', null)
+
+      if (!restoreErr) {
+        // SQL approach didn't work, do it the safe way
+        const { data: allData } = await (client as any)
+          .from('forecast_history')
+          .select('id, temp_pronosticada, temp_real')
+          .not('temp_real', 'is', null)
+          .not('temp_pronosticada', 'is', null)
+
+        if (allData) {
+          for (const r of allData as any[]) {
+            const newError = Math.round((r.temp_real - r.temp_pronosticada) * 100) / 100
+            await (client as any)
+              .from('forecast_history')
+              .update({ temp_corregida: r.temp_pronosticada, error: newError })
+              .eq('id', r.id)
+          }
+          console.log(`[RESTORE] ${allData.length} records reset`)
+        }
+      }
+    }
+
+    // Step 2: Fetch all records
     const { data, error } = await (client as any)
       .from('forecast_history')
       .select('id, slug, fecha_objetivo, temp_pronosticada, temp_corregida, temp_real, error')
@@ -44,7 +82,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     const all = Array.from(seen.values()) as HistoryRecord[]
 
-    // Group by slug and sort by fecha_objetivo
+    // Group by slug and sort by fecha_objetivo (oldest first = chronological)
     const bySlug: Record<string, HistoryRecord[]> = {}
     for (const r of all) {
       if (!bySlug[r.slug]) bySlug[r.slug] = []
@@ -56,15 +94,19 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     let totalUpdated = 0
     let totalSkipped = 0
-    const cityResults: { slug: string; old_bias: number; new_bias: number; old_accuracy: number; new_accuracy: number; updated: number; skipped: number }[] = []
+    const cityResults: { slug: string; old_acc: number; new_acc: number; updated: number; skipped: number }[] = []
 
     for (const [slug, records] of Object.entries(bySlug)) {
+      // Build errors newest-first as we go (computeDynamicBias expects newest-first)
       const pastErrors: { error: number }[] = []
       let updated = 0
       let skipped = 0
+      const newErrors: number[] = []
 
       for (const record of records) {
         const mes = new Date(record.fecha_objetivo + 'T12:00:00').getMonth() + 1
+        // pastErrors is newest-first (sorted DESC by date). computeDynamicBias
+        // reverses internally to chronological old→new for correct EMA.
         const sesgo = computeDynamicBias(slug, mes, pastErrors)
 
         const newTempCorregida = Math.round(Math.max(0, record.temp_pronosticada + sesgo) * 100) / 100
@@ -73,7 +115,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         // Check if correction actually changes the value
         const diff = Math.abs(newTempCorregida - record.temp_corregida)
         if (diff < 0.05) {
-          pastErrors.push({ error: record.error ?? newError })
+          // Push error in newest-first order (prepend)
+          pastErrors.unshift({ error: record.error ?? newError })
+          newErrors.push(record.error ?? newError)
           skipped++
           continue
         }
@@ -85,31 +129,37 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           .eq('id', record.id)
 
         if (updateErr) {
-          pastErrors.push({ error: record.error ?? newError })
+          pastErrors.unshift({ error: record.error ?? newError })
+          newErrors.push(record.error ?? newError)
           skipped++
         } else {
           updated++
-          pastErrors.push({ error: newError })
+          pastErrors.unshift({ error: newError })
+          newErrors.push(newError)
         }
       }
 
       totalUpdated += updated
       totalSkipped += skipped
 
-      // Old vs new accuracy
+      // Old vs new raw accuracy
       const oldWithin = records.filter(r => Math.abs(r.error ?? 0) <= 0.5).length
       const oldAcc = records.length > 0 ? Math.round(oldWithin / records.length * 100) : 0
-      // For new accuracy, re-fetch would be needed, estimate from what we changed
-      cityResults.push({ slug, old_bias: 0, new_bias: 0, old_accuracy: oldAcc, new_accuracy: 0, updated, skipped })
+      const newWithin = newErrors.filter(e => Math.abs(e) <= 0.5).length
+      const newAcc = newErrors.length > 0 ? Math.round(newWithin / newErrors.length * 100) : 0
+
+      cityResults.push({ slug, old_acc: oldAcc, new_acc: newAcc, updated, skipped })
     }
 
     return res.status(200).json({
       status: 'ok',
-      message: `Walk-forward completado: ${totalUpdated} actualizados, ${totalSkipped} sin cambio`,
+      message: restore ? 'Restore + Walk-forward completado' : 'Walk-forward completado',
       total: all.length,
       updated: totalUpdated,
       skipped: totalSkipped,
-      cities: cityResults.map(c => `${c.slug}: ${c.updated} upd, ${c.skipped} skip, old_acc=${c.old_accuracy}%`),
+      cities: cityResults.map(c =>
+        `${c.slug}: ${c.updated} upd, ${c.skipped} skip, ${c.old_acc}%→${c.new_acc}%`
+      ),
     })
   } catch (error) {
     return res.status(500).json({ status: 'error', message: (error as Error).message })
