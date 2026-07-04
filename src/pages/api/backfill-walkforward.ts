@@ -25,37 +25,24 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     // Step 1: If restore=true, reset temp_corregida = temp_pronosticada first
     if (restore) {
-      const { error: restoreErr } = await (client as any)
+      const { data: allData } = await (client as any)
         .from('forecast_history')
-        .update({
-          temp_corregida: (client as any).rpc('round', {
-            value: (client as any).sql`temp_real - temp_pronosticada`,
-            precision: 2,
-          }),
-          error: null,
-        })
+        .select('id, temp_pronosticada, temp_real')
         .not('temp_real', 'is', null)
         .not('temp_pronosticada', 'is', null)
 
-      if (!restoreErr) {
-        // SQL approach didn't work, do it the safe way
-        const { data: allData } = await (client as any)
-          .from('forecast_history')
-          .select('id, temp_pronosticada, temp_real')
-          .not('temp_real', 'is', null)
-          .not('temp_pronosticada', 'is', null)
-
-        if (allData) {
-          for (const r of allData as any[]) {
-            const newError = Math.round((r.temp_real - r.temp_pronosticada) * 100) / 100
-            await (client as any)
-              .from('forecast_history')
-              .update({ temp_corregida: r.temp_pronosticada, error: newError })
-              .eq('id', r.id)
-          }
-          console.log(`[RESTORE] ${allData.length} records reset`)
+      let restored = 0
+      if (allData) {
+        for (const r of allData as any[]) {
+          const newError = Math.round((r.temp_real - r.temp_pronosticada) * 100) / 100
+          const { error: upErr } = await (client as any)
+            .from('forecast_history')
+            .update({ temp_corregida: r.temp_pronosticada, error: newError })
+            .eq('id', r.id)
+          if (!upErr) restored++
         }
       }
+      console.log(`[RESTORE] ${restored} records reset`)
     }
 
     // Step 2: Fetch all records
