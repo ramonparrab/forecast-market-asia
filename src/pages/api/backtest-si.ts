@@ -222,15 +222,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             ) || relevantes[0])
           : null
 
-        // GANA/PIERDE se decide contra el contrato real (exacto o superior)
+        // GANA/PIERDE: si hay contrato exacto al nivel del umbral, evalúa contra él;
+        // si no (contrato sustituto o ausente), usa MEJORA CONTINUA vs REAL
         let resultado: 'gana' | 'pierde' | 'pendiente'
         if (tempRealRounded === null) {
           resultado = 'pendiente'
         } else if (usado) {
           const cVal = typeof usado.valor === 'number' ? usado.valor : (Array.isArray(usado.valor) ? usado.valor[0] : null)
-          if (cVal !== null && usado.tipo === 'superior') {
+          if (cVal !== null && cVal === umbral && usado.tipo === 'superior') {
             resultado = tempRealRounded >= cVal ? 'gana' : 'pierde'
-          } else if (cVal !== null) {
+          } else if (cVal !== null && cVal === umbral) {
             resultado = tempRealRounded === cVal ? 'gana' : 'pierde'
           } else {
             resultado = tempRealRounded >= umbral ? 'gana' : 'pierde'
