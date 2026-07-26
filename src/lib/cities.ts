@@ -10,6 +10,7 @@ export const CIUDADES_ASIA: City[] = [
   { slug: 'wuhan',     nombre: 'Wuhan',     lat: 30.78, lon: 114.21, estacion: 'Tianhe Intl' },
   { slug: 'chongqing', nombre: 'Chongqing', lat: 29.72, lon: 106.64, estacion: 'Jiangbei Intl' },
   { slug: 'chengdu',   nombre: 'Chengdu',   lat: 30.58, lon: 103.96, estacion: 'Shuangliu Intl' },
+  { slug: 'singapore', nombre: 'Singapur',  lat: 1.35,  lon: 103.99, estacion: 'Changi Intl' },
 ]
 
 export const MODELOS_CLIMATICOS = [
