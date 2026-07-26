@@ -13,6 +13,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // Run fresh analysis directly (avoids self-request issues on serverless)
     const caracasOffset = -4 * 60
     const nowCaracas = new Date(new Date().getTime() + caracasOffset * 60000)
+    nowCaracas.setDate(nowCaracas.getDate() + 1)
     const fechaObjetivo = nowCaracas.toISOString().slice(0, 10)
     const analysis = await runDailyAnalysis(fechaObjetivo)
 

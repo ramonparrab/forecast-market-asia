@@ -10,6 +10,11 @@ import BacktestChart from '@/components/BacktestChart'
 import ExecutiveSummaryPanel from '@/components/ExecutiveSummary'
 import ComparisonPanel from '@/components/ComparisonPanel'
 import SignalsPanel from '@/components/SignalsPanel'
+import CoberturaSiNo from '@/components/CoberturaSiNo'
+import MejoraContinua from '@/components/MejoraContinua'
+import BacktestSi from '@/components/BacktestSi'
+import Arquitectura from '@/components/Arquitectura'
+
 import { DailyAnalysis, GlobalMetrics, CityAnalysis } from '@/types'
 
 export async function getServerSideProps() {
@@ -100,7 +105,11 @@ export async function getServerSideProps() {
       const startStr = hace30.toISOString().slice(0, 10)
 
       // Eliminar registros existentes en el rango para evitar duplicados
-      await client.from('forecast_history' as any).delete().gte('fecha_objetivo', startStr).lt('fecha_objetivo', fecha)
+      const { getServiceClient } = await import('@/lib/supabase')
+      const serviceClient = getServiceClient()
+      if (serviceClient) {
+        await serviceClient.from('forecast_history' as any).delete().gte('fecha_objetivo', startStr).lt('fecha_objetivo', fecha)
+      }
 
       const backtest = await runBacktest(HINDCAST_DAYS)
       const hindcastRecords = backtest.resultados.map(r => ({
@@ -178,7 +187,7 @@ export async function getServerSideProps() {
   }
 }
 
-type View = 'executive' | 'dashboard' | 'table' | 'metrics' | 'comparison' | 'backtest' | 'arbitrage' | 'architecture' | 'signals'
+type View = 'executive' | 'dashboard' | 'table' | 'metrics' | 'comparison' | 'backtest' | 'arbitrage' | 'architecture' | 'signals' | 'coverage' | 'mejora-continua' | 'backtest-si'
 
 /** Returns a friendly confidence label + color class */
 function getConfidence(city: CityAnalysis): { label: string; color: string; bg: string } {
@@ -630,6 +639,9 @@ export default function Home({ initialAnalysis, initialMetrics, initialAvailable
     { key: 'backtest', label: 'Backtest', icon: '⏳', desc: '90 días históricos' },
     { key: 'arbitrage', label: 'Arbitraje', icon: '🔍', desc: 'Alertas de ineficiencia' },
     { key: 'architecture', label: 'Arquitectura', icon: '🏗️', desc: 'Pipeline del sistema' },
+    { key: 'coverage', label: 'COBERTURA SI/NO', icon: '🛡️', desc: 'YES+NO pairs' },
+    { key: 'mejora-continua', label: 'MEJORA CONTINUA', icon: '🔬', desc: 'Current vs Improvements comparison' },
+    { key: 'backtest-si', label: 'BACKTEST SI', icon: '🎲', desc: 'Simular apuestas SI en Polymarket' },
   ]
 
   return (
@@ -692,7 +704,7 @@ export default function Home({ initialAnalysis, initialMetrics, initialAvailable
         </div>
 
         {/* View switcher */}
-        <div className="flex gap-1 rounded-lg bg-slate-800 p-1">
+        <div className="flex flex-wrap gap-1 rounded-lg bg-slate-800 p-1">
           {views.map(v => (
             <button
               key={v.key}
@@ -789,7 +801,7 @@ export default function Home({ initialAnalysis, initialMetrics, initialAvailable
                     <p className="text-lg sm:text-xl font-bold text-emerald-400">{city.forecast.temp_corregida.toFixed(1)}°C</p>
                     <p className="text-[9px] text-gray-600">{city.exito_pct}% acierto</p>
                     <p className="text-[8px] text-blue-400 mt-0.5">corrección: {city.forecast.sesgo_aplicado > 0 ? '+' : ''}{city.forecast.sesgo_aplicado.toFixed(1)}°C</p>
-                    <p className="text-[7px] text-gray-600">{Object.keys(city.forecast.ensemble_raw).length} modelos · {city.forecast.consenso}</p>
+                    <p className="text-[7px] text-gray-600">{Object.keys(city.forecast.ensemble_raw ?? {}).length} modelos · {city.forecast.consenso}</p>
                   </div>
                 ))}
               </div>
@@ -863,128 +875,17 @@ export default function Home({ initialAnalysis, initialMetrics, initialAvailable
         />
       )}
 
+      {/* Cobertura SI/NO View */}
+      {activeView === 'coverage' && <CoberturaSiNo />}
+
+      {/* Mejora Continua View */}
+      {activeView === 'mejora-continua' && <MejoraContinua />}
+
+      {/* Backtest SI View */}
+      {activeView === 'backtest-si' && <BacktestSi />}
+
       {/* System Architecture View */}
-      {activeView === 'architecture' && (
-        <div className="space-y-6">
-          <div className="rounded-2xl bg-gradient-to-br from-slate-900 to-slate-800 border border-gray-700/30 p-6">
-            <h2 className="text-xl font-bold text-white mb-1">🏗️ Arquitectura del Sistema</h2>
-            <p className="text-sm text-gray-400 mb-6">Pipeline completo de forecasting meteorológico con 5 mejoras implementadas</p>
-
-            {/* Pipeline Flow */}
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 mb-8">
-              <div className="rounded-xl bg-blue-500/5 border border-blue-500/20 p-4">
-                <div className="text-2xl mb-2">📡</div>
-                <h3 className="font-semibold text-blue-400 text-sm mb-2">1. Datos Meteorológicos</h3>
-                <ul className="text-xs text-gray-400 space-y-1">
-                  <li>• Open-Meteo: 6 modelos + ECMWF ENS 51 miembros</li>
-                  <li>• Nowcasting METAR: observaciones en vivo</li>
-                  <li>• Archive API: temperatura real histórica</li>
-                </ul>
-              </div>
-
-              <div className="rounded-xl bg-emerald-500/5 border border-emerald-500/20 p-4">
-                <div className="text-2xl mb-2">🔬</div>
-                <h3 className="font-semibold text-emerald-400 text-sm mb-2">2. Ensemble + Filtros</h3>
-                <ul className="text-xs text-gray-400 space-y-1">
-                  <li>• Z-score filter: excluye modelos outlier (&gt;3σ)</li>
-                  <li>• EWMA weighting: pesos dinámicos por precisión</li>
-                  <li>• Bias correction dinámico (EMA últimos 30 días)</li>
-                </ul>
-              </div>
-
-              <div className="rounded-xl bg-purple-500/5 border border-purple-500/20 p-4">
-                <div className="text-2xl mb-2">🎯</div>
-                <h3 className="font-semibold text-purple-400 text-sm mb-2">3. Calibración</h3>
-                <ul className="text-xs text-gray-400 space-y-1">
-                  <li>• Empirical CDF: ECMWF ENS 51 miembros</li>
-                  <li>• Platt Scaling: calibración sigmoide (activo)</li>
-                  <li>• Isotonic PAVA: alternativa disponible (no-normales)</li>
-                </ul>
-              </div>
-
-              <div className="rounded-xl bg-amber-500/5 border border-amber-500/20 p-4">
-                <div className="text-2xl mb-2">📊</div>
-                <h3 className="font-semibold text-amber-400 text-sm mb-2">4. Probabilidad Monte Carlo</h3>
-                <ul className="text-xs text-gray-400 space-y-1">
-                  <li>• 20,000 simulaciones por contrato</li>
-                  <li>• Student-t ν=4 (colas gordas)</li>
-                  <li>• Empirical CDF cuando hay ≥20 miembros</li>
-                </ul>
-              </div>
-
-              <div className="rounded-xl bg-rose-500/5 border border-rose-500/20 p-4">
-                <div className="text-2xl mb-2">💰</div>
-                <h3 className="font-semibold text-rose-400 text-sm mb-2">5. Kelly + Asignación</h3>
-                <ul className="text-xs text-gray-400 space-y-1">
-                  <li>• Fractional Kelly (0.25)</li>
-                  <li>• Edge mínimo 6%</li>
-                  <li>• $10/día presupuesto, $1-5 por apuesta</li>
-                </ul>
-              </div>
-
-              <div className="rounded-xl bg-cyan-500/5 border border-cyan-500/20 p-4">
-                <div className="text-2xl mb-2">✅</div>
-                <h3 className="font-semibold text-cyan-400 text-sm mb-2">6. Validación Walk-Forward</h3>
-                <ul className="text-xs text-gray-400 space-y-1">
-                  <li>• Backtest walk-forward: sin look-ahead bias</li>
-                  <li>• 30 días training + test secuencial</li>
-                  <li>• MAE/RMSE/bias por ciudad</li>
-                </ul>
-              </div>
-            </div>
-
-            {/* Model Details */}
-            <div className="rounded-xl bg-slate-800/50 border border-gray-700/30 p-4 mb-4">
-              <h3 className="font-semibold text-white text-sm mb-3">🧩 Detalle de Modelos (Open-Meteo)</h3>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
-                <div className="bg-slate-900/50 rounded-lg p-2"><span className="text-blue-400">best_match</span><p className="text-gray-500">Mejor modelo por coordenada</p></div>
-                <div className="bg-slate-900/50 rounded-lg p-2"><span className="text-blue-400">ecmwf_ifs025</span><p className="text-gray-500">ECMWF HRES (~9km)</p></div>
-                <div className="bg-slate-900/50 rounded-lg p-2"><span className="text-blue-400">gfs_seamless</span><p className="text-gray-500">NOAA GFS (~13km)</p></div>
-                <div className="bg-slate-900/50 rounded-lg p-2"><span className="text-blue-400">icon_seamless</span><p className="text-gray-500">DWD ICON (~13km)</p></div>
-                <div className="bg-slate-900/50 rounded-lg p-2"><span className="text-blue-400">jma_seamless</span><p className="text-gray-500">JMA Japonés (~20km)</p></div>
-                <div className="bg-slate-900/50 rounded-lg p-2"><span className="text-blue-400">meteofrance_seamless</span><p className="text-gray-500">Météo France (~10km)</p></div>
-                <div className="bg-slate-900/50 rounded-lg p-2 col-span-2"><span className="text-emerald-400 font-medium">ecmwf_ens</span><p className="text-gray-500">ECMWF ENS: 51 miembros + control → Empirical CDF</p></div>
-              </div>
-            </div>
-
-            {/* ECMWF ENS 51 */}
-            <div className="rounded-xl bg-emerald-500/5 border border-emerald-500/20 p-4 mb-4">
-              <h3 className="font-semibold text-emerald-400 text-sm mb-2">🟢 ECMWF ENS 51 Miembros</h3>
-              <p className="text-xs text-gray-400 mb-2">Mejora más importante: el Ensemble del Centro Europeo proporciona 51 perturbaciones del mismo modelo, dando una distribución de probabilidad REAL. Esto reemplaza la suposición paramétrica (Student-t) con una CDF empírica, eliminando el mayor error de calibración.</p>
-              <div className="text-xs text-gray-500">Cada miembro: misma fecha, misma ciudad, condiciones iniciales ligeramente perturbadas → spread realista</div>
-            </div>
-
-            {/* PAVA */}
-            <div className="rounded-xl bg-purple-500/5 border border-purple-500/20 p-4 mb-4">
-              <h3 className="font-semibold text-purple-400 text-sm mb-2">🟣 Calibración: Platt Scaling (Activo)</h3>
-              <p className="text-xs text-gray-400 mb-2">Platt Scaling ajusta probabilidades via sigmoide (logit). Backtest muestra que en datos meteorológicos (distribución aproximadamente normal), Platt supera a PAVA isotonic: 2.5% mejor Brier score, 17.9% mejor ECE.</p>
-              <div className="text-xs text-gray-500">PAVA isotonic está disponible como alternativa para datasets no-normales. ECE (Expected Calibration Error) &lt;3% = excelente.</div>
-            </div>
-
-            {/* EWMA + Z-score */}
-            <div className="rounded-xl bg-amber-500/5 border border-amber-500/20 p-4 mb-4">
-              <h3 className="font-semibold text-amber-400 text-sm mb-2">🟠 EWMA + Z-score Filter</h3>
-              <p className="text-xs text-gray-400 mb-2">EWMA (Exponentially Weighted Moving Average) aplica pesos dinámicos por modelo con decaimiento exponencial (decay=0.15). Z-score filter excluye modelos con |z| &gt; 3σ antes del promedio, eliminando outliers como GFS cuando produce valores extremos.</p>
-            </div>
-
-            {/* Walk-forward */}
-            <div className="rounded-xl bg-cyan-500/5 border border-cyan-500/20 p-4">
-              <h3 className="font-semibold text-cyan-400 text-sm mb-2">🔵 Walk-Forward Backtest</h3>
-              <p className="text-xs text-gray-400 mb-2">El gold standard de validación: para cada día, el sesgo se calcula SOLO con datos anteriores a esa fecha. Esto da la precisión real del sistema en producción, sin look-ahead bias. El backtest normal (que entrena con todos los datos) sobrestima la precisión.</p>
-              <div className="grid grid-cols-2 gap-4 mt-3 text-xs">
-                <div className="bg-slate-900/50 rounded-lg p-2">
-                  <p className="text-gray-500">Backtest Simple</p>
-                  <p className="text-gray-400">Entrena con datos pasados → sesgo calculado con 90 días</p>
-                </div>
-                <div className="bg-slate-900/50 rounded-lg p-2">
-                  <p className="text-emerald-400">Walk-Forward</p>
-                  <p className="text-gray-400">Cada día solo ve datos anteriores → precisión real</p>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+      {activeView === 'architecture' && <Arquitectura />}
 
       {/* Loading skeleton */}
       {loading && (

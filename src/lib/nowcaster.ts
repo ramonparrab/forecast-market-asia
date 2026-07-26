@@ -6,7 +6,8 @@
  *   become increasingly informative about the day's high.
  * - Weight of observation rises from 0% at 00:00 local to 80% by 21:00 local.
  * - The blended value = w * observed_max + (1-w) * ensemble_max
- * - This prevents the bot from ignoring a high that's already been observed.
+ * - If observed temp already exceeds forecast, weight jumps to ≥0.7.
+ * - Hong Kong uses HKO rhrread API instead of Open-Meteo.
  */
 
 // Station ICAO codes for our 9 Asian cities
@@ -23,16 +24,46 @@ const STATION_MAP: Record<string, string> = {
 }
 
 /**
+ * Fetches current temperature from HKO rhrread API (Hong Kong only).
+ * Returns the Hong Kong Observatory station temperature, or null if unavailable.
+ */
+async function fetchHKORhrread(): Promise<number | null> {
+  try {
+    const resp = await fetch(
+      'https://data.weather.gov.hk/weatherAPI/opendata/weather.php?dataType=rhrread',
+      { signal: AbortSignal.timeout(5000) }
+    )
+    if (!resp.ok) return null
+    const data = await resp.json()
+    const tempData = data?.temperature?.data
+    if (!Array.isArray(tempData)) return null
+    const hko = tempData.find((t: any) => t.place === 'Hong Kong Observatory')
+    return hko?.value ?? null
+  } catch {
+    return null
+  }
+}
+
+/**
  * Fetches METAR observation for a station from Open-Meteo.
  * Returns the current temperature at the station, or null if unavailable.
  */
 async function fetchMetarObservation(lat: number, lon: number): Promise<number | null> {
   try {
-    const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m&temperature_unit=celsius&timezone=auto`
+    const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&hourly=temperature_2m&temperature_unit=celsius&forecast_days=1`
     const resp = await fetch(url, { signal: AbortSignal.timeout(5000) })
     if (!resp.ok) return null
     const data = await resp.json()
-    return data?.current?.temperature_2m ?? null
+    if (!data?.hourly?.time || !data?.hourly?.temperature_2m) return null
+    const now = new Date()
+    let maxTemp = -Infinity
+    for (let i = 0; i < data.hourly.time.length; i++) {
+      const hourTime = new Date(data.hourly.time[i] + 'Z')
+      if (hourTime <= now && data.hourly.temperature_2m[i] !== null) {
+        maxTemp = Math.max(maxTemp, data.hourly.temperature_2m[i])
+      }
+    }
+    return maxTemp === -Infinity ? null : Math.round(maxTemp * 100) / 100
   } catch {
     return null
   }
@@ -77,8 +108,8 @@ export function computeNowcasted(
     return { temp: ensembleTemp, obsWeight: w, observedTemp: null, station }
   }
 
-  // If observation already exceeds ensemble, trust observation more
-  const boostW = observedTemp > ensembleTemp ? Math.min(w + 0.15, 0.9) : w
+  // If observation already exceeds ensemble, jump to ≥0.7
+  const boostW = observedTemp > ensembleTemp ? Math.min(Math.max(w, 0.7), 0.9) : w
   const blended = observedTemp * boostW + ensembleTemp * (1 - boostW)
 
   return {
@@ -103,6 +134,6 @@ export async function nowcastTemperature(
   observedTemp: number | null
   station: string
 }> {
-  const observed = await fetchMetarObservation(lat, lon)
+  const observed = slug === 'hong-kong' ? await fetchHKORhrread() : await fetchMetarObservation(lat, lon)
   return computeNowcasted(slug, lat, lon, ensembleTemp, observed)
 }

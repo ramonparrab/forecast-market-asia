@@ -153,6 +153,10 @@ function CompactBetCard({ accion, index }: { accion: BetAction; index: number })
         </div>
       </div>
       <p className="mt-2 text-[10px] text-gray-500 leading-relaxed">{accion.razon}</p>
+      <div className="mt-1.5 flex items-center gap-3 text-[9px] text-gray-500 border-t border-gray-700/50 pt-1.5">
+        <span>Precisión: <span className="font-bold text-gray-300">{accion.exito_pct}%</span></span>
+        <span>Edge: <span className="font-bold text-blue-400">+{accion.edge.toFixed(1)}%</span></span>
+      </div>
     </div>
   )
 }
@@ -179,7 +183,7 @@ export default function ExecutiveSummaryPanel({ analysis, metrics, previousAnaly
     const debil: string[] = []
     const fewModels: string[] = []
     for (const city of analysis.cities) {
-      const numModels = Object.keys(city.forecast.ensemble_raw).length
+      const numModels = Object.keys(city.forecast.ensemble_raw ?? {}).length
       if (numModels < 3) fewModels.push(city.ciudad)
       if (!city.nowcast?.activo) noNowcast.push(city.ciudad)
       if (city.forecast.consenso === 'DEBIL') debil.push(city.ciudad)
@@ -450,7 +454,7 @@ export default function ExecutiveSummaryPanel({ analysis, metrics, previousAnaly
         </h3>
         <div className="grid grid-cols-3 sm:grid-cols-5 lg:grid-cols-9 gap-2">
           {analysis.cities.sort((a, b) => b.exito_pct - a.exito_pct).map(c => {
-            const numModels = Object.keys(c.forecast.ensemble_raw).length
+            const numModels = Object.keys(c.forecast.ensemble_raw ?? {}).length
             const hasNowcast = c.nowcast?.activo
             const consensusOk = c.forecast.consenso !== 'DEBIL'
             const needsAttention = c.exito_pct < 55

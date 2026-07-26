@@ -23,6 +23,75 @@ const MONTHS = ['january','february','march','april','may','june',
                 'july','august','september','october','november','december']
 
 /**
+ * Fetch the actual settlement temperature from resolved Polymarket contracts.
+ * After resolution, each contract has YES price = 1 (true) or 0 (false).
+ * The highest temperature value with YES=1 is the real temperature (integer °C).
+ * Handles both formats: "34°C" (exact) and "34°C or higher" (superior).
+ */
+export async function fetchActualTempFromPolymarket(
+  slug: string,
+  fechaObjetivo: string
+): Promise<number | null> {
+  try {
+    const date = new Date(fechaObjetivo + 'T12:00:00Z')
+    const monthName = MONTHS[date.getUTCMonth()]
+    const day = date.getUTCDate()
+    const year = date.getUTCFullYear()
+    const eventSlug = `highest-temperature-in-${slug}-on-${monthName}-${day}-${year}`
+
+    const eventsResp = await fetch(`${GAMMA_API}/events?slug=${encodeURIComponent(eventSlug)}`, {
+      signal: AbortSignal.timeout(15000)
+    })
+    if (!eventsResp.ok) return null
+
+    const events = await eventsResp.json()
+    if (!events?.length) return null
+
+    const markets: GammaMarket[] = events[0].markets || []
+    let maxResolved = -Infinity
+    let anyResolved = false
+
+    for (const market of markets) {
+      let outcomePrices: string[]
+      if (typeof market.outcomePrices === 'string') {
+        try { outcomePrices = JSON.parse(market.outcomePrices) } catch { continue }
+      } else {
+        outcomePrices = market.outcomePrices as string[]
+      }
+      if (!outcomePrices?.length) continue
+
+      const yesPrice = parseFloat(outcomePrices[0])
+      if (yesPrice !== 0 && yesPrice !== 1) continue
+
+      const texto = (market as any).groupItemTitle || market.question || ''
+      if (!texto) continue
+
+      // Skip "or below" contracts (inferior/range) — we want the highest YES
+      const lower = texto.toLowerCase()
+      if (lower.includes('or below') || lower.includes('under') || lower.includes('or lower')) continue
+
+      const nums = texto.match(/\d+/g)
+      if (!nums) continue
+
+      const value = parseInt(nums[0])
+      anyResolved = true
+
+      if (yesPrice === 1 && value > maxResolved) {
+        maxResolved = value
+      }
+    }
+
+    if (!anyResolved) return null
+    if (maxResolved === -Infinity) return null
+
+    return maxResolved
+  } catch (e) {
+    console.error(`[Polymarket] settlement fetch error for ${slug} ${fechaObjetivo}:`, (e as Error).message)
+    return null
+  }
+}
+
+/**
  * Fetch Polymarket contracts for a given city/date using Gamma API.
  * Builds the exact event slug instead of searching by title.
  */

@@ -3,6 +3,7 @@ import { NextApiRequest, NextApiResponse } from 'next'
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   const supabaseUrl = String(process.env.NEXT_PUBLIC_SUPABASE_URL || '').replace(/\/rest\/v1\/?$/, '')
   const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
+  const serviceKey = process.env.SUPABASE_SERVICE_KEY || ''
   if (!supabaseUrl || !supabaseKey) return res.status(500).json({ error: 'No Supabase config' })
 
   try {
@@ -47,14 +48,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     let deleted = 0
     if (req.method === 'POST' && toDelete.length > 0) {
+      const deleteKey = serviceKey || supabaseKey
       for (let i = 0; i < toDelete.length; i += 100) {
         const batch = toDelete.slice(i, i + 100)
         const idsParam = batch.join(',')
         await fetch(`${supabaseUrl}/rest/v1/forecast_history?id=in.(${idsParam})`, {
           method: 'DELETE',
           headers: {
-            apikey: supabaseKey,
-            Authorization: `Bearer ${supabaseKey}`,
+            apikey: deleteKey,
+            Authorization: `Bearer ${deleteKey}`,
             Prefer: 'count=exact',
           },
           signal: AbortSignal.timeout(30000),

@@ -1,7 +1,6 @@
 import { NextApiRequest, NextApiResponse } from 'next'
 import { getRecordsWithoutActuals, updateActualTemperature } from '@/lib/supabase'
 import { fetchStationMaxTemp } from '@/lib/station-weather'
-import { fetchActualMaxTemp } from '@/lib/openmeteo'
 
 /**
  * POST /api/backfill
@@ -34,18 +33,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const results: { slug: string; fecha: string; temp_real: number | null; error: string | null }[] = []
 
     for (const record of records) {
-      // Try station-based first (matches Polymarket resolution)
-      let tempReal = await fetchStationMaxTemp(record.slug, record.fecha_objetivo)
-
-      // Fallback to Open-Meteo ERA5 if station data unavailable
-      if (tempReal === null) {
-        if (!record.lat || !record.lon) {
-          results.push({ slug: record.slug, fecha: record.fecha_objetivo, temp_real: null, error: 'No station data and no lat/lon' })
-          errors++
-          continue
-        }
-        tempReal = await fetchActualMaxTemp(record.lat, record.lon, record.fecha_objetivo)
-      }
+      // Try Polymarket settlement first, then TWC/HKO fallback (matches Polymarket resolution)
+      const tempReal = await fetchStationMaxTemp(record.slug, record.fecha_objetivo)
 
       if (tempReal === null) {
         results.push({ slug: record.slug, fecha: record.fecha_objetivo, temp_real: null, error: 'No data from any source' })

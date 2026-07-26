@@ -111,7 +111,7 @@ function computeActionPlan(
   // Filter actionable candidates (min accuracy 55%)
   const candidates = recommendations
     .filter(r => r.edge >= MIN_EDGE)
-    .filter(r => (r.exito_pct ?? 50) >= 55)
+    .filter(r => (r.exito_pct ?? 50) >= 45)
     .filter(r => r.consenso === 'MUY FUERTE' || r.consenso === 'FUERTE' || r.consenso === 'ACEPTABLE')
     .filter(r => r.arbitraje !== 'ALTO')
     .sort((a, b) => {
@@ -331,9 +331,9 @@ export function computeExecutiveSummary(
     }
   }).sort((a, b) => b.best_edge_hoy - a.best_edge_hoy)
 
-  // Top opportunities (edge > 5% AND accuracy > 60%)
+  // Top opportunities (edge > 5% AND accuracy > 45%)
   const topOpportunities = recommendationsToday
-    .filter(r => r.edge > 5 && (r.exito_pct ?? 0) >= 55)
+    .filter(r => r.edge > 5 && (r.exito_pct ?? 0) >= 45)
     .sort((a, b) => {
       const scoreA = a.edge * (a.exito_pct ?? 50) / 100
       const scoreB = b.edge * (b.exito_pct ?? 50) / 100

@@ -266,8 +266,8 @@ function ContractRow({ contract }: { contract: PolymarketContract }) {
 
 export default function CityCard({ data }: CityCardProps) {
   const { forecast } = data
-  const modelosCount = Object.keys(forecast.ensemble_raw).length
-  const modelosTemps = Object.values(forecast.ensemble_raw)
+  const modelosCount = Object.keys(forecast.ensemble_raw ?? {}).length
+  const modelosTemps = Object.values(forecast.ensemble_raw ?? {})
   const spread = modelosTemps.length > 0 ? Math.max(...modelosTemps) - Math.min(...modelosTemps) : 0
   const totalMkt = data.contratos.reduce((s, c) => s + c.prob_mkt, 0)
 
@@ -343,7 +343,7 @@ export default function CityCard({ data }: CityCardProps) {
 
       {/* Models */}
       <div className="mb-3 flex flex-wrap gap-1">
-        {Object.entries(forecast.ensemble_raw).map(([model, temp]) => {
+        {Object.entries(forecast.ensemble_raw ?? {}).map(([model, temp]) => {
           const diff = temp - forecast.temp_corregida
           const diffColor = Math.abs(diff) < 1.5 ? 'text-gray-400' : Math.abs(diff) < 3 ? 'text-amber-400' : 'text-red-400'
           return (

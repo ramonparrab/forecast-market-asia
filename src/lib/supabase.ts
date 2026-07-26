@@ -24,7 +24,7 @@ export function getServiceClient() {
 }
 
 export async function saveDailyRun(run: DailyRun): Promise<number | null> {
-  const client = getClient()
+  const client = getServiceClient()
   if (!client) return null
 
   if (!run.resultados || !Array.isArray(run.resultados) || run.resultados.length === 0) {
@@ -213,7 +213,7 @@ export async function updateActualTemperature(
   recordId: number,
   tempReal: number
 ): Promise<boolean> {
-  const client = getClient()
+  const client = getServiceClient()
   if (!client) return false
 
   // Get the forecast temp to compute error client-side
@@ -266,7 +266,7 @@ export async function fixBiasSign(
   newTempCorregida: number,
   newError: number
 ): Promise<boolean> {
-  const client = getClient()
+  const client = getServiceClient()
   if (!client) return false
   const { error: updateErr } = await (client
     .from('forecast_history' as any) as any)
@@ -286,7 +286,7 @@ export async function updateForecastPrecision(
   tempCorregida: number,
   error: number
 ): Promise<boolean> {
-  const client = getClient()
+  const client = getServiceClient()
   if (!client) return false
   const { error: updateErr } = await (client
     .from('forecast_history' as any) as any)
@@ -510,7 +510,7 @@ export interface BacktestBiasEntry {
 }
 
 export async function saveBacktestBias(entries: BacktestBiasEntry[]): Promise<void> {
-  const client = getClient()
+  const client = getServiceClient()
   if (!client || entries.length === 0) return
 
   // Upsert per slug+mes
@@ -545,7 +545,7 @@ export async function getBacktestBias(): Promise<BacktestBiasEntry[]> {
 }
 
 export async function saveBacktestChunk(dias: number, offset: number, summary: BacktestSummary): Promise<void> {
-  const client = getClient()
+  const client = getServiceClient()
   if (!client) return
 
   const { error } = await client
@@ -831,7 +831,7 @@ export async function computeGlobalMetrics(): Promise<GlobalMetrics | null> {
 }
 
 export async function recoverEnsembleFromDailyRuns(): Promise<{ fixed: number; skipped: number; errors: number }> {
-  const client = getClient()
+  const client = getServiceClient()
   if (!client) return { fixed: 0, skipped: 0, errors: 1 }
 
   const { data, error } = await client
