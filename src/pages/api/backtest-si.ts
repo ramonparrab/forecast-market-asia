@@ -205,15 +205,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         const tempReal = day.temp_real
         const tempRealRounded = tempReal !== null ? roundTemp(tempReal) : null
 
-        // GANA/PIERDE se decide comparando el REAL contra nuestro UMBRAL
-        let resultado: 'gana' | 'pierde' | 'pendiente'
-        if (tempRealRounded === null) {
-          resultado = 'pendiente'
-        } else {
-          resultado = tempRealRounded >= umbral ? 'gana' : 'pierde'
-        }
-
-        // Buscar contrato para mostrar multiplicador (si existe en nuestros datos)
+        // Buscar contrato real de Polymarket (el que se habría comprado)
         const relevantes = contratos.filter((c: any) => {
           if (c.tipo === 'inferior' || c.tipo === 'rango') return false
           const val = typeof c.valor === 'number' ? c.valor : (Array.isArray(c.valor) ? c.valor[0] : null)
@@ -229,6 +221,23 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
               (c: any) => c.tipo === 'superior' && typeof c.valor === 'number' && c.valor === umbral
             ) || relevantes[0])
           : null
+
+        // GANA/PIERDE se decide contra el contrato real (exacto o superior)
+        let resultado: 'gana' | 'pierde' | 'pendiente'
+        if (tempRealRounded === null) {
+          resultado = 'pendiente'
+        } else if (usado) {
+          const cVal = typeof usado.valor === 'number' ? usado.valor : (Array.isArray(usado.valor) ? usado.valor[0] : null)
+          if (cVal !== null && usado.tipo === 'superior') {
+            resultado = tempRealRounded >= cVal ? 'gana' : 'pierde'
+          } else if (cVal !== null) {
+            resultado = tempRealRounded === cVal ? 'gana' : 'pierde'
+          } else {
+            resultado = tempRealRounded >= umbral ? 'gana' : 'pierde'
+          }
+        } else {
+          resultado = tempRealRounded >= umbral ? 'gana' : 'pierde'
+        }
 
         if (usado) {
           const probMkt = usado.prob_mkt
