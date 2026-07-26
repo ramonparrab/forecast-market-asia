@@ -519,7 +519,7 @@ export default function Home({ initialAnalysis, initialMetrics, initialAvailable
           const data: DailyAnalysis = await resp.json()
           setAnalysis(data)
           setIsHistorical(true)
-          setLastUpdated(`Cargado: ${data.fecha_objetivo} (cron 10PM)`)
+          setLastUpdated(`Cargado: ${new Date(data.fecha).toLocaleDateString('en-CA', { timeZone: 'America/Caracas' })} (cron 10PM)`)
           await fetchPreviousDay(data.fecha_objetivo)
         }
       } catch { /* no saved data — user clicks Run Analysis */ }
