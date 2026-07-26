@@ -6,6 +6,10 @@ import { CIUDADES_ASIA } from '@/lib/cities'
 const supabaseUrl = String(process.env.NEXT_PUBLIC_SUPABASE_URL || '').replace(/\/rest\/v1\/?$/, '')
 const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
 
+function roundTemp(v: number): number {
+  return Math.floor(v + 0.55)
+}
+
 export interface BacktestContract {
   tipo: string
   valor: number | [number, number]
@@ -137,7 +141,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
       const tempMejora = day.combinado.temp
       const tempOriginal = day.temp_corregida
-      const umbralBase = Math.round(tempMejora)
+      const umbralBase = roundTemp(tempMejora)
       const umbral = thresholdMode === 'forecast+1' ? umbralBase + 1 : umbralBase
 
       if (estrategia === 'consecutiva') {
@@ -168,7 +172,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         }
 
         const tempReal = day.temp_real
-        const tempRealRounded = tempReal !== null ? Math.round(tempReal) : null
+        const tempRealRounded = tempReal !== null ? roundTemp(tempReal) : null
 
         const resultadosContratos = usados.map(c => {
           if (c.prob_mkt === null) {

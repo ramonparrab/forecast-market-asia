@@ -191,7 +191,7 @@ function computeActionPlan(
     if (rec.consenso === 'MUY FUERTE') razones.push('consenso muy fuerte entre modelos')
     else if (rec.consenso === 'FUERTE') razones.push('consenso fuerte entre modelos')
 
-    if (rec.temp_corregida && rec.contrato.includes(`${Math.round(rec.temp_corregida)}`)) {
+    if (rec.temp_corregida && rec.contrato.includes(`${Math.floor(rec.temp_corregida + 0.55)}`)) {
       razones.push(`contrato alineado con pronóstico ${rec.temp_corregida.toFixed(1)}°C`)
     }
 

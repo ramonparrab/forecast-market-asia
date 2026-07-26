@@ -298,7 +298,7 @@ export default function BacktestSi() {
                   {sortedDesc.map(r => (
                     <tr key={r.fecha} className="border-t border-gray-800 hover:bg-slate-800/30 transition">
                       <td className="px-3 py-2 text-gray-400 whitespace-nowrap">{r.fecha}</td>
-                      <td className="px-3 py-2 text-right text-blue-300 font-bold">{r.temp_mejora.toFixed(1)}°C</td>
+                      <td className="px-3 py-2 text-right text-blue-300 font-bold">{r.temp_mejora.toFixed(2)}°C</td>
                       <td className="px-3 py-2 text-right text-white font-medium">≥{r.umbral}°C</td>
                       <td className="px-3 py-2 text-right text-white">
                         {r.contratos_usados[0]?.tipo === 'superior' ? '≥' : ''}
@@ -365,7 +365,7 @@ export default function BacktestSi() {
                     return (
                       <tr key={r.fecha} className="border-t border-gray-800 hover:bg-slate-800/30 transition">
                         <td className="px-2 py-2 text-gray-400 whitespace-nowrap">{r.fecha}</td>
-                        <td className="px-2 py-2 text-right text-blue-300 font-bold">{r.temp_mejora.toFixed(1)}°C</td>
+                        <td className="px-2 py-2 text-right text-blue-300 font-bold">{r.temp_mejora.toFixed(2)}°C</td>
                         <td className="px-2 py-2 text-right text-white font-medium">≥{r.umbral}°C</td>
 
                         {/* Temp-1 */}

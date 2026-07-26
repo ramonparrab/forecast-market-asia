@@ -103,7 +103,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         if (!hist || hist.temp_real == null) continue
 
         const tempReal = Number(hist.temp_real)
-        const ganadorValor = Math.round(tempReal)
+        const ganadorValor = Math.floor(tempReal + 0.55)
 
         // Find our best recommendation at 10pm: highest score (edge * IA) with edge > 0
         let nuestraRecom: { valor: number; mkt: number; ia: number; edge: number; score: number } | null = null

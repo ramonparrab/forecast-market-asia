@@ -446,7 +446,7 @@ export async function getHistoricalAccuracyInteger(
 
   const records = Array.from(seen.values())
   const within = records.filter((r: any) => {
-    const errorInteger = r.temp_real - Math.round(r.temp_corregida)
+    const errorInteger = r.temp_real - Math.floor(r.temp_corregida + 0.55)
     return Math.abs(errorInteger) <= 1
   }).length
 
