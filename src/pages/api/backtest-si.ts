@@ -202,6 +202,18 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           resultado,
         })
       } else {
+        const tempReal = day.temp_real
+        const tempRealRounded = tempReal !== null ? roundTemp(tempReal) : null
+
+        // GANA/PIERDE se decide comparando el REAL contra nuestro UMBRAL
+        let resultado: 'gana' | 'pierde' | 'pendiente'
+        if (tempRealRounded === null) {
+          resultado = 'pendiente'
+        } else {
+          resultado = tempRealRounded >= umbral ? 'gana' : 'pierde'
+        }
+
+        // Buscar contrato para mostrar multiplicador (si existe en nuestros datos)
         const relevantes = contratos.filter((c: any) => {
           if (c.tipo === 'inferior' || c.tipo === 'rango') return false
           const val = typeof c.valor === 'number' ? c.valor : (Array.isArray(c.valor) ? c.valor[0] : null)
@@ -212,51 +224,50 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           return av - bv
         })
 
-        if (relevantes.length === 0) continue
+        const usado = relevantes.length > 0
+          ? (relevantes.find(
+              (c: any) => c.tipo === 'superior' && typeof c.valor === 'number' && c.valor === umbral
+            ) || relevantes[0])
+          : null
 
-        let usado = relevantes.find(
-          (c: any) => c.tipo === 'superior' && typeof c.valor === 'number' && c.valor === umbral
-        )
-        if (!usado) usado = relevantes[0]
-
-        const prob = usado.prob_mkt
-        const mult = prob > 0 ? 100 / prob : 0
-        const multNeto = mult - 1
-
-        const tempReal = day.temp_real
-        const tempRealRounded = tempReal !== null ? Math.round(tempReal) : null
-
-        let resultado: 'gana' | 'pierde' | 'pendiente'
-        if (tempRealRounded === null) {
-          resultado = 'pendiente'
-        } else {
-          const cVal = typeof usado.valor === 'number' ? usado.valor : (Array.isArray(usado.valor) ? usado.valor[0] : null)
-          resultado = evalResult(tempRealRounded, usado.tipo, cVal)
-        }
-
-        const probMkt = usado.prob_mkt
-        const multIndiv = probMkt > 0 ? 100 / probMkt : 0
-        const multNetoIndiv = multIndiv - 1
-
-        results.push({
-          fecha: date,
-          temp_original: tempOriginal,
-          temp_mejora: tempMejora,
-          umbral,
-          modo_umbral: thresholdMode,
-          contratos_usados: [{
-            tipo: usado.tipo,
-            valor: usado.valor,
-            prob_mkt: probMkt,
+        if (usado) {
+          const probMkt = usado.prob_mkt
+          const multIndiv = probMkt > 0 ? 100 / probMkt : 0
+          const multNetoIndiv = multIndiv - 1
+          results.push({
+            fecha: date,
+            temp_original: tempOriginal,
+            temp_mejora: tempMejora,
+            umbral,
+            modo_umbral: thresholdMode,
+            contratos_usados: [{
+              tipo: usado.tipo,
+              valor: usado.valor,
+              prob_mkt: probMkt,
+              multiplicador: Math.round(multIndiv * 100) / 100,
+              multiplicador_neto: Math.round(multNetoIndiv * 100) / 100,
+            }],
+            costo_total_pct: probMkt.toFixed(1) + '%',
             multiplicador: Math.round(multIndiv * 100) / 100,
             multiplicador_neto: Math.round(multNetoIndiv * 100) / 100,
-          }],
-          costo_total_pct: probMkt.toFixed(1) + '%',
-          multiplicador: Math.round(multIndiv * 100) / 100,
-          multiplicador_neto: Math.round(multNetoIndiv * 100) / 100,
-          temp_real: tempReal,
-          resultado,
-        })
+            temp_real: tempReal,
+            resultado,
+          })
+        } else {
+          results.push({
+            fecha: date,
+            temp_original: tempOriginal,
+            temp_mejora: tempMejora,
+            umbral,
+            modo_umbral: thresholdMode,
+            contratos_usados: [],
+            costo_total_pct: '-',
+            multiplicador: 0,
+            multiplicador_neto: 0,
+            temp_real: tempReal,
+            resultado,
+          })
+        }
       }
     }
 

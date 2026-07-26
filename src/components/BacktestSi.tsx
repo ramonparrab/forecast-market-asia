@@ -301,18 +301,21 @@ export default function BacktestSi() {
                       <td className="px-3 py-2 text-right text-blue-300 font-bold">{r.temp_mejora.toFixed(2)}°C</td>
                       <td className="px-3 py-2 text-right text-white font-medium">≥{r.umbral}°C</td>
                       <td className="px-3 py-2 text-right text-white">
-                        {r.contratos_usados[0]?.tipo === 'superior' ? '≥' : ''}
-                        {typeof r.contratos_usados[0]?.valor === 'number' ? r.contratos_usados[0].valor + '°C' : ''}
+                        {r.contratos_usados[0]?.tipo === 'superior' ? '≥' : r.contratos_usados[0]?.tipo ? '' : '-'}
+                        {typeof r.contratos_usados[0]?.valor === 'number' ? r.contratos_usados[0].valor + '°C' : '-'}
                       </td>
                       <td className="px-3 py-2 text-right">
                         <span className="text-amber-400 font-medium">{r.costo_total_pct}</span>
                       </td>
                       <td className="px-3 py-2 text-right">
-                        <span className="text-blue-400 font-bold">x{r.multiplicador.toFixed(2)}</span>
-                        <span className="text-gray-500 ml-1">(+{r.multiplicador_neto.toFixed(2)})</span>
+                        {r.multiplicador > 0 ? (
+                          <><span className="text-blue-400 font-bold">x{r.multiplicador.toFixed(2)}</span><span className="text-gray-500 ml-1">(+{r.multiplicador_neto.toFixed(2)})</span></>
+                        ) : (
+                          <span className="text-gray-500">?</span>
+                        )}
                       </td>
                       <td className="px-3 py-2 text-right text-white">
-                        {r.temp_real !== null ? r.temp_real.toFixed(1) + '°C' : '-'}
+                        {r.temp_real !== null ? r.temp_real.toFixed(2) + '°C' : '-'}
                       </td>
                       <td className="px-3 py-2 text-center">
                         {r.resultado === 'gana' ? (
