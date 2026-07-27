@@ -46,30 +46,30 @@ function computeRecommendation(
   tc11: number,
   fecha_objetivo: string,
   slug: string,
+  prevReal: number | null,
 ): '10PM' | '11PM' | null {
-  // Only for chongqing
   if (slug !== 'chongqing') return null
 
   const diff = tc11 - tc10
   const month = parseInt(fecha_objetivo.substring(5, 7), 10)
+  const trend = prevReal != null ? tc10 - prevReal : null
 
-  // R1: 11PM significantly warmer -> warming trend
+  // Non-Jul/Aug: always 11PM
+  if (month !== 7 && month !== 8) return '11PM'
+
+  // Julio/Agosto:
+  // |diff| < 0.3 → modelo estable, 10PM gana 70%
+  if (Math.abs(diff) < 0.3) return '10PM'
+  // diff > 1.5 → calentamiento rápido, 11PM gana 80%
   if (diff > 1.5) return '11PM'
-  // R2: Extreme heat predicted by 10PM, 11PM slightly cooler -> corrects warm bias
-  if (tc10 >= 36 && diff < -0.3) return '11PM'
-  // R3: Rapid cooling (10PM < 33 but 11PM warms) -> 10PM
-  if (diff > 1.0 && tc10 < 33) return '10PM'
-  // R4: 11PM much cooler in Jul/Aug -> 10PM
-  if (diff < -1.0 && (month === 7 || month === 8)) return '10PM'
-  // R5: Stable model -> seasonal baseline
-  if (Math.abs(diff) < 1.5) {
-    if (month === 6 || month === 9 || month === 10 || month === 11) return '11PM'
-    if (month === 7 || month === 8) return '10PM'
-    return '11PM'
+  // tc10 >= 36 y 11PM cooler → depende de tendencia vs ayer
+  if (tc10 >= 36 && diff < -0.3 && trend !== null) {
+    if (trend > 0.5) return '10PM' // modelo calienta, 10PM alcanza
+    return '11PM' // estable/enfría, 11PM corrige sesgo cálido
   }
-  // Fallback
-  if (month === 7 || month === 8) return '10PM'
-  return '11PM'
+  if (tc10 >= 36 && diff < -0.3) return '11PM'
+  // Default Julio: 10PM
+  return '10PM'
 }
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
@@ -276,7 +276,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           }
         }
 
-        const predGana = computeRecommendation(tcFirst, tcLast, fecha, slug)
+        const prevData = fi > 0 && resultDays.length > 0 ? resultDays[resultDays.length - 1] : null
+        const predGana = computeRecommendation(tcFirst, tcLast, fecha, slug, prevData?.temp_real ?? null)
         let predAcierto: boolean | null = null
         if (predGana && gana && gana !== 'EMPATE') {
           predAcierto = predGana === gana
