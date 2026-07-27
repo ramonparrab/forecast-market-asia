@@ -52,92 +52,76 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const startDate = new Date()
     startDate.setDate(startDate.getDate() - daysLimit - 3)
 
-    const { data: runs, error: runsError } = await client
-      .from('daily_runs' as any)
-      .select('id, fecha_ejecucion, fecha_objetivo, resultados')
-      .gte('fecha_ejecucion', startDate.toISOString())
-      .order('fecha_ejecucion', { ascending: true } as any)
-
-    if (runsError) return res.status(500).json({ error: runsError.message })
-    if (!runs || runs.length === 0) return res.status(200).json({ ciudades: {} })
-
-    const allSlugs = slugFilter ? [slugFilter] : CIUDADES_ASIA.map(c => c.slug)
-    const slugNames = new Map(CIUDADES_ASIA.map(c => [c.slug, c.nombre]))
-
-    const rawEntries: { fecha_ejecucion: string; slug: string; fecha_objetivo: string; temp_corregida: number }[] = []
-
-    for (const run of runs) {
-      const fechaObjetivo = run.fecha_objetivo as string
-      if (!fechaObjetivo) continue
-
-      const objDate = new Date(fechaObjetivo + 'T12:00:00')
-      const daysAgo = Math.floor((endDate.getTime() - objDate.getTime()) / (1000 * 60 * 60 * 24))
-      if (daysAgo < 0 || daysAgo > daysLimit) continue
-
-      let parsed: any[]
-      try {
-        parsed = JSON.parse(run.resultados)
-      } catch {
-        continue
-      }
-      if (!Array.isArray(parsed)) continue
-
-      for (const slug of allSlugs) {
-        const cityData = parsed.find((c: any) => c.slug === slug)
-        const tc = cityData?.forecast?.temp_corregida
-        if (tc != null) {
-          rawEntries.push({
-            fecha_ejecucion: run.fecha_ejecucion,
-            slug,
-            fecha_objetivo: fechaObjetivo,
-            temp_corregida: Number(tc),
-          })
-        }
-      }
-    }
-
-    if (rawEntries.length === 0) return res.status(200).json({ ciudades: {} })
-
-    const groups = new Map<string, { fecha_ejecucion: string; temp_corregida: number }[]>()
-
-    for (const e of rawEntries) {
-      const key = `${e.slug}|${e.fecha_objetivo}`
-      if (!groups.has(key)) groups.set(key, [])
-      groups.get(key)!.push({
-        fecha_ejecucion: e.fecha_ejecucion,
-        temp_corregida: e.temp_corregida,
-      })
-    }
-
-    const bySlug = new Map<string, { fecha_objetivo: string; earlier: { fecha_ejecucion: string; temp_corregida: number }; latest: { fecha_ejecucion: string; temp_corregida: number } }[]>()
-
-    Array.from(groups.entries()).forEach(([key, entries]) => {
-      if (entries.length < 2) return
-
-      const [slug, fecha_objetivo] = key.split('|')
-      entries.sort((a, b) => a.fecha_ejecucion.localeCompare(b.fecha_ejecucion))
-
-      const earlier = entries[entries.length - 2]
-      const latest = entries[entries.length - 1]
-
-      if (!bySlug.has(slug)) bySlug.set(slug, [])
-      bySlug.get(slug)!.push({ fecha_objetivo, earlier, latest })
-    })
-
-    // Get forecast history for mejora corrections + real temps
+    // Get ALL forecast_history records (without dedup) to find earliest vs latest per target
     let fhQuery = client
       .from('forecast_history' as any)
-      .select('id, slug, fecha_objetivo, temp_corregida, temp_real, error')
-      .not('temp_real', 'is', null)
+      .select('id, slug, fecha_objetivo, temp_corregida, temp_real, error, fecha_ejecucion')
+      .gte('fecha_ejecucion', startDate.toISOString())
 
     if (slugFilter) {
       fhQuery = fhQuery.eq('slug', slugFilter)
     }
 
-    const { data: fhRecords } = await fhQuery
+    const { data: rawRecords, error: fhError } = await fhQuery
+    if (fhError) return res.status(500).json({ error: fhError.message })
+    if (!rawRecords || rawRecords.length === 0) return res.status(200).json({ ciudades: {} })
+
+    const allSlugs = slugFilter ? [slugFilter] : CIUDADES_ASIA.map(c => c.slug)
+    const slugNames = new Map(CIUDADES_ASIA.map(c => [c.slug, c.nombre]))
+
+    // Group ALL records by (slug, fecha_objetivo) to find earliest and latest
+    const groups = new Map<string, { id: number; temp_corregida: number; fecha_ejecucion: string }[]>()
+
+    for (const r of (rawRecords as any[])) {
+      if (!allSlugs.includes(r.slug)) continue
+      const objDate = new Date(r.fecha_objetivo + 'T12:00:00')
+      const daysAgo = Math.floor((endDate.getTime() - objDate.getTime()) / (1000 * 60 * 60 * 24))
+      if (daysAgo < 0 || daysAgo > daysLimit) continue
+
+      const key = `${r.slug}|${r.fecha_objetivo}`
+      if (!groups.has(key)) groups.set(key, [])
+      groups.get(key)!.push({
+        id: r.id,
+        temp_corregida: r.temp_corregida,
+        fecha_ejecucion: r.fecha_ejecucion,
+      })
+    }
+
+    // Build per-slug comparison data from earliest vs latest record per target
+    const bySlug = new Map<string, { fecha_objetivo: string; first: { id: number; temp_corregida: number; fecha_ejecucion: string }; last: { id: number; temp_corregida: number; fecha_ejecucion: string } }[]>()
+
+    Array.from(groups.entries()).forEach(([key, entries]) => {
+      if (entries.length < 2) return
+
+      const [slug, fecha_objetivo] = key.split('|')
+      entries.sort((a, b) => a.id - b.id)
+
+      // Need at least 12h between first and last record
+      const first = entries[0]
+      const last = entries[entries.length - 1]
+      const timeDiffMs = new Date(last.fecha_ejecucion).getTime() - new Date(first.fecha_ejecucion).getTime()
+      if (timeDiffMs < 12 * 60 * 60 * 1000) return
+
+      if (!bySlug.has(slug)) bySlug.set(slug, [])
+      bySlug.get(slug)!.push({ fecha_objetivo, first, last })
+    })
+
+    if (bySlug.size === 0) return res.status(200).json({ ciudades: {} })
+
+    // Get mejora corrections from deduplicated forecast_history (same as mejora-continua)
+    let mejoraQuery = client
+      .from('forecast_history' as any)
+      .select('id, slug, fecha_objetivo, temp_corregida, temp_real, error')
+      .not('temp_real', 'is', null)
+
+    if (slugFilter) {
+      mejoraQuery = mejoraQuery.eq('slug', slugFilter)
+    }
+
+    const { data: mejoraRecords } = await mejoraQuery
 
     const fhBySlug = new Map<string, any[]>()
-    for (const r of (fhRecords as any[]) ?? []) {
+    for (const r of (mejoraRecords as any[]) ?? []) {
       if (!fhBySlug.has(r.slug)) fhBySlug.set(r.slug, [])
       fhBySlug.get(r.slug)!.push(r)
     }
@@ -173,7 +157,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       }
     })
 
-    // Build final result per slug
+    // Build final results
     const ciudades: Record<string, NowcastCityResult> = {}
 
     Array.from(bySlug.entries()).forEach(([slug, days]) => {
@@ -184,22 +168,22 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
       for (const day of days) {
         const tempReal = reals.get(day.fecha_objetivo) ?? null
-        const tc10 = day.earlier.temp_corregida
-        const tc11 = day.latest.temp_corregida
+        const tcFirst = day.first.temp_corregida
+        const tcLast = day.last.temp_corregida
 
         const correction = corrections.get(day.fecha_objetivo) ?? 0
-        const comb10 = tc10 + correction
-        const comb11 = tc11 + correction
+        const combFirst = tcFirst + correction
+        const combLast = tcLast + correction
 
-        let error10: number | null = null
-        let error11: number | null = null
+        let errorFirst: number | null = null
+        let errorLast: number | null = null
         let gana: NowcastDay['gana'] = null
 
         if (tempReal !== null) {
-          error10 = round2(Math.abs(comb10 - tempReal))
-          error11 = round2(Math.abs(comb11 - tempReal))
+          errorFirst = round2(Math.abs(combFirst - tempReal))
+          errorLast = round2(Math.abs(combLast - tempReal))
 
-          const diff = error11 - error10
+          const diff = errorLast - errorFirst
           if (Math.abs(diff) < 0.01) {
             gana = 'EMPATE'
           } else if (diff > 0) {
@@ -212,14 +196,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         resultDays.push({
           fecha_objetivo: day.fecha_objetivo,
           temp_real: tempReal,
-          temp_corregida_10pm: round2(tc10),
-          temp_corregida_11pm: round2(tc11),
-          hora_10pm: day.earlier.fecha_ejecucion,
-          hora_11pm: day.latest.fecha_ejecucion,
-          combinado_10pm: round2(comb10),
-          combinado_11pm: round2(comb11),
-          error_10pm: error10,
-          error_11pm: error11,
+          temp_corregida_10pm: round2(tcFirst),
+          temp_corregida_11pm: round2(tcLast),
+          hora_10pm: day.first.fecha_ejecucion,
+          hora_11pm: day.last.fecha_ejecucion,
+          combinado_10pm: round2(combFirst),
+          combinado_11pm: round2(combLast),
+          error_10pm: errorFirst,
+          error_11pm: errorLast,
           gana,
         })
       }
