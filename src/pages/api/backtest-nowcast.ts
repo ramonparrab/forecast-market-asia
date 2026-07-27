@@ -41,6 +41,10 @@ function round2(v: number): number {
   return Math.round(v * 100) / 100
 }
 
+function roundInt(v: number): number {
+  return Math.round(v + 0.05)
+}
+
 function computeRecommendation(
   tc10: number,
   tc11: number,
@@ -266,13 +270,20 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           errorFirst = round2(Math.abs(combFirst - tempReal))
           errorLast = round2(Math.abs(combLast - tempReal))
 
-          const diff = errorLast - errorFirst
-          if (Math.abs(diff) < 0.01) {
+          const rReal = roundInt(tempReal)
+          const r10 = roundInt(combFirst)
+          const r11 = roundInt(combLast)
+          const a10 = r10 === rReal
+          const a11 = r11 === rReal
+
+          if (a10 && a11) {
             gana = 'EMPATE'
-          } else if (diff > 0) {
+          } else if (a10 && !a11) {
             gana = '10PM'
-          } else {
+          } else if (!a10 && a11) {
             gana = '11PM'
+          } else {
+            gana = null
           }
         }
 
@@ -285,8 +296,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         const prevReal = prevFhVal?.real ?? null
         const predGana = computeRecommendation(tcFirst, tcLast, fecha, slug, prevReal)
         let predAcierto: boolean | null = null
-        if (predGana && gana && gana !== 'EMPATE') {
+        if (predGana && gana) {
           predAcierto = predGana === gana
+        } else if (predGana && gana === null && tempReal !== null) {
+          predAcierto = false
         }
 
         resultDays.push({
