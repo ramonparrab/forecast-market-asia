@@ -52,43 +52,65 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const startDate = new Date()
     startDate.setDate(startDate.getDate() - daysLimit - 3)
 
-    // Get ALL forecast_history records (without dedup) to find earliest vs latest per target
-    let fhQuery = client
-      .from('forecast_history' as any)
-      .select('id, slug, fecha_objetivo, temp_corregida, temp_real, error, fecha_ejecucion')
+    // 1) Read daily_runs (they have multiple records per target date)
+    const { data: runs, error: runsError } = await client
+      .from('daily_runs' as any)
+      .select('id, fecha_ejecucion, fecha_objetivo, resultados')
       .gte('fecha_ejecucion', startDate.toISOString())
+      .order('fecha_ejecucion', { ascending: true } as any)
 
-    if (slugFilter) {
-      fhQuery = fhQuery.eq('slug', slugFilter)
-    }
-
-    const { data: rawRecords, error: fhError } = await fhQuery
-    if (fhError) return res.status(500).json({ error: fhError.message })
-    if (!rawRecords || rawRecords.length === 0) return res.status(200).json({ ciudades: {} })
+    if (runsError) return res.status(500).json({ error: runsError.message })
+    if (!runs || runs.length === 0) return res.status(200).json({ ciudades: {} })
 
     const allSlugs = slugFilter ? [slugFilter] : CIUDADES_ASIA.map(c => c.slug)
     const slugNames = new Map(CIUDADES_ASIA.map(c => [c.slug, c.nombre]))
 
-    // Group ALL records by (slug, fecha_objetivo) to find earliest and latest
-    const groups = new Map<string, { id: number; temp_corregida: number; fecha_ejecucion: string }[]>()
+    // 2) Parse resultados JSON and extract temp_corregida from forecast
+    const rawEntries: { id: number; fecha_ejecucion: string; slug: string; fecha_objetivo: string; temp_corregida: number }[] = []
 
-    for (const r of (rawRecords as any[])) {
-      if (!allSlugs.includes(r.slug)) continue
-      const objDate = new Date(r.fecha_objetivo + 'T12:00:00')
+    for (const run of runs) {
+      const fechaObjetivo = run.fecha_objetivo as string
+      if (!fechaObjetivo) continue
+
+      const objDate = new Date(fechaObjetivo + 'T12:00:00')
       const daysAgo = Math.floor((endDate.getTime() - objDate.getTime()) / (1000 * 60 * 60 * 24))
       if (daysAgo < 0 || daysAgo > daysLimit) continue
 
-      const key = `${r.slug}|${r.fecha_objetivo}`
-      if (!groups.has(key)) groups.set(key, [])
-      groups.get(key)!.push({
-        id: r.id,
-        temp_corregida: r.temp_corregida,
-        fecha_ejecucion: r.fecha_ejecucion,
-      })
+      let parsed: any[]
+      try {
+        parsed = JSON.parse(run.resultados)
+      } catch {
+        continue
+      }
+      if (!Array.isArray(parsed)) continue
+
+      for (const slug of allSlugs) {
+        const cityData = parsed.find((c: any) => c.slug === slug)
+        const tc = cityData?.forecast?.temp_corregida
+        if (tc != null) {
+          rawEntries.push({
+            id: run.id,
+            fecha_ejecucion: run.fecha_ejecucion,
+            slug,
+            fecha_objetivo: fechaObjetivo,
+            temp_corregida: Number(tc),
+          })
+        }
+      }
     }
 
-    // Build per-slug comparison data from earliest vs latest record per target
-    const bySlug = new Map<string, { fecha_objetivo: string; first: { id: number; temp_corregida: number; fecha_ejecucion: string }; last: { id: number; temp_corregida: number; fecha_ejecucion: string } }[]>()
+    if (rawEntries.length === 0) return res.status(200).json({ ciudades: {} })
+
+    // 3) Group by (slug, fecha_objetivo) and take first vs last record
+    const groups = new Map<string, { id: number; fecha_ejecucion: string; temp_corregida: number }[]>()
+
+    for (const e of rawEntries) {
+      const key = `${e.slug}|${e.fecha_objetivo}`
+      if (!groups.has(key)) groups.set(key, [])
+      groups.get(key)!.push({ id: e.id, fecha_ejecucion: e.fecha_ejecucion, temp_corregida: e.temp_corregida })
+    }
+
+    const bySlug = new Map<string, { fecha_objetivo: string; first: { id: number; fecha_ejecucion: string; temp_corregida: number }; last: { id: number; fecha_ejecucion: string; temp_corregida: number } }[]>()
 
     Array.from(groups.entries()).forEach(([key, entries]) => {
       if (entries.length < 2) return
@@ -96,7 +118,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       const [slug, fecha_objetivo] = key.split('|')
       entries.sort((a, b) => a.id - b.id)
 
-      // Need at least 12h between first and last record
+      // First record = initial forecast; last = latest update; need >=12h gap
       const first = entries[0]
       const last = entries[entries.length - 1]
       const timeDiffMs = new Date(last.fecha_ejecucion).getTime() - new Date(first.fecha_ejecucion).getTime()
@@ -108,20 +130,20 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     if (bySlug.size === 0) return res.status(200).json({ ciudades: {} })
 
-    // Get mejora corrections from deduplicated forecast_history (same as mejora-continua)
-    let mejoraQuery = client
+    // 4) Get mejora corrections from forecast_history (deduplicated, same as mejora-continua)
+    let fhQuery = client
       .from('forecast_history' as any)
       .select('id, slug, fecha_objetivo, temp_corregida, temp_real, error')
       .not('temp_real', 'is', null)
 
     if (slugFilter) {
-      mejoraQuery = mejoraQuery.eq('slug', slugFilter)
+      fhQuery = fhQuery.eq('slug', slugFilter)
     }
 
-    const { data: mejoraRecords } = await mejoraQuery
+    const { data: fhRecords } = await fhQuery
 
     const fhBySlug = new Map<string, any[]>()
-    for (const r of (mejoraRecords as any[]) ?? []) {
+    for (const r of (fhRecords as any[]) ?? []) {
       if (!fhBySlug.has(r.slug)) fhBySlug.set(r.slug, [])
       fhBySlug.get(r.slug)!.push(r)
     }
@@ -157,7 +179,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       }
     })
 
-    // Build final results
+    // 5) Build final results
     const ciudades: Record<string, NowcastCityResult> = {}
 
     Array.from(bySlug.entries()).forEach(([slug, days]) => {
