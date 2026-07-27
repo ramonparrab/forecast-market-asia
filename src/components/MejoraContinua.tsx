@@ -6,9 +6,33 @@ interface ApiResponse {
   ciudades: Record<string, CityMejoraResult>
 }
 
+interface NowcastDay {
+  fecha_objetivo: string
+  temp_real: number | null
+  temp_corregida_10pm: number | null
+  temp_corregida_11pm: number | null
+  combinado_10pm: number | null
+  combinado_11pm: number | null
+  error_10pm: number | null
+  error_11pm: number | null
+  gana: '10PM' | '11PM' | 'EMPATE' | null
+}
+
+interface NowcastCityResult {
+  slug: string
+  nombre: string
+  days: NowcastDay[]
+  total_gana_10pm: number
+  total_gana_11pm: number
+  total_empate: number
+  total_dias: number
+  error_prom_10pm: number | null
+  error_prom_11pm: number | null
+}
+
 const MEJORA_KEYS: MejoraKey[] = ['station', 'rapid_warming', 'range_bias', 'combinado']
 
-type SubView = 'analisis' | 'pipeline'
+type SubView = 'analisis' | 'pipeline' | 'backtest_nowcast'
 
 function round2(v: number): number {
   return Math.round(v * 100) / 100
@@ -399,6 +423,215 @@ function PipelineView() {
   )
 }
 
+function NowcastView({ data, ciudadSlug, setCiudadSlug }: {
+  data: Record<string, NowcastCityResult>
+  ciudadSlug: string
+  setCiudadSlug: (s: string) => void
+}) {
+  const allSlugs = CIUDADES_ASIA.map(c => c.slug)
+  const filteredSlugs = ciudadSlug === 'todas'
+    ? allSlugs.filter(s => data[s])
+    : [ciudadSlug].filter(s => data[s])
+
+  // Aggregate across all displayed cities
+  const agg = (() => {
+    let g10 = 0, g11 = 0, emp = 0, total = 0
+    let sumE10 = 0, sumE11 = 0, cntE = 0
+    for (const s of Object.keys(data)) {
+      const c = data[s]
+      g10 += c.total_gana_10pm
+      g11 += c.total_gana_11pm
+      emp += c.total_empate
+      total += c.total_dias
+      if (c.error_prom_10pm !== null && c.error_prom_11pm !== null) {
+        sumE10 += c.error_prom_10pm * c.total_dias
+        sumE11 += c.error_prom_11pm * c.total_dias
+        cntE += c.total_dias
+      }
+    }
+    return {
+      g10, g11, emp, total,
+      err10: cntE > 0 ? (sumE10 / cntE).toFixed(3) : '-',
+      err11: cntE > 0 ? (sumE11 / cntE).toFixed(3) : '-',
+    }
+  })()
+
+  const selected = ciudadSlug !== 'todas' ? data[ciudadSlug] : null
+
+  return (
+    <div className="space-y-4">
+      {/* City selector */}
+      <div className="flex flex-wrap gap-2 items-center">
+        <label className="text-xs text-gray-500">Ciudad:</label>
+        <select
+          value={ciudadSlug}
+          onChange={e => setCiudadSlug(e.target.value)}
+          className="rounded-lg bg-slate-700 border border-gray-600 px-3 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500"
+        >
+          <option value="todas">Todas las ciudades</option>
+          {CIUDADES_ASIA.filter(c => data[c.slug]).map(c => (
+            <option key={c.slug} value={c.slug}>{c.nombre}</option>
+          ))}
+        </select>
+      </div>
+
+      {/* Global summary */}
+      <div className="rounded-xl bg-gradient-to-br from-slate-900 to-slate-800 border border-blue-500/20 p-4">
+        <h3 className="text-sm font-semibold text-white mb-3">📊 Nowcast 10PM vs 11PM — Comparación Global</h3>
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-2 text-xs">
+          <div className="rounded-lg bg-slate-800/50 p-2 text-center">
+            <p className="text-gray-500">Días comparables</p>
+            <p className="text-xl font-bold text-white">{agg.total}</p>
+          </div>
+          <div className="rounded-lg bg-amber-500/10 p-2 text-center">
+            <p className="text-amber-400">Gana 10PM</p>
+            <p className="text-xl font-bold text-amber-400">{agg.g10} <span className="text-xs text-gray-500">({agg.total > 0 ? (agg.g10/agg.total*100).toFixed(0) : '-'}%)</span></p>
+          </div>
+          <div className="rounded-lg bg-blue-500/10 p-2 text-center">
+            <p className="text-blue-400">Gana 11PM</p>
+            <p className="text-xl font-bold text-blue-400">{agg.g11} <span className="text-xs text-gray-500">({agg.total > 0 ? (agg.g11/agg.total*100).toFixed(0) : '-'}%)</span></p>
+          </div>
+          <div className="rounded-lg bg-gray-500/10 p-2 text-center">
+            <p className="text-gray-400">Empates</p>
+            <p className="text-xl font-bold text-gray-400">{agg.emp} <span className="text-xs text-gray-500">({agg.total > 0 ? (agg.emp/agg.total*100).toFixed(0) : '-'}%)</span></p>
+          </div>
+          <div className="rounded-lg bg-indigo-500/10 p-2 text-center">
+            <p className="text-indigo-400">Error prom</p>
+            <p className="text-lg font-bold text-indigo-400">10PM {agg.err10}°C</p>
+            <p className="text-lg font-bold text-indigo-300">11PM {agg.err11}°C</p>
+          </div>
+        </div>
+      </div>
+
+      {/* Multi-city summary table */}
+      {ciudadSlug === 'todas' && (
+        <div className="rounded-xl bg-slate-800/50 border border-gray-700/30 overflow-hidden">
+          <div className="p-3 border-b border-gray-700/30">
+            <h3 className="text-sm font-semibold text-white">Resumen por Ciudad</h3>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="bg-slate-800/50 text-gray-400">
+                  <th className="text-left p-2">Ciudad</th>
+                  <th className="text-right p-2">Días</th>
+                  <th className="text-right p-2">10PM ✅</th>
+                  <th className="text-right p-2">11PM ✅</th>
+                  <th className="text-right p-2">=</th>
+                  <th className="text-right p-2">% 10PM</th>
+                  <th className="text-right p-2">Error 10PM</th>
+                  <th className="text-right p-2">Error 11PM</th>
+                  <th className="text-right p-2">Δ Error</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredSlugs.map(slug => {
+                  const c = data[slug]
+                  const pct10 = c.total_dias > 0 ? (c.total_gana_10pm / c.total_dias * 100).toFixed(0) : '-'
+                  const delta = c.error_prom_10pm !== null && c.error_prom_11pm !== null
+                    ? (c.error_prom_10pm - c.error_prom_11pm).toFixed(3)
+                    : '-'
+                  const deltaColor = delta !== '-' ? (Number(delta) > 0 ? 'text-emerald-400' : Number(delta) < 0 ? 'text-red-400' : 'text-gray-500') : ''
+                  return (
+                    <tr key={slug} className="border-t border-gray-800 hover:bg-slate-800/30 transition">
+                      <td className="p-2 text-white font-medium">{c.nombre}</td>
+                      <td className="p-2 text-right text-gray-300">{c.total_dias}</td>
+                      <td className="p-2 text-right text-amber-400 font-bold">{c.total_gana_10pm}</td>
+                      <td className="p-2 text-right text-blue-400 font-bold">{c.total_gana_11pm}</td>
+                      <td className="p-2 text-right text-gray-500">{c.total_empate}</td>
+                      <td className="p-2 text-right text-amber-400">{pct10}%</td>
+                      <td className="p-2 text-right text-gray-400">{c.error_prom_10pm?.toFixed(3) ?? '-'}°C</td>
+                      <td className="p-2 text-right text-gray-400">{c.error_prom_11pm?.toFixed(3) ?? '-'}°C</td>
+                      <td className={`p-2 text-right font-bold ${deltaColor}`}>{delta !== '-' ? (Number(delta) >= 0 ? '+' : '') + delta + '°C' : '-'}</td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* Single city day-by-day table */}
+      {selected && (
+        <div className="rounded-xl bg-slate-800/50 border border-gray-700/30 overflow-hidden">
+          <div className="p-3 border-b border-gray-700/30">
+            <h3 className="text-sm font-semibold text-white">
+              📋 Día a Día — {selected.nombre}
+              <span className="text-gray-500 font-normal ml-2 text-xs">
+                {selected.total_dias} días con doble registro
+              </span>
+            </h3>
+          </div>
+          <div className="overflow-x-auto" style={{ maxHeight: 500 }}>
+            <table className="w-full text-xs">
+              <thead className="sticky top-0 bg-slate-900">
+                <tr className="text-gray-400">
+                  <th className="text-left p-2">Fecha</th>
+                  <th className="text-right p-2">Real</th>
+                  <th className="text-right p-2">10PM tc</th>
+                  <th className="text-right p-2">10PM Combinado</th>
+                  <th className="text-right p-2">Error 10PM</th>
+                  <th className="text-right p-2">11PM tc</th>
+                  <th className="text-right p-2">11PM Combinado</th>
+                  <th className="text-right p-2">Error 11PM</th>
+                  <th className="text-right p-2">Ganador</th>
+                </tr>
+              </thead>
+              <tbody>
+                {selected.days.slice().reverse().map(d => {
+                  const color10 = d.error_10pm !== null && d.error_11pm !== null
+                    ? (d.error_10pm < d.error_11pm ? 'text-amber-400' : d.error_10pm > d.error_11pm ? 'text-blue-400' : 'text-gray-500')
+                    : 'text-gray-500'
+                  const color11 = d.error_10pm !== null && d.error_11pm !== null
+                    ? (d.error_11pm < d.error_10pm ? 'text-blue-400' : 'text-gray-500')
+                    : 'text-gray-500'
+                  const ganadorClass = d.gana === '10PM' ? 'text-amber-400' : d.gana === '11PM' ? 'text-blue-400' : 'text-gray-500'
+                  return (
+                    <tr key={d.fecha_objetivo} className={`border-t border-gray-800 hover:bg-slate-800/30 transition ${
+                      d.gana === '10PM' ? 'bg-amber-500/5' : d.gana === '11PM' ? 'bg-blue-500/5' : ''
+                    }`}>
+                      <td className="p-2 text-gray-300">{d.fecha_objetivo}</td>
+                      <td className="p-2 text-right text-yellow-400 font-medium">{d.temp_real !== null ? d.temp_real.toFixed(1) : '-'}°C</td>
+                      <td className="p-2 text-right text-gray-400">{d.temp_corregida_10pm?.toFixed(2) ?? '-'}</td>
+                      <td className="p-2 text-right text-amber-300 font-medium">{d.combinado_10pm?.toFixed(2) ?? '-'}°C</td>
+                      <td className={`p-2 text-right font-medium ${color10}`}>{d.error_10pm !== null ? d.error_10pm.toFixed(3) + '°C' : '-'}</td>
+                      <td className="p-2 text-right text-gray-400">{d.temp_corregida_11pm?.toFixed(2) ?? '-'}</td>
+                      <td className="p-2 text-right text-blue-300 font-medium">{d.combinado_11pm?.toFixed(2) ?? '-'}°C</td>
+                      <td className={`p-2 text-right font-medium ${color11}`}>{d.error_11pm !== null ? d.error_11pm.toFixed(3) + '°C' : '-'}</td>
+                      <td className={`p-2 text-right font-bold ${ganadorClass}`}>
+                        {d.gana === '10PM' ? '10PM ✅' : d.gana === '11PM' ? '11PM ✅' : d.gana === 'EMPATE' ? '=' : '-'}
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+          {/* City summary footer */}
+          <div className="p-3 border-t border-gray-700/30 bg-slate-800/30">
+            <div className="grid grid-cols-4 gap-2 text-xs text-center">
+              <div><span className="text-gray-500">Gana 10PM:</span> <span className="text-amber-400 font-bold">{selected.total_gana_10pm}</span></div>
+              <div><span className="text-gray-500">Gana 11PM:</span> <span className="text-blue-400 font-bold">{selected.total_gana_11pm}</span></div>
+              <div><span className="text-gray-500">Empates:</span> <span className="text-gray-400 font-bold">{selected.total_empate}</span></div>
+              <div>
+                <span className="text-gray-500">Δ Error:</span>
+                <span className={selected.error_prom_10pm !== null && selected.error_prom_11pm !== null
+                  ? (selected.error_prom_10pm > selected.error_prom_11pm ? ' text-emerald-400' : ' text-red-400')
+                  : ' text-gray-400'}>
+                  {' '}{selected.error_prom_10pm !== null && selected.error_prom_11pm !== null
+                    ? ((selected.error_prom_10pm - selected.error_prom_11pm) >= 0 ? '+' : '') + (selected.error_prom_10pm - selected.error_prom_11pm).toFixed(3) + '°C'
+                    : '-'}
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function MejoraContinua() {
   const [ciudadesData, setCiudadesData] = useState<Record<string, CityMejoraResult> | null>(null)
   const [loading, setLoading] = useState(true)
@@ -408,10 +641,19 @@ export default function MejoraContinua() {
   const [daysLimit, setDaysLimit] = useState(60)
   const [subView, setSubView] = useState<SubView>('analisis')
 
+  // Nowcast comparison state
+  const [nowcastData, setNowcastData] = useState<Record<string, NowcastCityResult> | null>(null)
+  const [nowcastLoading, setNowcastLoading] = useState(false)
+  const [nowcastError, setNowcastError] = useState<string | null>(null)
+
   const allSlugs = CIUDADES_ASIA.map(c => c.slug)
 
   useEffect(() => {
-    loadData()
+    if (subView === 'backtest_nowcast') {
+      loadNowcast()
+    } else {
+      loadData()
+    }
   }, [daysLimit])
 
   async function loadData() {
@@ -426,6 +668,21 @@ export default function MejoraContinua() {
       setError((e as Error).message)
     } finally {
       setLoading(false)
+    }
+  }
+
+  async function loadNowcast() {
+    setNowcastLoading(true)
+    setNowcastError(null)
+    try {
+      const resp = await fetch(`/api/backtest-nowcast?dias=${daysLimit}`)
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+      const json = await resp.json()
+      setNowcastData(json.ciudades)
+    } catch (e) {
+      setNowcastError((e as Error).message)
+    } finally {
+      setNowcastLoading(false)
     }
   }
 
@@ -532,30 +789,42 @@ export default function MejoraContinua() {
           >
             🔄 Pipeline Comparativo
           </button>
+          <button
+            onClick={() => setSubView('backtest_nowcast')}
+            className={`rounded-lg px-4 py-2 text-sm font-medium transition ${
+              subView === 'backtest_nowcast'
+                ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/20'
+                : 'bg-slate-700 text-gray-300 hover:bg-slate-600'
+            }`}
+          >
+            ⏱ Nowcast 10PM vs 11PM
+          </button>
         </div>
 
-        {/* Controls - only show in análisis view */}
-        {subView === 'analisis' && (
+        {/* Controls */}
+        {(subView === 'analisis' || subView === 'backtest_nowcast') && (
           <>
             <div className="flex flex-wrap gap-3 items-end">
-              <div>
-                <label className="block text-xs text-gray-500 mb-1">Ciudad</label>
-                <select
-                  value={ciudadSlug}
-                  onChange={e => setCiudadSlug(e.target.value)}
-                  className="rounded-lg bg-slate-700 border border-gray-600 px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
-                >
-                  <option value="todas">Todas las ciudades</option>
-                  {CIUDADES_ASIA.map(c => (
-                    <option key={c.slug} value={c.slug}>{c.nombre}</option>
-                  ))}
-                </select>
-              </div>
+              {subView === 'analisis' && (
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">Ciudad</label>
+                  <select
+                    value={ciudadSlug}
+                    onChange={e => setCiudadSlug(e.target.value)}
+                    className="rounded-lg bg-slate-700 border border-gray-600 px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
+                  >
+                    <option value="todas">Todas las ciudades</option>
+                    {CIUDADES_ASIA.map(c => (
+                      <option key={c.slug} value={c.slug}>{c.nombre}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
               <div>
                 <label className="block text-xs text-gray-500 mb-1">Días históricos</label>
                 <select
                   value={daysLimit}
-                  onChange={e => { setDaysLimit(Number(e.target.value)); loadData() }}
+                  onChange={e => { setDaysLimit(Number(e.target.value)); }}
                   className="rounded-lg bg-slate-700 border border-gray-600 px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
                 >
                   <option value={30}>30 días</option>
@@ -565,7 +834,7 @@ export default function MejoraContinua() {
                 </select>
               </div>
               <button
-                onClick={loadData}
+                onClick={subView === 'backtest_nowcast' ? loadNowcast : loadData}
                 disabled={loading}
                 className="rounded-lg bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-500 transition disabled:opacity-50"
               >
@@ -573,26 +842,57 @@ export default function MejoraContinua() {
               </button>
             </div>
 
-            <div className="flex flex-wrap gap-2 mt-4">
-              {MEJORA_KEYS.map(key => (
-                <button
-                  key={key}
-                  onClick={() => setMejoraKey(key)}
-                  className={`rounded-lg px-4 py-2 text-sm font-medium transition ${
-                    mejoraKey === key
-                      ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-600/20'
-                      : 'bg-slate-700 text-gray-300 hover:bg-slate-600'
-                  }`}
-                >
-                  {MEJORA_LABELS[key]}
-                </button>
-              ))}
-            </div>
+            {subView === 'analisis' && (
+              <div className="flex flex-wrap gap-2 mt-4">
+                {MEJORA_KEYS.map(key => (
+                  <button
+                    key={key}
+                    onClick={() => setMejoraKey(key)}
+                    className={`rounded-lg px-4 py-2 text-sm font-medium transition ${
+                      mejoraKey === key
+                        ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-600/20'
+                        : 'bg-slate-700 text-gray-300 hover:bg-slate-600'
+                    }`}
+                  >
+                    {MEJORA_LABELS[key]}
+                  </button>
+                ))}
+              </div>
+            )}
           </>
         )}
       </div>
 
       {subView === 'pipeline' && <PipelineView />}
+
+      {subView === 'backtest_nowcast' && (
+        <>
+          {nowcastError && (
+            <div className="rounded-xl bg-red-500/10 border border-red-500/20 p-4 text-sm text-red-400">⚠️ {nowcastError}</div>
+          )}
+
+          {nowcastLoading && (
+            <div className="text-center py-8 text-gray-400 text-sm">
+              <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-gray-400 border-t-emerald-400 mr-2" />
+              Comparando 10PM vs 11PM para todas las ciudades...
+            </div>
+          )}
+
+          {!nowcastLoading && nowcastData && Object.keys(nowcastData).length === 0 && (
+            <div className="rounded-xl bg-slate-800/50 border border-gray-700/30 p-8 text-center text-gray-400 text-sm">
+              No hay suficientes datos con doble registro en la ventana 9PM-midnight UTC para comparar.
+            </div>
+          )}
+
+          {!nowcastLoading && nowcastData && Object.keys(nowcastData).length > 0 && (
+            <NowcastView
+              data={nowcastData}
+              ciudadSlug={ciudadSlug}
+              setCiudadSlug={setCiudadSlug}
+            />
+          )}
+        </>
+      )}
 
       {subView === 'analisis' && (
         <>
