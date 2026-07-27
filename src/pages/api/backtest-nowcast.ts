@@ -93,10 +93,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const groups = new Map<string, { fecha_ejecucion: string; temp_corregida: number }[]>()
 
     for (const e of rawEntries) {
-      const d = new Date(e.fecha_ejecucion)
-      const utcHour = d.getUTCHours()
-      if (utcHour < 1 || utcHour > 4) continue
-
       const key = `${e.slug}|${e.fecha_objetivo}`
       if (!groups.has(key)) groups.set(key, [])
       groups.get(key)!.push({
@@ -105,7 +101,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       })
     }
 
-    const bySlug = new Map<string, { fecha_objetivo: string; earliest: { fecha_ejecucion: string; temp_corregida: number }; latest: { fecha_ejecucion: string; temp_corregida: number } }[]>()
+    const bySlug = new Map<string, { fecha_objetivo: string; earlier: { fecha_ejecucion: string; temp_corregida: number }; latest: { fecha_ejecucion: string; temp_corregida: number } }[]>()
 
     Array.from(groups.entries()).forEach(([key, entries]) => {
       if (entries.length < 2) return
@@ -113,11 +109,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       const [slug, fecha_objetivo] = key.split('|')
       entries.sort((a, b) => a.fecha_ejecucion.localeCompare(b.fecha_ejecucion))
 
-      const earliest = entries[0]
+      // Take the last two records for this target (most recent updates)
+      const earlier = entries[entries.length - 2]
       const latest = entries[entries.length - 1]
 
       if (!bySlug.has(slug)) bySlug.set(slug, [])
-      bySlug.get(slug)!.push({ fecha_objetivo, earliest, latest })
+      bySlug.get(slug)!.push({ fecha_objetivo, earlier, latest })
     })
 
     // Get forecast history for mejora corrections + real temps
@@ -180,7 +177,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
       for (const day of days) {
         const tempReal = reals.get(day.fecha_objetivo) ?? null
-        const tc10 = day.earliest.temp_corregida
+        const tc10 = day.earlier.temp_corregida
         const tc11 = day.latest.temp_corregida
 
         const correction = corrections.get(day.fecha_objetivo) ?? 0
@@ -210,7 +207,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           temp_real: tempReal,
           temp_corregida_10pm: round2(tc10),
           temp_corregida_11pm: round2(tc11),
-          hora_10pm: day.earliest.fecha_ejecucion,
+          hora_10pm: day.earlier.fecha_ejecucion,
           hora_11pm: day.latest.fecha_ejecucion,
           combinado_10pm: round2(comb10),
           combinado_11pm: round2(comb11),
