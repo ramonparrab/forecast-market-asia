@@ -601,6 +601,8 @@ function NowcastView({ data, ciudadSlug, setCiudadSlug }: {
                   const color11 = d.error_10pm !== null && d.error_11pm !== null
                     ? (d.error_11pm < d.error_10pm ? 'text-blue-400' : 'text-gray-500')
                     : 'text-gray-500'
+                  const combinado10Class = d.gana === '10PM' ? 'text-green-400 font-bold' : 'text-amber-300 font-medium'
+                  const combinado11Class = d.gana === '11PM' ? 'text-green-400 font-bold' : 'text-blue-300 font-medium'
                   const ganadorClass = d.gana === '10PM' ? 'text-amber-400' : d.gana === '11PM' ? 'text-blue-400' : 'text-gray-500'
                   return (
                     <tr key={d.fecha_objetivo} className={`border-t border-gray-800 hover:bg-slate-800/30 transition ${
@@ -609,10 +611,10 @@ function NowcastView({ data, ciudadSlug, setCiudadSlug }: {
                       <td className="p-2 text-gray-300">{d.fecha_objetivo}</td>
                       <td className="p-2 text-right text-yellow-400 font-medium">{d.temp_real !== null ? d.temp_real.toFixed(1) : '-'}°C</td>
                       <td className="p-2 text-right text-gray-400">{d.temp_corregida_10pm?.toFixed(2) ?? '-'}</td>
-                      <td className="p-2 text-right text-amber-300 font-medium">{d.combinado_10pm?.toFixed(2) ?? '-'}°C</td>
+                      <td className={`p-2 text-right ${combinado10Class}`}>{d.combinado_10pm?.toFixed(2) ?? '-'}°C</td>
                       <td className={`p-2 text-right font-medium ${color10}`}>{d.error_10pm !== null ? d.error_10pm.toFixed(3) + '°C' : '-'}</td>
                       <td className="p-2 text-right text-gray-400">{d.temp_corregida_11pm?.toFixed(2) ?? '-'}</td>
-                      <td className="p-2 text-right text-blue-300 font-medium">{d.combinado_11pm?.toFixed(2) ?? '-'}°C</td>
+                      <td className={`p-2 text-right ${combinado11Class}`}>{d.combinado_11pm?.toFixed(2) ?? '-'}°C</td>
                       <td className={`p-2 text-right font-medium ${color11}`}>{d.error_11pm !== null ? d.error_11pm.toFixed(3) + '°C' : '-'}</td>
                       <td className={`p-2 text-right font-bold ${ganadorClass}`}>
                         {d.gana === '10PM' ? '10PM ✅' : d.gana === '11PM' ? '11PM ✅' : d.gana === 'EMPATE' ? '=' : '-'}
