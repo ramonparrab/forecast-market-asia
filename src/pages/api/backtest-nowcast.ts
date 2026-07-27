@@ -106,22 +106,19 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     if (!allFh || allFh.length === 0) return res.status(200).json({ ciudades: {} })
 
     // Separate historical (with temp_real) and pending (without temp_real) per slug
-    const fhBySlug: Record<string, { historical: any[]; pending: any | null }> = {}
+    const fhBySlug: Record<string, { historical: any[]; pending: any[] }> = {}
     for (const r of allFh as any[]) {
-      if (!fhBySlug[r.slug]) fhBySlug[r.slug] = { historical: [], pending: null }
+      if (!fhBySlug[r.slug]) fhBySlug[r.slug] = { historical: [], pending: [] }
       const bucket = fhBySlug[r.slug]
       if (r.temp_real != null) {
         bucket.historical.push(r)
       } else {
-        if (!bucket.pending || r.id > bucket.pending.id) {
-          bucket.pending = r
-        }
+        bucket.pending.push(r)
       }
     }
 
     // ============ 2) Build FH lookup: (slug|fecha) -> { tc, real } ============
     const fhMap: Record<string, { tc: number; real: number | null }> = {}
-    const slugPending: Record<string, { fecha: string; tc: number }> = {}
 
     Object.keys(fhBySlug).forEach(slug => {
       const bucket = fhBySlug[slug]
@@ -135,9 +132,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       Object.keys(seen).forEach(fecha => {
         fhMap[slug + '|' + fecha] = { tc: seen[fecha].temp_corregida, real: seen[fecha].temp_real }
       })
-      if (bucket.pending) {
-        slugPending[slug] = { fecha: bucket.pending.fecha_objetivo, tc: bucket.pending.temp_corregida }
-      }
+      // Add all pending (keep latest id per fecha_objetivo to deduplicate)
+      const pendSeen: Record<string, any> = {}
+      bucket.pending.forEach((r: any) => {
+        if (!pendSeen[r.fecha_objetivo] || r.id > pendSeen[r.fecha_objetivo].id) {
+          pendSeen[r.fecha_objetivo] = r
+        }
+      })
+      Object.keys(pendSeen).forEach(fecha => {
+        fhMap[slug + '|' + fecha] = { tc: pendSeen[fecha].temp_corregida, real: null }
+      })
     })
 
     // Filter by daysLimit
@@ -147,16 +151,19 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       const daysAgo = Math.floor((endDate.getTime() - new Date(fecha + 'T12:00:00').getTime()) / (1000 * 60 * 60 * 24))
       if (daysAgo >= 0 && daysAgo <= daysLimit) {
         if (!validTargets[slug]) validTargets[slug] = []
-        validTargets[slug].push(fecha)
+        if (validTargets[slug].indexOf(fecha) === -1) {
+          validTargets[slug].push(fecha)
+        }
       }
     })
-    // Also include pending targets
-    Object.keys(slugPending).forEach(slug => {
-      const p = slugPending[slug]
-      if (!validTargets[slug]) validTargets[slug] = []
-      if (validTargets[slug].indexOf(p.fecha) === -1) {
-        fhMap[slug + '|' + p.fecha] = { tc: p.tc, real: null }
-        validTargets[slug].push(p.fecha)
+    // Always include pending dates (no temp_real), even if in the future
+    Object.keys(fhMap).forEach(key => {
+      const [slug, fecha] = key.split('|')
+      if (fhMap[key].real === null) {
+        if (!validTargets[slug]) validTargets[slug] = []
+        if (validTargets[slug].indexOf(fecha) === -1) {
+          validTargets[slug].push(fecha)
+        }
       }
     })
 
