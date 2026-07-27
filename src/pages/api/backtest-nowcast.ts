@@ -290,19 +290,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       }
     })
 
-    // Debug: log corrections for chongqing
-    const debugInfo: any = {}
-    if (fhBySlug['chongqing']) {
-      const b = fhBySlug['chongqing']
-      const cr = slugCorrections['chongqing']
-      debugInfo.chongqing = {
-        historicalCount: b.historical.length,
-        pending: b.pending ? { fecha: b.pending.fecha_objetivo, tc: b.pending.temp_corregida } : null,
-        correctionJuly27: cr ? cr['2026-07-27'] ?? null : null,
-        allCorrections: cr ? Object.keys(cr).map(f => f + ':' + cr[f].toFixed(3)).join(', ') : 'none',
-      }
-    }
-    return res.status(200).json({ ciudades, _debug: debugInfo })
+    return res.status(200).json({ ciudades })
   } catch (error) {
     console.error('[backtest-nowcast]', error)
     return res.status(500).json({ error: (error as Error).message })
