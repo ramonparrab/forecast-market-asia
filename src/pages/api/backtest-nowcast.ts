@@ -52,83 +52,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const startDate = new Date()
     startDate.setDate(startDate.getDate() - daysLimit - 3)
 
-    // 1) Read daily_runs (they have multiple records per target date)
-    const { data: runs, error: runsError } = await client
-      .from('daily_runs' as any)
-      .select('id, fecha_ejecucion, fecha_objetivo, resultados')
-      .gte('fecha_ejecucion', startDate.toISOString())
-      .order('fecha_ejecucion', { ascending: true } as any)
-
-    if (runsError) return res.status(500).json({ error: runsError.message })
-    if (!runs || runs.length === 0) return res.status(200).json({ ciudades: {} })
-
-    const allSlugs = slugFilter ? [slugFilter] : CIUDADES_ASIA.map(c => c.slug)
-    const slugNames = new Map(CIUDADES_ASIA.map(c => [c.slug, c.nombre]))
-
-    // 2) Parse resultados JSON and extract temp_corregida from forecast
-    const rawEntries: { id: number; fecha_ejecucion: string; slug: string; fecha_objetivo: string; temp_corregida: number }[] = []
-
-    for (const run of runs) {
-      const fechaObjetivo = run.fecha_objetivo as string
-      if (!fechaObjetivo) continue
-
-      const objDate = new Date(fechaObjetivo + 'T12:00:00')
-      const daysAgo = Math.floor((endDate.getTime() - objDate.getTime()) / (1000 * 60 * 60 * 24))
-      if (daysAgo < 0 || daysAgo > daysLimit) continue
-
-      let parsed: any[]
-      try {
-        parsed = JSON.parse(run.resultados)
-      } catch {
-        continue
-      }
-      if (!Array.isArray(parsed)) continue
-
-      for (const slug of allSlugs) {
-        const cityData = parsed.find((c: any) => c.slug === slug)
-        const tc = cityData?.forecast?.temp_corregida
-        if (tc != null) {
-          rawEntries.push({
-            id: run.id,
-            fecha_ejecucion: run.fecha_ejecucion,
-            slug,
-            fecha_objetivo: fechaObjetivo,
-            temp_corregida: Number(tc),
-          })
-        }
-      }
-    }
-
-    if (rawEntries.length === 0) return res.status(200).json({ ciudades: {} })
-
-    // 3) Group by (slug, fecha_objetivo) and take first vs last record
-    const groups = new Map<string, { id: number; fecha_ejecucion: string; temp_corregida: number }[]>()
-
-    for (const e of rawEntries) {
-      const key = `${e.slug}|${e.fecha_objetivo}`
-      if (!groups.has(key)) groups.set(key, [])
-      groups.get(key)!.push({ id: e.id, fecha_ejecucion: e.fecha_ejecucion, temp_corregida: e.temp_corregida })
-    }
-
-    const bySlug = new Map<string, { fecha_objetivo: string; first: { id: number; fecha_ejecucion: string; temp_corregida: number }; last: { id: number; fecha_ejecucion: string; temp_corregida: number } }[]>()
-
-    Array.from(groups.entries()).forEach(([key, entries]) => {
-      if (entries.length < 2) return
-
-      const [slug, fecha_objetivo] = key.split('|')
-      entries.sort((a, b) => a.id - b.id)
-
-      // First record = pre-cron; last = post-cron (latest update with bias applied)
-      const first = entries[0]
-      const last = entries[entries.length - 1]
-
-      if (!bySlug.has(slug)) bySlug.set(slug, [])
-      bySlug.get(slug)!.push({ fecha_objetivo, first, last })
-    })
-
-    if (bySlug.size === 0) return res.status(200).json({ ciudades: {} })
-
-    // 4) Get mejora corrections from forecast_history (deduplicated, same as mejora-continua)
+    // ============ 1) forecast_history = canonical source for 11PM + temp_real ============
     let fhQuery = client
       .from('forecast_history' as any)
       .select('id, slug, fecha_objetivo, temp_corregida, temp_real, error')
@@ -139,32 +63,87 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     const { data: fhRecords } = await fhQuery
+    if (!fhRecords || fhRecords.length === 0) return res.status(200).json({ ciudades: {} })
 
-    const fhBySlug = new Map<string, any[]>()
-    for (const r of (fhRecords as any[]) ?? []) {
-      if (!fhBySlug.has(r.slug)) fhBySlug.set(r.slug, [])
-      fhBySlug.get(r.slug)!.push(r)
+    // Deduplicate FH: keep latest id per (slug, fecha_objetivo)
+    const fhBySlug = new Map<string, Map<string, any>>()
+    for (const r of fhRecords as any[]) {
+      if (!fhBySlug.has(r.slug)) fhBySlug.set(r.slug, new Map())
+      const byDate = fhBySlug.get(r.slug)!
+      if (!byDate.has(r.fecha_objetivo) || r.id > byDate.get(r.fecha_objetivo).id) {
+        byDate.set(r.fecha_objetivo, r)
+      }
     }
 
-    const slugCorrections = new Map<string, Map<string, number>>()
-    const slugReals = new Map<string, Map<string, number>>()
+    const allSlugs = slugFilter ? [slugFilter] : CIUDADES_ASIA.map(c => c.slug)
+    const slugNames = new Map(CIUDADES_ASIA.map(c => [c.slug, c.nombre]))
 
-    Array.from(fhBySlug.entries()).forEach(([slug, records]) => {
-      const seen = new Map<string, any>()
-      for (const r of records) {
-        const key = r.fecha_objetivo
-        if (!seen.has(key) || r.id > seen.get(key).id) {
-          seen.set(key, r)
+    // ============ 2) Build lookup: (slug, fecha_objetivo) -> FH temp_corregida ============
+    const fhTc = new Map<string, number>()
+    const fhReals = new Map<string, number>()
+    for (const [slug, byDate] of fhBySlug) {
+      for (const [fecha, r] of byDate) {
+        const key = slug + '|' + fecha
+        fhTc.set(key, r.temp_corregida)
+        fhReals.set(key, r.temp_real)
+      }
+    }
+
+    // Filter targets within daysLimit
+    const validTargets = new Map<string, string[]>() // slug -> fecha[]
+    for (const [key] of fhTc) {
+      const [slug, fecha] = key.split('|')
+      const objDate = new Date(fecha + 'T12:00:00')
+      const daysAgo = Math.floor((endDate.getTime() - objDate.getTime()) / (1000 * 60 * 60 * 24))
+      if (daysAgo >= 0 && daysAgo <= daysLimit) {
+        if (!validTargets.has(slug)) validTargets.set(slug, [])
+        validTargets.get(slug)!.push(fecha)
+      }
+    }
+
+    // ============ 3) Read daily_runs: get FIRST record per (slug, fecha_objetivo) ============
+    const { data: runs } = await client
+      .from('daily_runs' as any)
+      .select('id, fecha_ejecucion, fecha_objetivo, resultados')
+      .gte('fecha_ejecucion', startDate.toISOString())
+      .order('fecha_ejecucion', { ascending: true } as any)
+
+    // Map: (slug|fecha) -> first record from daily_runs
+    const drFirst = new Map<string, { id: number; fecha_ejecucion: string; tc: number }>()
+
+    for (const run of (runs as any[]) ?? []) {
+      const fo = run.fecha_objetivo as string
+      if (!fo) continue
+      let parsed: any[]
+      try { parsed = JSON.parse(run.resultados) } catch { continue }
+      if (!Array.isArray(parsed)) continue
+
+      for (const slug of allSlugs) {
+        const key = slug + '|' + fo
+        if (drFirst.has(key)) continue // already have first record for this pair
+        if (!fhTc.has(key)) continue // not a target we care about
+
+        const cityData = parsed.find((c: any) => c.slug === slug)
+        const tc = cityData?.forecast?.temp_corregida
+        if (tc != null) {
+          drFirst.set(key, {
+            id: run.id,
+            fecha_ejecucion: run.fecha_ejecucion,
+            tc: Number(tc),
+          })
         }
       }
-      const sorted = Array.from(seen.values()).sort((a, b) =>
+    }
+
+    if (drFirst.size === 0) return res.status(200).json({ ciudades: {} })
+
+    // ============ 4) Compute mejora corrections from FH (same as mejora-continua) ============
+    const slugCorrections = new Map<string, Map<string, number>>()
+
+    for (const [slug, records] of fhBySlug) {
+      const sorted = Array.from(records.values()).sort((a, b) =>
         a.fecha_objetivo.localeCompare(b.fecha_objetivo)
       )
-
-      const reals = new Map<string, number>()
-      for (const r of sorted) reals.set(r.fecha_objetivo, r.temp_real)
-      slugReals.set(slug, reals)
-
       try {
         const result = computeAllMejoras(sorted, slugNames.get(slug) || slug)
         const corrections = new Map<string, number>()
@@ -173,25 +152,27 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         }
         slugCorrections.set(slug, corrections)
       } catch (e) {
-        console.error(`Error computing mejora for ${slug}:`, e)
+        console.error('Error computing mejora for', slug, e)
       }
-    })
+    }
 
-    // 5) Build final results
+    // ============ 5) Build results ============
     const ciudades: Record<string, NowcastCityResult> = {}
 
-    Array.from(bySlug.entries()).forEach(([slug, days]) => {
-      const corrections = slugCorrections.get(slug) || new Map()
-      const reals = slugReals.get(slug) || new Map()
-
+    for (const [slug, fechas] of validTargets) {
       const resultDays: NowcastDay[] = []
+      const corrections = slugCorrections.get(slug) || new Map()
 
-      for (const day of days) {
-        const tempReal = reals.get(day.fecha_objetivo) ?? null
-        const tcFirst = day.first.temp_corregida
-        const tcLast = day.last.temp_corregida
+      for (const fecha of fechas) {
+        const key = slug + '|' + fecha
+        const first = drFirst.get(key)
+        if (!first) continue
 
-        const correction = corrections.get(day.fecha_objetivo) ?? 0
+        const tcFirst = first.tc
+        const tcLast = fhTc.get(key)!
+        const tempReal = fhReals.get(key) ?? null
+
+        const correction = corrections.get(fecha) ?? 0
         const combFirst = tcFirst + correction
         const combLast = tcLast + correction
 
@@ -214,12 +195,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         }
 
         resultDays.push({
-          fecha_objetivo: day.fecha_objetivo,
+          fecha_objetivo: fecha,
           temp_real: tempReal,
           temp_corregida_10pm: round2(tcFirst),
           temp_corregida_11pm: round2(tcLast),
-          hora_10pm: day.first.fecha_ejecucion,
-          hora_11pm: day.last.fecha_ejecucion,
+          hora_10pm: first.fecha_ejecucion,
+          hora_11pm: null,
           combinado_10pm: round2(combFirst),
           combinado_11pm: round2(combLast),
           error_10pm: errorFirst,
@@ -228,7 +209,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         })
       }
 
-      if (resultDays.length === 0) return
+      if (resultDays.length === 0) continue
 
       resultDays.sort((a, b) => a.fecha_objetivo.localeCompare(b.fecha_objetivo))
 
@@ -258,7 +239,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         error_prom_10pm: countErr > 0 ? round2(sumErr10 / countErr) : null,
         error_prom_11pm: countErr > 0 ? round2(sumErr11 / countErr) : null,
       }
-    })
+    }
 
     return res.status(200).json({ ciudades })
   } catch (error) {
