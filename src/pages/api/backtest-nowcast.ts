@@ -16,7 +16,7 @@ export interface NowcastDay {
   combinado_11pm: number | null
   error_10pm: number | null
   error_11pm: number | null
-  gana: '10PM' | '11PM' | 'EMPATE' | null
+  gana: '10PM' | '11PM' | 'EMPATE' | '10PM/11PM' | null
   pred_gana?: '10PM' | '11PM' | null
   pred_acierto?: boolean | null
 }
@@ -277,7 +277,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           const a11 = r11 === rReal
 
           if (a10 && a11) {
-            gana = 'EMPATE'
+            gana = '10PM/11PM'
           } else if (a10 && !a11) {
             gana = '10PM'
           } else if (!a10 && a11) {
@@ -296,7 +296,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         const prevReal = prevFhVal?.real ?? null
         const predGana = computeRecommendation(tcFirst, tcLast, fecha, slug, prevReal)
         let predAcierto: boolean | null = null
-        if (predGana && gana) {
+        if (predGana && gana === '10PM/11PM') {
+          predAcierto = true
+        } else if (predGana && gana) {
           predAcierto = predGana === gana
         } else if (predGana && gana === null && tempReal !== null) {
           predAcierto = false
@@ -327,9 +329,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
       for (let di = 0; di < resultDays.length; di++) {
         const d = resultDays[di]
-        if (d.gana === '10PM') g10++
-        else if (d.gana === '11PM') g11++
-        else if (d.gana === 'EMPATE') emp++
+        if (d.gana === '10PM' || d.gana === '10PM/11PM') g10++
+        if (d.gana === '11PM' || d.gana === '10PM/11PM') g11++
+        if (d.gana === 'EMPATE') emp++
 
         if (d.error_10pm !== null && d.error_11pm !== null) {
           sumErr10 += d.error_10pm

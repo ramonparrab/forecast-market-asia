@@ -15,7 +15,7 @@ interface NowcastDay {
   combinado_11pm: number | null
   error_10pm: number | null
   error_11pm: number | null
-  gana: '10PM' | '11PM' | 'EMPATE' | null
+  gana: '10PM' | '11PM' | 'EMPATE' | '10PM/11PM' | null
   pred_gana?: '10PM' | '11PM' | null
   pred_acierto?: boolean | null
 }
@@ -651,14 +651,15 @@ function NowcastView({ data, ciudadSlug, setCiudadSlug }: {
                   const color11 = d.error_10pm !== null && d.error_11pm !== null
                     ? (d.error_11pm < d.error_10pm ? 'text-blue-400' : 'text-gray-500')
                     : 'text-gray-500'
-                  const combinado10Class = d.gana === '10PM' ? 'text-green-400 font-bold' : 'text-amber-300 font-medium'
-                  const combinado11Class = d.gana === '11PM' ? 'text-green-400 font-bold' : 'text-blue-300 font-medium'
-                  const ganadorClass = d.gana === '10PM' ? 'text-amber-400' : d.gana === '11PM' ? 'text-blue-400' : 'text-gray-500'
+                  const ambosAcertaron = d.gana === '10PM/11PM'
+                  const combinado10Class = d.gana === '10PM' || ambosAcertaron ? 'text-green-400 font-bold' : 'text-amber-300 font-medium'
+                  const combinado11Class = d.gana === '11PM' || ambosAcertaron ? 'text-green-400 font-bold' : 'text-blue-300 font-medium'
+                  const ganadorClass = d.gana === '10PM' ? 'text-amber-400' : d.gana === '11PM' ? 'text-blue-400' : ambosAcertaron ? 'text-white' : 'text-gray-500'
                   const predClass = d.pred_gana === '10PM' ? 'text-amber-400' : d.pred_gana === '11PM' ? 'text-blue-400' : 'text-gray-500'
                   const aciertoClass = d.pred_acierto === true ? 'text-green-400' : d.pred_acierto === false ? 'text-red-400' : 'text-gray-500'
                   return (
                     <tr key={d.fecha_objetivo} className={`border-t border-gray-800 hover:bg-slate-800/30 transition ${
-                      d.gana === '10PM' ? 'bg-amber-500/5' : d.gana === '11PM' ? 'bg-blue-500/5' : ''
+                      d.gana === '10PM' ? 'bg-amber-500/5' : d.gana === '11PM' ? 'bg-blue-500/5' : ambosAcertaron ? 'bg-green-500/10' : ''
                     }`}>
                       <td className="p-2 text-gray-300">{d.fecha_objetivo}</td>
                       <td className="p-2 text-right text-yellow-400 font-medium">{d.temp_real !== null ? d.temp_real.toFixed(1) : '-'}°C</td>
@@ -669,7 +670,7 @@ function NowcastView({ data, ciudadSlug, setCiudadSlug }: {
                       <td className={`p-2 text-right ${combinado11Class}`}>{d.combinado_11pm?.toFixed(2) ?? '-'}°C</td>
                       <td className={`p-2 text-right font-medium ${color11}`}>{d.error_11pm !== null ? d.error_11pm.toFixed(3) + '°C' : '-'}</td>
                       <td className={`p-2 text-right font-bold ${ganadorClass}`}>
-                        {d.gana === '10PM' ? '10PM ✅' : d.gana === '11PM' ? '11PM ✅' : d.gana === 'EMPATE' ? '=' : '-'}
+                        {d.gana === '10PM' ? '10PM ✅' : d.gana === '11PM' ? '11PM ✅' : ambosAcertaron ? '10PM/11PM' : '-'}
                       </td>
                       {selected.slug === 'chongqing' && (
                         <td className={`p-2 text-right font-bold ${predClass}`}>
@@ -692,7 +693,8 @@ function NowcastView({ data, ciudadSlug, setCiudadSlug }: {
             <div className="grid grid-cols-4 gap-2 text-xs text-center">
               <div><span className="text-gray-500">Gana 10PM:</span> <span className="text-amber-400 font-bold">{selected.total_gana_10pm}</span></div>
               <div><span className="text-gray-500">Gana 11PM:</span> <span className="text-blue-400 font-bold">{selected.total_gana_11pm}</span></div>
-              <div><span className="text-gray-500">Empates:</span> <span className="text-gray-400 font-bold">{selected.total_empate}</span></div>
+              <div><span className="text-gray-500">Ambos:</span> <span className="text-green-400 font-bold">{selected.days.filter(d => d.gana === '10PM/11PM').length}</span></div>
+              <div><span className="text-gray-500">Ninguno:</span> <span className="text-gray-400 font-bold">{selected.days.filter(d => d.gana === null && d.temp_real !== null).length}</span></div>
               <div>
                 <span className="text-gray-500">Δ Error:</span>
                 <span className={selected.error_prom_10pm !== null && selected.error_prom_11pm !== null
