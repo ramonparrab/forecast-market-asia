@@ -227,21 +227,21 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         console.error('Error computing mejora for', slug, e)
       }
 
-      // computeCurrentForecast for pending date
-      if (bucket.pending) {
+      // computeCurrentForecast for each pending date
+      bucket.pending.forEach((p: any) => {
         try {
           const cf = computeCurrentForecast(sorted, {
             slug,
-            temp_corregida: bucket.pending.temp_corregida,
-            fecha_objetivo: bucket.pending.fecha_objetivo,
+            temp_corregida: p.temp_corregida,
+            fecha_objetivo: p.fecha_objetivo,
           } as any, slugNames[slug] || slug)
           if (cf) {
-            corrections[bucket.pending.fecha_objetivo] = cf.combinado - bucket.pending.temp_corregida
+            corrections[p.fecha_objetivo] = cf.combinado - p.temp_corregida
           }
         } catch (e) {
           console.error('Error computing current forecast for', slug, e)
         }
-      }
+      })
 
       slugCorrections[slug] = corrections
     })
