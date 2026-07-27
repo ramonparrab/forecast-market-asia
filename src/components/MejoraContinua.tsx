@@ -651,10 +651,10 @@ export default function MejoraContinua() {
   useEffect(() => {
     if (subView === 'backtest_nowcast') {
       loadNowcast()
-    } else {
+    } else if (subView === 'analisis') {
       loadData()
     }
-  }, [daysLimit])
+  }, [subView, daysLimit])
 
   async function loadData() {
     setLoading(true)
@@ -835,10 +835,10 @@ export default function MejoraContinua() {
               </div>
               <button
                 onClick={subView === 'backtest_nowcast' ? loadNowcast : loadData}
-                disabled={loading}
+                disabled={subView === 'backtest_nowcast' ? nowcastLoading : loading}
                 className="rounded-lg bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-500 transition disabled:opacity-50"
               >
-                {loading ? 'Cargando...' : '↻ Actualizar'}
+                {(subView === 'backtest_nowcast' ? nowcastLoading : loading) ? 'Cargando...' : '↻ Actualizar'}
               </button>
             </div>
 
