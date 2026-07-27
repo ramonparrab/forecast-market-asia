@@ -17,6 +17,8 @@ export interface NowcastDay {
   error_10pm: number | null
   error_11pm: number | null
   gana: '10PM' | '11PM' | 'EMPATE' | null
+  pred_gana?: '10PM' | '11PM' | null
+  pred_acierto?: boolean | null
 }
 
 export interface NowcastCityResult {
@@ -37,6 +39,37 @@ export interface BacktestNowcastResponse {
 
 function round2(v: number): number {
   return Math.round(v * 100) / 100
+}
+
+function computeRecommendation(
+  tc10: number,
+  tc11: number,
+  fecha_objetivo: string,
+  slug: string,
+): '10PM' | '11PM' | null {
+  // Only for chongqing
+  if (slug !== 'chongqing') return null
+
+  const diff = tc11 - tc10
+  const month = parseInt(fecha_objetivo.substring(5, 7), 10)
+
+  // R1: 11PM significantly warmer -> warming trend
+  if (diff > 1.5) return '11PM'
+  // R2: Extreme heat predicted by 10PM, 11PM slightly cooler -> corrects warm bias
+  if (tc10 >= 36 && diff < -0.3) return '11PM'
+  // R3: Rapid cooling (10PM < 33 but 11PM warms) -> 10PM
+  if (diff > 1.0 && tc10 < 33) return '10PM'
+  // R4: 11PM much cooler in Jul/Aug -> 10PM
+  if (diff < -1.0 && (month === 7 || month === 8)) return '10PM'
+  // R5: Stable model -> seasonal baseline
+  if (Math.abs(diff) < 1.5) {
+    if (month === 6 || month === 9 || month === 10 || month === 11) return '11PM'
+    if (month === 7 || month === 8) return '10PM'
+    return '11PM'
+  }
+  // Fallback
+  if (month === 7 || month === 8) return '10PM'
+  return '11PM'
 }
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
@@ -243,6 +276,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           }
         }
 
+        const predGana = computeRecommendation(tcFirst, tcLast, fecha, slug)
+        let predAcierto: boolean | null = null
+        if (predGana && gana && gana !== 'EMPATE') {
+          predAcierto = predGana === gana
+        }
+
         resultDays.push({
           fecha_objetivo: fecha,
           temp_real: tempReal,
@@ -254,6 +293,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           error_10pm: errorFirst,
           error_11pm: errorLast,
           gana,
+          pred_gana: predGana || undefined,
+          pred_acierto: predAcierto ?? undefined,
         })
       }
 

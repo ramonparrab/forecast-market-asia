@@ -16,6 +16,8 @@ interface NowcastDay {
   error_10pm: number | null
   error_11pm: number | null
   gana: '10PM' | '11PM' | 'EMPATE' | null
+  pred_gana?: '10PM' | '11PM' | null
+  pred_acierto?: boolean | null
 }
 
 interface NowcastCityResult {
@@ -567,6 +569,52 @@ function NowcastView({ data, ciudadSlug, setCiudadSlug }: {
         </div>
       )}
 
+      {/* Recommendation banner for Chongqing */}
+      {selected && selected.slug === 'chongqing' && (() => {
+        const last = selected.days[selected.days.length - 1]
+        if (!last || !last.pred_gana) return null
+        const isPending = last.temp_real === null
+        const recom = last.pred_gana
+        const recomValue = recom === '10PM' ? last.combinado_10pm : last.combinado_11pm
+        const otherValue = recom === '10PM' ? last.combinado_11pm : last.combinado_10pm
+        const diffValues = Math.abs((last.combinado_10pm || 0) - (last.combinado_11pm || 0))
+        const motivos: string[] = []
+        const dtc = (last.temp_corregida_11pm || 0) - (last.temp_corregida_10pm || 0)
+        if (dtc > 1.5) motivos.push('11PM detecta calentamiento rápido')
+        else if ((last.temp_corregida_10pm || 0) >= 36 && dtc < -0.3) motivos.push('Calor extremo, 11PM corrige sesgo cálido de 10PM')
+        else if (dtc > 1.0 && (last.temp_corregida_10pm || 0) < 33) motivos.push('Enfriamiento repentino, 10PM más estable')
+        else if ((last.temp_corregida_10pm || 0) >= 36) motivos.push('Calor extremo estable, 10PM históricamente mejor en Julio')
+        else motivos.push('Modelo estable, preferencia estacional')
+        return (
+          <div className={`rounded-xl border p-4 ${isPending ? 'bg-gradient-to-r from-purple-900/40 to-slate-800/40 border-purple-500/30' : 'bg-slate-800/30 border-gray-700/30'}`}>
+            <div className="flex items-start gap-3">
+              <span className="text-2xl">{isPending ? '🔮' : '📊'}</span>
+              <div className="flex-1">
+                <p className="text-sm font-semibold text-white">
+                  {isPending ? '🔮 Recomendación para mañana' : '📊 Resultado recomendación'}
+                  <span className="text-xs text-gray-500 ml-2">Chongqing</span>
+                </p>
+                <p className="text-lg font-bold mt-1" style={{color: recom === '10PM' ? '#fbbf24' : '#60a5fa'}}>
+                  {recom} Combinado ({recomValue?.toFixed(2) ?? '-'}°C)
+                  <span className="text-sm font-normal text-gray-400 ml-2">
+                    vs {recom === '10PM' ? '11PM' : '10PM'} ({otherValue?.toFixed(2) ?? '-'}°C, Δ={diffValues.toFixed(2)}°C)
+                  </span>
+                </p>
+                <p className="text-xs text-gray-400 mt-1">Motivo: {motivos.join(', ')}.</p>
+                {!isPending && last.pred_acierto !== undefined && (
+                  <p className={`text-xs font-bold mt-1 ${last.pred_acierto ? 'text-green-400' : 'text-red-400'}`}>
+                    {last.pred_acierto ? '✅ ¡Acertó la predicción!' : '❌ No acertó esta vez'}
+                  </p>
+                )}
+                {isPending && (
+                  <p className="text-xs text-gray-500 mt-1">Esperando temperatura real para verificar... Una vez cerrado el día, aquí mostrará si acertó.</p>
+                )}
+              </div>
+            </div>
+          </div>
+        )
+      })()}
+
       {/* Single city day-by-day table */}
       {selected && (
         <div className="rounded-xl bg-slate-800/50 border border-gray-700/30 overflow-hidden">
@@ -591,6 +639,8 @@ function NowcastView({ data, ciudadSlug, setCiudadSlug }: {
                   <th className="text-right p-2">11PM Combinado</th>
                   <th className="text-right p-2">Error 11PM</th>
                   <th className="text-right p-2">Ganador</th>
+                  {selected.slug === 'chongqing' && <th className="text-right p-2">Pred.</th>}
+                  {selected.slug === 'chongqing' && <th className="text-right p-2">¿Acertó?</th>}
                 </tr>
               </thead>
               <tbody>
@@ -604,6 +654,8 @@ function NowcastView({ data, ciudadSlug, setCiudadSlug }: {
                   const combinado10Class = d.gana === '10PM' ? 'text-green-400 font-bold' : 'text-amber-300 font-medium'
                   const combinado11Class = d.gana === '11PM' ? 'text-green-400 font-bold' : 'text-blue-300 font-medium'
                   const ganadorClass = d.gana === '10PM' ? 'text-amber-400' : d.gana === '11PM' ? 'text-blue-400' : 'text-gray-500'
+                  const predClass = d.pred_gana === '10PM' ? 'text-amber-400' : d.pred_gana === '11PM' ? 'text-blue-400' : 'text-gray-500'
+                  const aciertoClass = d.pred_acierto === true ? 'text-green-400' : d.pred_acierto === false ? 'text-red-400' : 'text-gray-500'
                   return (
                     <tr key={d.fecha_objetivo} className={`border-t border-gray-800 hover:bg-slate-800/30 transition ${
                       d.gana === '10PM' ? 'bg-amber-500/5' : d.gana === '11PM' ? 'bg-blue-500/5' : ''
@@ -619,6 +671,16 @@ function NowcastView({ data, ciudadSlug, setCiudadSlug }: {
                       <td className={`p-2 text-right font-bold ${ganadorClass}`}>
                         {d.gana === '10PM' ? '10PM ✅' : d.gana === '11PM' ? '11PM ✅' : d.gana === 'EMPATE' ? '=' : '-'}
                       </td>
+                      {selected.slug === 'chongqing' && (
+                        <td className={`p-2 text-right font-bold ${predClass}`}>
+                          {d.pred_gana ?? '-'}
+                        </td>
+                      )}
+                      {selected.slug === 'chongqing' && (
+                        <td className={`p-2 text-right font-bold ${aciertoClass}`}>
+                          {d.pred_acierto === true ? '✅' : d.pred_acierto === false ? '❌' : d.temp_real === null && d.pred_gana ? '⏳' : '-'}
+                        </td>
+                      )}
                     </tr>
                   )
                 })}
