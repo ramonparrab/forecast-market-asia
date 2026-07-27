@@ -54,7 +54,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     const { data: runs, error: runsError } = await client
       .from('daily_runs' as any)
-      .select('id, fecha_ejecucion, resultados')
+      .select('id, fecha_ejecucion, fecha_objetivo, resultados')
       .gte('fecha_ejecucion', startDate.toISOString())
       .order('fecha_ejecucion', { ascending: true } as any)
 
@@ -67,22 +67,30 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const rawEntries: { fecha_ejecucion: string; slug: string; fecha_objetivo: string; temp_corregida: number }[] = []
 
     for (const run of runs) {
-      const resData = run.resultados as Record<string, any>
-      const fechaObjetivo = resData?.fecha_objetivo as string | undefined
+      const fechaObjetivo = run.fecha_objetivo as string
       if (!fechaObjetivo) continue
 
-      const objDate = new Date(fechaObjetivo + 'T00:00:00')
+      const objDate = new Date(fechaObjetivo + 'T12:00:00')
       const daysAgo = Math.floor((endDate.getTime() - objDate.getTime()) / (1000 * 60 * 60 * 24))
       if (daysAgo < 0 || daysAgo > daysLimit) continue
 
+      let parsed: any[]
+      try {
+        parsed = JSON.parse(run.resultados)
+      } catch {
+        continue
+      }
+      if (!Array.isArray(parsed)) continue
+
       for (const slug of allSlugs) {
-        const cityData = resData[slug]
-        if (cityData?.temp_corregida != null) {
+        const cityData = parsed.find((c: any) => c.slug === slug)
+        const tc = cityData?.forecast?.temp_corregida
+        if (tc != null) {
           rawEntries.push({
             fecha_ejecucion: run.fecha_ejecucion,
             slug,
             fecha_objetivo: fechaObjetivo,
-            temp_corregida: Number(cityData.temp_corregida),
+            temp_corregida: Number(tc),
           })
         }
       }
@@ -109,7 +117,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       const [slug, fecha_objetivo] = key.split('|')
       entries.sort((a, b) => a.fecha_ejecucion.localeCompare(b.fecha_ejecucion))
 
-      // Take the last two records for this target (most recent updates)
       const earlier = entries[entries.length - 2]
       const latest = entries[entries.length - 1]
 
