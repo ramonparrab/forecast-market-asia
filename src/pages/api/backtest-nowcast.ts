@@ -276,8 +276,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           }
         }
 
-        const prevData = fi > 0 && resultDays.length > 0 ? resultDays[resultDays.length - 1] : null
-        const predGana = computeRecommendation(tcFirst, tcLast, fecha, slug, prevData?.temp_real ?? null)
+        const [pY, pM, pD] = fecha.split('-').map(Number)
+        const prevDate = new Date(pY, pM - 1, pD - 1)
+        const prevKey = slug + '|' + prevDate.getFullYear() + '-' +
+          String(prevDate.getMonth() + 1).padStart(2, '0') + '-' +
+          String(prevDate.getDate()).padStart(2, '0')
+        const prevFhVal = fhMap[prevKey]
+        const prevReal = prevFhVal?.real ?? null
+        const predGana = computeRecommendation(tcFirst, tcLast, fecha, slug, prevReal)
         let predAcierto: boolean | null = null
         if (predGana && gana && gana !== 'EMPATE') {
           predAcierto = predGana === gana
