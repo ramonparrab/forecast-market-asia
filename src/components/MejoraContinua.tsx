@@ -460,21 +460,6 @@ function NowcastView({ data, ciudadSlug, setCiudadSlug }: {
 
   return (
     <div className="space-y-4">
-      {/* City selector */}
-      <div className="flex flex-wrap gap-2 items-center">
-        <label className="text-xs text-gray-500">Ciudad:</label>
-        <select
-          value={ciudadSlug}
-          onChange={e => setCiudadSlug(e.target.value)}
-          className="rounded-lg bg-slate-700 border border-gray-600 px-3 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500"
-        >
-          <option value="todas">Todas las ciudades</option>
-          {CIUDADES_ASIA.filter(c => data[c.slug]).map(c => (
-            <option key={c.slug} value={c.slug}>{c.nombre}</option>
-          ))}
-        </select>
-      </div>
-
       {/* Global summary */}
       <div className="rounded-xl bg-gradient-to-br from-slate-900 to-slate-800 border border-blue-500/20 p-4">
         <h3 className="text-sm font-semibold text-white mb-3">📊 Nowcast 10PM vs 11PM — Comparación Global</h3>
@@ -805,21 +790,19 @@ export default function MejoraContinua() {
         {(subView === 'analisis' || subView === 'backtest_nowcast') && (
           <>
             <div className="flex flex-wrap gap-3 items-end">
-              {subView === 'analisis' && (
-                <div>
-                  <label className="block text-xs text-gray-500 mb-1">Ciudad</label>
-                  <select
-                    value={ciudadSlug}
-                    onChange={e => setCiudadSlug(e.target.value)}
-                    className="rounded-lg bg-slate-700 border border-gray-600 px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
-                  >
-                    <option value="todas">Todas las ciudades</option>
-                    {CIUDADES_ASIA.map(c => (
-                      <option key={c.slug} value={c.slug}>{c.nombre}</option>
-                    ))}
-                  </select>
-                </div>
-              )}
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Ciudad</label>
+                <select
+                  value={ciudadSlug}
+                  onChange={e => setCiudadSlug(e.target.value)}
+                  className="rounded-lg bg-slate-700 border border-gray-600 px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
+                >
+                  <option value="todas">Todas las ciudades</option>
+                  {CIUDADES_ASIA.map(c => (
+                    <option key={c.slug} value={c.slug}>{c.nombre}</option>
+                  ))}
+                </select>
+              </div>
               <div>
                 <label className="block text-xs text-gray-500 mb-1">Días históricos</label>
                 <select
