@@ -331,7 +331,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         const d = resultDays[di]
         if (d.gana === '10PM' || d.gana === '10PM/11PM') g10++
         if (d.gana === '11PM' || d.gana === '10PM/11PM') g11++
-        if (d.gana === 'EMPATE') emp++
+        if (d.gana === '10PM/11PM') emp++
 
         if (d.error_10pm !== null && d.error_11pm !== null) {
           sumErr10 += d.error_10pm

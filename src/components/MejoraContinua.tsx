@@ -478,9 +478,9 @@ function NowcastView({ data, ciudadSlug, setCiudadSlug }: {
             <p className="text-blue-400">Gana 11PM</p>
             <p className="text-xl font-bold text-blue-400">{agg.g11} <span className="text-xs text-gray-500">({agg.total > 0 ? (agg.g11/agg.total*100).toFixed(0) : '-'}%)</span></p>
           </div>
-          <div className="rounded-lg bg-gray-500/10 p-2 text-center">
-            <p className="text-gray-400">Empates</p>
-            <p className="text-xl font-bold text-gray-400">{agg.emp} <span className="text-xs text-gray-500">({agg.total > 0 ? (agg.emp/agg.total*100).toFixed(0) : '-'}%)</span></p>
+          <div className="rounded-lg bg-green-500/10 p-2 text-center">
+            <p className="text-green-400">Ambos</p>
+            <p className="text-xl font-bold text-green-400">{agg.emp} <span className="text-xs text-gray-500">({agg.total > 0 ? (agg.emp/agg.total*100).toFixed(0) : '-'}%)</span></p>
           </div>
           <div className="rounded-lg bg-indigo-500/10 p-2 text-center">
             <p className="text-indigo-400">Error prom</p>
@@ -504,7 +504,7 @@ function NowcastView({ data, ciudadSlug, setCiudadSlug }: {
                   <th className="text-right p-2">Días</th>
                   <th className="text-right p-2">10PM ✅</th>
                   <th className="text-right p-2">11PM ✅</th>
-                  <th className="text-right p-2">=</th>
+                  <th className="text-right p-2">Ambos</th>
                   <th className="text-right p-2">% 10PM</th>
                   <th className="text-right p-2">Error 10PM</th>
                   <th className="text-right p-2">Error 11PM</th>
@@ -525,7 +525,7 @@ function NowcastView({ data, ciudadSlug, setCiudadSlug }: {
                       <td className="p-2 text-right text-gray-300">{c.total_dias}</td>
                       <td className="p-2 text-right text-amber-400 font-bold">{c.total_gana_10pm}</td>
                       <td className="p-2 text-right text-blue-400 font-bold">{c.total_gana_11pm}</td>
-                      <td className="p-2 text-right text-gray-500">{c.total_empate}</td>
+                      <td className="p-2 text-right text-green-400 font-bold">{c.total_empate}</td>
                       <td className="p-2 text-right text-amber-400">{pct10}%</td>
                       <td className="p-2 text-right text-gray-400">{c.error_prom_10pm?.toFixed(3) ?? '-'}°C</td>
                       <td className="p-2 text-right text-gray-400">{c.error_prom_11pm?.toFixed(3) ?? '-'}°C</td>
@@ -556,9 +556,9 @@ function NowcastView({ data, ciudadSlug, setCiudadSlug }: {
               <p className="text-blue-400">Gana 11PM</p>
               <p className="text-xl font-bold text-blue-400">{selected.total_gana_11pm} <span className="text-xs text-gray-500">({selected.total_dias > 0 ? (selected.total_gana_11pm / selected.total_dias * 100).toFixed(0) : '-'}%)</span></p>
             </div>
-            <div className="rounded-lg bg-gray-500/10 p-2 text-center">
-              <p className="text-gray-400">Empates</p>
-              <p className="text-xl font-bold text-gray-400">{selected.total_empate} <span className="text-xs text-gray-500">({selected.total_dias > 0 ? (selected.total_empate / selected.total_dias * 100).toFixed(0) : '-'}%)</span></p>
+            <div className="rounded-lg bg-green-500/10 p-2 text-center">
+              <p className="text-green-400">Ambos</p>
+              <p className="text-xl font-bold text-green-400">{selected.total_empate} <span className="text-xs text-gray-500">({selected.total_dias > 0 ? (selected.total_empate / selected.total_dias * 100).toFixed(0) : '-'}%)</span></p>
             </div>
             <div className="rounded-lg bg-indigo-500/10 p-2 text-center">
               <p className="text-indigo-400">Error prom</p>
@@ -585,6 +585,17 @@ function NowcastView({ data, ciudadSlug, setCiudadSlug }: {
         else if (dtc > 1.0 && (last.temp_corregida_10pm || 0) < 33) motivos.push('Enfriamiento repentino, 10PM más estable')
         else if ((last.temp_corregida_10pm || 0) >= 36) motivos.push('Calor extremo estable, 10PM históricamente mejor en Julio')
         else motivos.push('Modelo estable, preferencia estacional')
+        // Compute recommendation effectiveness across all days
+        let aciertos = 0, errores = 0, pendientes = 0
+        for (let di = 0; di < selected.days.length; di++) {
+          const dd = selected.days[di]
+          if (dd.pred_acierto === true) aciertos++
+          else if (dd.pred_acierto === false) errores++
+          else if (dd.pred_gana && dd.temp_real === null) pendientes++
+        }
+        const totalPred = aciertos + errores
+        const efectPct = totalPred > 0 ? (aciertos / totalPred * 100).toFixed(0) : '-'
+
         return (
           <div className={`rounded-xl border p-4 ${isPending ? 'bg-gradient-to-r from-purple-900/40 to-slate-800/40 border-purple-500/30' : 'bg-slate-800/30 border-gray-700/30'}`}>
             <div className="flex items-start gap-3">
@@ -609,6 +620,10 @@ function NowcastView({ data, ciudadSlug, setCiudadSlug }: {
                 {isPending && (
                   <p className="text-xs text-gray-500 mt-1">Esperando temperatura real para verificar... Una vez cerrado el día, aquí mostrará si acertó.</p>
                 )}
+                <p className="text-xs text-gray-500 mt-2 border-t border-gray-700/30 pt-2">
+                  Efectividad recomendación: <span className="text-green-400 font-bold">{aciertos}✓</span> / <span className="text-red-400 font-bold">{errores}✗</span> / <span className="text-gray-500">{pendientes}⏳</span>
+                  {totalPred > 0 && <span className="ml-2 text-white">({efectPct}% acierto)</span>}
+                </p>
               </div>
             </div>
           </div>
