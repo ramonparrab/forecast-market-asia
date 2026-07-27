@@ -52,7 +52,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     startDate.setDate(startDate.getDate() - daysLimit - 3)
 
     const allSlugs = slugFilter ? [slugFilter] : CIUDADES_ASIA.map(c => c.slug)
-    const slugNames = new Map(CIUDADES_ASIA.map(c => [c.slug, c.nombre]))
+    const slugNames: Record<string, string> = {}
+    CIUDADES_ASIA.forEach((c: any) => { slugNames[c.slug] = c.nombre })
 
     // ============ 1) Read ALL forecast_history (with and without temp_real) ============
     let fhQuery = client
@@ -68,14 +69,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     if (!allFh || allFh.length === 0) return res.status(200).json({ ciudades: {} })
 
     // Separate historical (with temp_real) and pending (without temp_real) per slug
-    const fhBySlug = new Map<string, { historical: any[]; pending: any | null }>()
+    const fhBySlug: Record<string, { historical: any[]; pending: any | null }> = {}
     for (const r of allFh as any[]) {
-      if (!fhBySlug.has(r.slug)) fhBySlug.set(r.slug, { historical: [], pending: null })
-      const bucket = fhBySlug.get(r.slug)!
+      if (!fhBySlug[r.slug]) fhBySlug[r.slug] = { historical: [], pending: null }
+      const bucket = fhBySlug[r.slug]
       if (r.temp_real != null) {
         bucket.historical.push(r)
       } else {
-        // Keep only the latest pending record
         if (!bucket.pending || r.id > bucket.pending.id) {
           bucket.pending = r
         }
@@ -83,46 +83,45 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     // ============ 2) Build FH lookup: (slug|fecha) -> { tc, real } ============
-    const fhMap = new Map<string, { tc: number; real: number | null }>()
-    const slugPending = new Map<string, { fecha: string; tc: number }>()
+    const fhMap: Record<string, { tc: number; real: number | null }> = {}
+    const slugPending: Record<string, { fecha: string; tc: number }> = {}
 
-    for (const [slug, bucket] of fhBySlug) {
+    Object.keys(fhBySlug).forEach(slug => {
+      const bucket = fhBySlug[slug]
       // Deduplicate historical: keep latest id per target
-      const seen = new Map<string, any>()
-      for (const r of bucket.historical) {
-        const key = r.fecha_objetivo
-        if (!seen.has(key) || r.id > seen.get(key).id) seen.set(key, r)
-      }
-      for (const [fecha, r] of seen) {
-        fhMap.set(slug + '|' + fecha, { tc: r.temp_corregida, real: r.temp_real })
-      }
-      // Pending
+      const seen: Record<string, any> = {}
+      bucket.historical.forEach((r: any) => {
+        if (!seen[r.fecha_objetivo] || r.id > seen[r.fecha_objetivo].id) {
+          seen[r.fecha_objetivo] = r
+        }
+      })
+      Object.keys(seen).forEach(fecha => {
+        fhMap[slug + '|' + fecha] = { tc: seen[fecha].temp_corregida, real: seen[fecha].temp_real }
+      })
       if (bucket.pending) {
-        slugPending.set(slug, {
-          fecha: bucket.pending.fecha_objetivo,
-          tc: bucket.pending.temp_corregida,
-        })
+        slugPending[slug] = { fecha: bucket.pending.fecha_objetivo, tc: bucket.pending.temp_corregida }
       }
-    }
+    })
 
     // Filter by daysLimit
-    const validTargets = new Map<string, string[]>()
-    for (const [key, val] of fhMap) {
+    const validTargets: Record<string, string[]> = {}
+    Object.keys(fhMap).forEach(key => {
       const [slug, fecha] = key.split('|')
       const daysAgo = Math.floor((endDate.getTime() - new Date(fecha + 'T12:00:00').getTime()) / (1000 * 60 * 60 * 24))
       if (daysAgo >= 0 && daysAgo <= daysLimit) {
-        if (!validTargets.has(slug)) validTargets.set(slug, [])
-        validTargets.get(slug)!.push(fecha)
+        if (!validTargets[slug]) validTargets[slug] = []
+        validTargets[slug].push(fecha)
       }
-    }
+    })
     // Also include pending targets
-    for (const [slug, p] of slugPending) {
-      if (!validTargets.has(slug)) validTargets.set(slug, [])
-      if (!validTargets.get(slug)!.includes(p.fecha)) {
-        fhMap.set(slug + '|' + p.fecha, { tc: p.tc, real: null })
-        validTargets.get(slug)!.push(p.fecha)
+    Object.keys(slugPending).forEach(slug => {
+      const p = slugPending[slug]
+      if (!validTargets[slug]) validTargets[slug] = []
+      if (validTargets[slug].indexOf(p.fecha) === -1) {
+        fhMap[slug + '|' + p.fecha] = { tc: p.tc, real: null }
+        validTargets[slug].push(p.fecha)
       }
-    }
+    })
 
     // ============ 3) Read daily_runs first record per (slug, fecha) ============
     const { data: runs } = await client
@@ -131,8 +130,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       .gte('fecha_ejecucion', startDate.toISOString())
       .order('fecha_ejecucion', { ascending: true } as any)
 
-    const drFirst = new Map<string, { id: number; fecha_ejecucion: string; tc: number }>()
-    const drAllRecords = new Map<string, { id: number; fecha_ejecucion: string; tc: number }[]>()
+    const drFirst: Record<string, { id: number; fecha_ejecucion: string; tc: number }> = {}
 
     for (const run of (runs as any[]) ?? []) {
       const fo = run.fecha_objetivo as string
@@ -141,50 +139,45 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       try { parsed = JSON.parse(run.resultados) } catch { continue }
       if (!Array.isArray(parsed)) continue
 
-      for (const slug of allSlugs) {
+      for (let si = 0; si < allSlugs.length; si++) {
+        const slug = allSlugs[si]
         const key = slug + '|' + fo
-        if (!fhMap.has(key)) continue
+        if (!fhMap[key]) continue
+        if (drFirst[key]) continue
 
         const cityData = parsed.find((c: any) => c.slug === slug)
         const tc = cityData?.forecast?.temp_corregida
         if (tc == null) continue
-        const val = { id: run.id, fecha_ejecucion: run.fecha_ejecucion, tc: Number(tc) }
-
-        if (!drFirst.has(key)) {
-          drFirst.set(key, val)
-         }
-        if (!drAllRecords.has(key)) drAllRecords.set(key, [])
-        drAllRecords.get(key)!.push(val)
+        drFirst[key] = { id: run.id, fecha_ejecucion: run.fecha_ejecucion, tc: Number(tc) }
       }
     }
 
-    if (drFirst.size === 0) return res.status(200).json({ ciudades: {} })
+    if (Object.keys(drFirst).length === 0) return res.status(200).json({ ciudades: {} })
 
     // ============ 4) Compute corrections using mejora-continua engine ============
-    const slugCorrections = new Map<string, Map<string, number>>()
+    const slugCorrections: Record<string, Record<string, number>> = {}
 
-    for (const [slug, bucket] of fhBySlug) {
-      const historical = bucket.historical
-      if (historical.length === 0) continue
+    Object.keys(fhBySlug).forEach(slug => {
+      const bucket = fhBySlug[slug]
+      if (bucket.historical.length === 0) return
 
       // Deduplicate historical (keep latest id per target)
-      const seen = new Map<string, any>()
-      for (const r of historical) {
-        if (!seen.has(r.fecha_objetivo) || r.id > seen.get(r.fecha_objetivo).id) {
-          seen.set(r.fecha_objetivo, r)
+      const seen: Record<string, any> = {}
+      bucket.historical.forEach((r: any) => {
+        if (!seen[r.fecha_objetivo] || r.id > seen[r.fecha_objetivo].id) {
+          seen[r.fecha_objetivo] = r
         }
-      }
-      const sorted = Array.from(seen.values()).sort((a, b) =>
-        a.fecha_objetivo.localeCompare(b.fecha_objetivo)
-      )
+      })
+      const sorted = Object.keys(seen).sort().map(f => seen[f])
 
-      const corrections = new Map<string, number>()
+      const corrections: Record<string, number> = {}
 
       // computeAllMejoras for historical dates
       try {
-        const result = computeAllMejoras(sorted, slugNames.get(slug) || slug)
-        for (const d of result.dailyResults) {
-          corrections.set(d.fecha, d.combinado.temp - d.temp_corregida)
+        const result = computeAllMejoras(sorted, slugNames[slug] || slug)
+        for (let di = 0; di < result.dailyResults.length; di++) {
+          const d = result.dailyResults[di]
+          corrections[d.fecha] = d.combinado.temp - d.temp_corregida
         }
       } catch (e) {
         console.error('Error computing mejora for', slug, e)
@@ -197,36 +190,38 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             slug,
             temp_corregida: bucket.pending.temp_corregida,
             fecha_objetivo: bucket.pending.fecha_objetivo,
-          } as any, slugNames.get(slug) || slug)
+          } as any, slugNames[slug] || slug)
           if (cf) {
-            corrections.set(bucket.pending.fecha_objetivo, cf.combinado - bucket.pending.temp_corregida)
+            corrections[bucket.pending.fecha_objetivo] = cf.combinado - bucket.pending.temp_corregida
           }
         } catch (e) {
           console.error('Error computing current forecast for', slug, e)
         }
       }
 
-      slugCorrections.set(slug, corrections)
-    }
+      slugCorrections[slug] = corrections
+    })
 
     // ============ 5) Build final results ============
     const ciudades: Record<string, NowcastCityResult> = {}
 
-    for (const [slug, fechas] of validTargets) {
+    Object.keys(validTargets).forEach(slug => {
+      const fechas = validTargets[slug]
       const resultDays: NowcastDay[] = []
-      const corrections = slugCorrections.get(slug) || new Map()
+      const corrections = slugCorrections[slug] || {}
 
-      for (const fecha of fechas) {
+      for (let fi = 0; fi < fechas.length; fi++) {
+        const fecha = fechas[fi]
         const key = slug + '|' + fecha
-        const first = drFirst.get(key)
-        const fhVal = fhMap.get(key)
+        const first = drFirst[key]
+        const fhVal = fhMap[key]
         if (!first || !fhVal) continue
 
         const tcFirst = first.tc
         const tcLast = fhVal.tc
         const tempReal = fhVal.real
 
-        const correction = corrections.get(fecha) ?? 0
+        const correction = corrections[fecha] ?? 0
         const combFirst = tcFirst + correction
         const combLast = tcLast + correction
 
@@ -262,14 +257,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         })
       }
 
-      if (resultDays.length === 0) continue
+      if (resultDays.length === 0) return
 
       resultDays.sort((a, b) => a.fecha_objetivo.localeCompare(b.fecha_objetivo))
 
       let g10 = 0, g11 = 0, emp = 0
       let sumErr10 = 0, sumErr11 = 0, countErr = 0
 
-      for (const d of resultDays) {
+      for (let di = 0; di < resultDays.length; di++) {
+        const d = resultDays[di]
         if (d.gana === '10PM') g10++
         else if (d.gana === '11PM') g11++
         else if (d.gana === 'EMPATE') emp++
@@ -283,7 +279,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
       ciudades[slug] = {
         slug,
-        nombre: slugNames.get(slug) || slug,
+        nombre: slugNames[slug] || slug,
         days: resultDays,
         total_gana_10pm: g10,
         total_gana_11pm: g11,
@@ -292,9 +288,21 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         error_prom_10pm: countErr > 0 ? round2(sumErr10 / countErr) : null,
         error_prom_11pm: countErr > 0 ? round2(sumErr11 / countErr) : null,
       }
-    }
+    })
 
-    return res.status(200).json({ ciudades })
+    // Debug: log corrections for chongqing
+    const debugInfo: any = {}
+    if (fhBySlug['chongqing']) {
+      const b = fhBySlug['chongqing']
+      const cr = slugCorrections['chongqing']
+      debugInfo.chongqing = {
+        historicalCount: b.historical.length,
+        pending: b.pending ? { fecha: b.pending.fecha_objetivo, tc: b.pending.temp_corregida } : null,
+        correctionJuly27: cr ? cr['2026-07-27'] ?? null : null,
+        allCorrections: cr ? Object.keys(cr).map(f => f + ':' + cr[f].toFixed(3)).join(', ') : 'none',
+      }
+    }
+    return res.status(200).json({ ciudades, _debug: debugInfo })
   } catch (error) {
     console.error('[backtest-nowcast]', error)
     return res.status(500).json({ error: (error as Error).message })
