@@ -537,6 +537,36 @@ function NowcastView({ data, ciudadSlug, setCiudadSlug }: {
         </div>
       )}
 
+      {/* Single city summary */}
+      {selected && (
+        <div className="rounded-xl bg-gradient-to-br from-slate-900 to-slate-800 border border-blue-500/20 p-4">
+          <h3 className="text-sm font-semibold text-white mb-3">📊 {selected.nombre} — Resumen</h3>
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-2 text-xs">
+            <div className="rounded-lg bg-slate-800/50 p-2 text-center">
+              <p className="text-gray-500">Días comparables</p>
+              <p className="text-xl font-bold text-white">{selected.total_dias}</p>
+            </div>
+            <div className="rounded-lg bg-amber-500/10 p-2 text-center">
+              <p className="text-amber-400">Gana 10PM</p>
+              <p className="text-xl font-bold text-amber-400">{selected.total_gana_10pm} <span className="text-xs text-gray-500">({selected.total_dias > 0 ? (selected.total_gana_10pm / selected.total_dias * 100).toFixed(0) : '-'}%)</span></p>
+            </div>
+            <div className="rounded-lg bg-blue-500/10 p-2 text-center">
+              <p className="text-blue-400">Gana 11PM</p>
+              <p className="text-xl font-bold text-blue-400">{selected.total_gana_11pm} <span className="text-xs text-gray-500">({selected.total_dias > 0 ? (selected.total_gana_11pm / selected.total_dias * 100).toFixed(0) : '-'}%)</span></p>
+            </div>
+            <div className="rounded-lg bg-gray-500/10 p-2 text-center">
+              <p className="text-gray-400">Empates</p>
+              <p className="text-xl font-bold text-gray-400">{selected.total_empate} <span className="text-xs text-gray-500">({selected.total_dias > 0 ? (selected.total_empate / selected.total_dias * 100).toFixed(0) : '-'}%)</span></p>
+            </div>
+            <div className="rounded-lg bg-indigo-500/10 p-2 text-center">
+              <p className="text-indigo-400">Error prom</p>
+              <p className="text-lg font-bold text-indigo-400">10PM {selected.error_prom_10pm?.toFixed(3) ?? '-'}°C</p>
+              <p className="text-lg font-bold text-indigo-300">11PM {selected.error_prom_11pm?.toFixed(3) ?? '-'}°C</p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Single city day-by-day table */}
       {selected && (
         <div className="rounded-xl bg-slate-800/50 border border-gray-700/30 overflow-hidden">

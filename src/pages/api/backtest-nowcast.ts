@@ -118,11 +118,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       const [slug, fecha_objetivo] = key.split('|')
       entries.sort((a, b) => a.id - b.id)
 
-      // First record = initial forecast; last = latest update; need >=12h gap
+      // First record = pre-cron; last = post-cron (latest update with bias applied)
       const first = entries[0]
       const last = entries[entries.length - 1]
-      const timeDiffMs = new Date(last.fecha_ejecucion).getTime() - new Date(first.fecha_ejecucion).getTime()
-      if (timeDiffMs < 12 * 60 * 60 * 1000) return
 
       if (!bySlug.has(slug)) bySlug.set(slug, [])
       bySlug.get(slug)!.push({ fecha_objetivo, first, last })
