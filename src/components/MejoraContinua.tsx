@@ -1117,11 +1117,11 @@ export default function MejoraContinua() {
                     <h3 className="text-sm font-semibold text-white mb-3">
                       🔧 Pipeline Específico — {selectedCity.nombre}
                       <span className={`ml-2 text-xs font-medium px-2 py-0.5 rounded-full ${
-                        selectedCity.modelo === 'wuhan_adaptive'
+                        selectedCity.modelo !== 'combinado_estandar'
                           ? 'bg-amber-500/20 text-amber-400'
                           : 'bg-emerald-500/20 text-emerald-400'
                       }`}>
-                        {selectedCity.modelo === 'wuhan_adaptive' ? 'WUHAN ADAPTIVE' : 'COMBINADO ESTÁNDAR'}
+                        {selectedCity.modelo !== 'combinado_estandar' ? `${selectedCity.nombre.toUpperCase()} ADAPTIVE` : 'COMBINADO ESTÁNDAR'}
                       </span>
                     </h3>
                     <div className="space-y-2">

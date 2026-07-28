@@ -41,7 +41,7 @@ export interface CityMejoraResult {
   slug: string
   nombre: string
   estacion_bias_general: number
-  modelo: 'combinado_estandar' | 'wuhan_adaptive' | 'shanghai_adaptive' | 'hongkong_adaptive' | 'seoul_adaptive' | 'singapore_adaptive'
+  modelo: 'combinado_estandar' | 'wuhan_adaptive' | 'shanghai_adaptive' | 'hongkong_adaptive' | 'seoul_adaptive' | 'singapore_adaptive' | 'beijing_adaptive' | 'chengdu_adaptive' | 'shenzhen_adaptive' | 'tokyo_adaptive'
   pipeline: PipelineStep[]
   dailyResults: DiaComparacion[]
   mejoras: Record<string, MejoraMetrics>
@@ -451,7 +451,7 @@ export function computeAllMejoras(
     slug,
     nombre,
     estacion_bias_general: round2(estacionBias),
-    modelo: esWuhan ? 'wuhan_adaptive' : esShanghai ? 'shanghai_adaptive' : esHongKong ? 'hongkong_adaptive' : esSeoul ? 'seoul_adaptive' : esSingapore ? 'singapore_adaptive' : 'combinado_estandar',
+    modelo: esWuhan ? 'wuhan_adaptive' : esShanghai ? 'shanghai_adaptive' : esHongKong ? 'hongkong_adaptive' : esSeoul ? 'seoul_adaptive' : esSingapore ? 'singapore_adaptive' : esBeijing ? 'beijing_adaptive' : esChengdu ? 'chengdu_adaptive' : esShenzhen ? 'shenzhen_adaptive' : esTokyo ? 'tokyo_adaptive' : 'combinado_estandar',
     pipeline,
     dailyResults,
     mejoras: {

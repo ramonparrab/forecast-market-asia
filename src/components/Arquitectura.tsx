@@ -131,6 +131,10 @@ function CityPipelineView({ ciudad }: { ciudad: CityData }) {
     ciudad.modelo === 'hongkong_adaptive' ? 'HongKong Adaptive (solo Station)' :
     ciudad.modelo === 'seoul_adaptive' ? 'Seoul Adaptive (solo Station)' :
     ciudad.modelo === 'singapore_adaptive' ? 'Singapore Adaptive (solo Station)' :
+    ciudad.modelo === 'beijing_adaptive' ? 'Beijing Adaptive (solo Station)' :
+    ciudad.modelo === 'chengdu_adaptive' ? 'Chengdu Adaptive (solo Station)' :
+    ciudad.modelo === 'shenzhen_adaptive' ? 'Shenzhen Adaptive (solo Station)' :
+    ciudad.modelo === 'tokyo_adaptive' ? 'Tokyo Adaptive (solo Station)' :
     ciudad.modelo
 
   return (
@@ -194,7 +198,7 @@ function PipelineColumn({ title, titleColor, subtitle, ciudad, isActual }: { tit
   function mejoraActivaEnMejora(etapa: string): boolean {
     const m = ciudad.modelo
     if (m === 'combinado_estandar') return true
-    if (m === 'wuhan_adaptive' || m === 'hongkong_adaptive' || m === 'seoul_adaptive' || m === 'singapore_adaptive') return etapa === 'Station Bias'
+    if (m === 'wuhan_adaptive' || m === 'hongkong_adaptive' || m === 'seoul_adaptive' || m === 'singapore_adaptive' || m === 'beijing_adaptive' || m === 'chengdu_adaptive' || m === 'shenzhen_adaptive' || m === 'tokyo_adaptive') return etapa === 'Station Bias'
     if (m === 'shanghai_adaptive') return etapa === 'Range Bias'
     return false
   }
