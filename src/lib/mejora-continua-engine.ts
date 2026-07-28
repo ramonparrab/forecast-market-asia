@@ -273,7 +273,11 @@ function buildPipeline(slug: string, estacionBias: number, rangoBiasMap: Record<
   const esHongKong = slug === 'hong-kong'
   const esSeoul = slug === 'seoul'
   const esSingapore = slug === 'singapore'
-  const esAdaptive = esWuhan || esHongKong || esSeoul || esSingapore
+  const esBeijing = slug === 'beijing'
+  const esChengdu = slug === 'chengdu'
+  const esShenzhen = slug === 'shenzhen'
+  const esTokyo = slug === 'tokyo'
+  const esAdaptive = esWuhan || esHongKong || esSeoul || esSingapore || esBeijing || esChengdu || esShenzhen || esTokyo
   const esRangeOnly = esShanghai
 
   const stationDesc = esAdaptive ? 'Corrige sesgo grid→estación con promedio histórico de errores (modelo adaptativo)' : esShanghai ? '❌ Desactivado: Range Bias supera a Station para Shanghai' : 'Corrige sesgo grid→estación con promedio histórico de errores'
@@ -281,6 +285,10 @@ function buildPipeline(slug: string, estacionBias: number, rangoBiasMap: Record<
     esSeoul ? `✅ Activo — Bias general: ${estacionBias >= 0 ? '+' : ''}${estacionBias.toFixed(2)}°C (mejora 33.9% MAE)` :
     esWuhan ? `✅ Activo — Bias general: ${estacionBias >= 0 ? '+' : ''}${estacionBias.toFixed(2)}°C (única corrección aplicada)` :
     esSingapore ? `✅ Activo — Bias general: ${estacionBias >= 0 ? '+' : ''}${estacionBias.toFixed(2)}°C (única corrección aplicada)` :
+    esBeijing ? `✅ Activo (Station supera a Range+Station) — Bias general: ${estacionBias >= 0 ? '+' : ''}${estacionBias.toFixed(2)}°C` :
+    esChengdu ? `✅ Activo (Station supera a Range+Station) — Bias general: ${estacionBias >= 0 ? '+' : ''}${estacionBias.toFixed(2)}°C` :
+    esShenzhen ? `✅ Activo (Station supera a Range+Station) — Bias general: ${estacionBias >= 0 ? '+' : ''}${estacionBias.toFixed(2)}°C` :
+    esTokyo ? `✅ Activo (Station supera a Range+Station) — Bias general: ${estacionBias >= 0 ? '+' : ''}${estacionBias.toFixed(2)}°C` :
     esShanghai ? `❌ Desactivado: Range Bias solo da mejor MAE (0.89°C vs 0.90°C con Station)` :
     `Bias general: ${estacionBias >= 0 ? '+' : ''}${estacionBias.toFixed(2)}°C`
 
@@ -290,6 +298,10 @@ function buildPipeline(slug: string, estacionBias: number, rangoBiasMap: Record<
     esHongKong ? '❌ Desactivado: Station solo da mejor MAE (1.04°C vs 1.12°C con Range)' :
     esSeoul ? '❌ Desactivado: Station solo da mejor MAE (1.19°C vs 1.28°C con Range)' :
     esSingapore ? '❌ Desactivado: Station solo es la estrategia inicial' :
+    esBeijing ? `❌ Desactivado: Station sola da mejor MAE que Station+Range` :
+    esChengdu ? `❌ Desactivado: Station sola da mejor MAE que Station+Range` :
+    esShenzhen ? `❌ Desactivado: Station sola da mejor MAE que Station+Range` :
+    esTokyo ? `❌ Desactivado: Station sola da mejor MAE que Station+Range` :
     `${Object.entries(rangoBiasMap).map(([r, b]) => `${r}: ${b >= 0 ? '+' : ''}${b.toFixed(2)}°C`).join(', ')}`
 
   const rapidDetail = esHongKong ? '❌ Desactivado: sin activaciones en 59 días (0% impacto)' :
@@ -297,12 +309,20 @@ function buildPipeline(slug: string, estacionBias: number, rangoBiasMap: Record<
     esShanghai ? '❌ Desactivado: solo 1 activación en 59 días (1.7%, datos insuficientes)' :
     esWuhan ? '❌ Desactivado: solo 3.4% win rate en Wuhan' :
     esSingapore ? '❌ Desactivado: modelo solo Station por ahora' :
+    esShenzhen ? '❌ Desactivado: Station sola da mejor MAE que incluir Rapid Warming' :
+    esBeijing ? '❌ Desactivado: Station sola da mejor MAE que incluir Rapid Warming' :
+    esChengdu ? '❌ Desactivado: Station sola da mejor MAE que incluir Rapid Warming' :
+    esTokyo ? '❌ Desactivado: Station sola da mejor MAE que incluir Rapid Warming' :
     'Se activa en saltos > 3°C'
 
   const combinadoDesc = esWuhan ? 'Solo Station Bias (sin range, sin rapid)' :
     esHongKong ? 'Solo Station Bias (sin range, sin rapid) — modelo HongKong Adaptive' :
     esSeoul ? 'Solo Station Bias (sin range, sin rapid) — modelo Seoul Adaptive' :
     esSingapore ? 'Solo Station Bias (sin range, sin rapid) — modelo Singapore Adaptive' :
+    esBeijing ? 'Solo Station Bias (sin range, sin rapid) — modelo Beijing Adaptive' :
+    esChengdu ? 'Solo Station Bias (sin range, sin rapid) — modelo Chengdu Adaptive' :
+    esShenzhen ? 'Solo Station Bias (sin range, sin rapid) — modelo Shenzhen Adaptive' :
+    esTokyo ? 'Solo Station Bias (sin range, sin rapid) — modelo Tokyo Adaptive' :
     esShanghai ? 'Solo Range Bias (sin station, sin rapid) — modelo Shanghai Adaptive' :
     'Station + Range + Rapid Warming'
 
@@ -310,6 +330,10 @@ function buildPipeline(slug: string, estacionBias: number, rangoBiasMap: Record<
     esHongKong ? 'Modelo HongKong Adaptive: temp_corregida + stationBias (MAE 1.04°C)' :
     esSeoul ? 'Modelo Seoul Adaptive: temp_corregida + stationBias (MAE 1.19°C)' :
     esSingapore ? 'Modelo Singapore Adaptive: temp_corregida + stationBias' :
+    esBeijing ? 'Modelo Beijing Adaptive: temp_corregida + stationBias (MAE ~1.12°C)' :
+    esChengdu ? 'Modelo Chengdu Adaptive: temp_corregida + stationBias (MAE ~1.13°C)' :
+    esShenzhen ? 'Modelo Shenzhen Adaptive: temp_corregida + stationBias (MAE ~0.91°C)' :
+    esTokyo ? 'Modelo Tokyo Adaptive: temp_corregida + stationBias (MAE ~0.87°C)' :
     esShanghai ? 'Modelo Shanghai Adaptive: temp_corregida + rangeBias (MAE 0.89°C)' :
     'Modelo estándar: temp + station + range + boost'
 
@@ -331,6 +355,11 @@ export function computeAllMejoras(
   const esHongKong = slug === 'hong-kong'
   const esSeoul = slug === 'seoul'
   const esSingapore = slug === 'singapore'
+  const esBeijing = slug === 'beijing'
+  const esChengdu = slug === 'chengdu'
+  const esShenzhen = slug === 'shenzhen'
+  const esTokyo = slug === 'tokyo'
+  const esOnlyStation = esWuhan || esHongKong || esSeoul || esSingapore || esBeijing || esChengdu || esShenzhen || esTokyo
   const validos = records.filter(r => r.temp_real !== null && r.error !== null) as (HistoricalRecord & { temp_real: number; error: number })[]
   validos.sort((a, b) => a.fecha_objetivo.localeCompare(b.fecha_objetivo))
 
@@ -357,7 +386,7 @@ export function computeAllMejoras(
     const errorRange = r.temp_real - tempRange
 
     let tempCombined: number, errorCombined: number
-    if (esWuhan || esHongKong || esSeoul || esSingapore) {
+    if (esOnlyStation) {
       // Station ONLY model
       tempCombined = r.temp_corregida + stationBias
       errorCombined = r.temp_real - tempCombined
@@ -446,6 +475,11 @@ export function computeCurrentForecast(
   const esHongKong = slug === 'hong-kong'
   const esSeoul = slug === 'seoul'
   const esSingapore = slug === 'singapore'
+  const esBeijing = slug === 'beijing'
+  const esChengdu = slug === 'chengdu'
+  const esShenzhen = slug === 'shenzhen'
+  const esTokyo = slug === 'tokyo'
+  const esOnlyStation = esWuhan || esHongKong || esSeoul || esSingapore || esBeijing || esChengdu || esShenzhen || esTokyo
   const validos = records.filter(r => r.temp_real !== null && r.error !== null) as (HistoricalRecord & { temp_real: number; error: number })[]
   validos.sort((a, b) => a.fecha_objetivo.localeCompare(b.fecha_objetivo))
 
@@ -464,7 +498,7 @@ export function computeCurrentForecast(
 
   // City-specific combinado
   let tempCombined: number
-  if (esWuhan || esHongKong || esSeoul || esSingapore) {
+  if (esOnlyStation) {
     tempCombined = currentRecord.temp_corregida + stationBias
   } else if (esShanghai) {
     tempCombined = currentRecord.temp_corregida + rangeBias
