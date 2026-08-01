@@ -32,9 +32,47 @@ interface NowcastCityResult {
   error_prom_11pm: number | null
 }
 
+interface KalmanDay {
+  fecha_objetivo: string
+  temp_real: number | null
+  hora_10pm: string | null
+  cur_10pm: number | null
+  cur_11pm: number | null
+  cur_err_10pm: number | null
+  cur_err_11pm: number | null
+  cur_gana: '10PM' | '11PM' | '10PM/11PM' | null
+  kal_10pm: number | null
+  kal_11pm: number | null
+  kal_err_10pm: number | null
+  kal_err_11pm: number | null
+  kal_gana: '10PM' | '11PM' | '10PM/11PM' | null
+  mejor: 'actual' | 'kalman' | 'empate' | null
+}
+
+interface KalmanCityResult {
+  slug: string
+  nombre: string
+  modelo_actual: string
+  pipeline_actual: PipelineStep[]
+  kalman: { q: number; r: number; ultimo_bias: number }
+  days: KalmanDay[]
+  cur_mae: number | null
+  kal_mae: number | null
+  cur_hits: number
+  kal_hits: number
+  cur_gana_10pm: number
+  cur_gana_11pm: number
+  cur_ambos: number
+  kal_gana_10pm: number
+  kal_gana_11pm: number
+  kal_ambos: number
+  total_dias: number
+  pendientes: number
+}
+
 const MEJORA_KEYS: MejoraKey[] = ['station', 'rapid_warming', 'range_bias', 'combinado']
 
-type SubView = 'analisis' | 'pipeline' | 'backtest_nowcast'
+type SubView = 'analisis' | 'pipeline' | 'backtest_nowcast' | 'backtest_kalman'
 
 function round2(v: number): number {
   return Math.round(v * 100) / 100
@@ -728,6 +766,336 @@ function NowcastView({ data, ciudadSlug, setCiudadSlug }: {
   )
 }
 
+const KALMAN_PIPELINE_STEPS: { paso: number; etapa: string; desc: string; detalle: string }[] = [
+  { paso: 1, etapa: 'Estado oculto', desc: 'El bias grid→estación es un estado x con incertidumbre P (varianza). Se inicia en x=0, P=R.', detalle: 'R ≈ varianza de los errores históricos (ruido de observación). Se estima por ciudad.' },
+  { paso: 2, etapa: 'Predicción', desc: 'El bias puede derivar de un día a otro: P̂ = P + Q. La estimación x no cambia en la predicción.', detalle: 'Q = 0.01 (ruido de proceso): cuánto se mueve el bias real por día. Más Q = más adaptativo.' },
+  { paso: 3, etapa: 'Corrección del forecast', desc: 'temp_final = temp_corregida + x̂. Se usa la estimación ANTES de ver el error de hoy (sin look-ahead).', detalle: 'Igual que la mejora continua: corrige el pronóstico con el bias estimado.' },
+  { paso: 4, etapa: 'Observación', desc: 'Llega la temperatura real del día: y = temp_real − temp_corregida (error observado).', detalle: 'El error diario = bias real + ruido v~N(0,R).' },
+  { paso: 5, etapa: 'Actualización', desc: 'K = P̂/(P̂+R). x = x̂ + K·(y − x̂). P = (1−K)·P̂. El filtro "cree" al error nuevo según la ganancia K.', detalle: 'K estable ≈ sqrt(Q/R) ≈ 7.8% → el error reciente pesa ~8%, el de hace k días K·(1−K)^k (decaimiento exponencial).' },
+  { paso: 6, etapa: 'Repetir diario', desc: 'Cada día: predecir → corregir → observar → actualizar. Memoria efectiva ~9 días.', detalle: 'Se adapta a cambios de régimen (olas de calor) que la media plana no sigue.' },
+]
+
+function KalmanView({ data, ciudadSlug, setCiudadSlug }: {
+  data: Record<string, KalmanCityResult>
+  ciudadSlug: string
+  setCiudadSlug: (s: string) => void
+}) {
+  const allSlugs = CIUDADES_ASIA.map(c => c.slug)
+  const filteredSlugs = ciudadSlug === 'todas'
+    ? allSlugs.filter(s => data[s])
+    : [ciudadSlug].filter(s => data[s])
+
+  // Global aggregates
+  const agg = (() => {
+    let curMae = 0, kalMae = 0, cnt = 0
+    let curHits = 0, kalHits = 0
+    let curWin = 0, kalWin = 0, tie = 0, totalDias = 0, pendientes = 0
+    for (const s of Object.keys(data)) {
+      const c = data[s]
+      curHits += c.cur_hits
+      kalHits += c.kal_hits
+      totalDias += c.total_dias
+      pendientes += c.pendientes
+      if (c.cur_mae !== null && c.kal_mae !== null) {
+        curMae += c.cur_mae * c.total_dias
+        kalMae += c.kal_mae * c.total_dias
+        cnt += c.total_dias
+      }
+      for (const d of c.days) {
+        if (d.temp_real === null) continue
+        if (d.mejor === 'actual') curWin++
+        else if (d.mejor === 'kalman') kalWin++
+        else if (d.mejor === 'empate') tie++
+      }
+    }
+    return {
+      curMae: cnt > 0 ? (curMae / cnt).toFixed(3) : '-',
+      kalMae: cnt > 0 ? (kalMae / cnt).toFixed(3) : '-',
+      curHits, kalHits, totalDias, pendientes, curWin, kalWin, tie,
+    }
+  })()
+
+  const selected = ciudadSlug !== 'todas' ? data[ciudadSlug] : null
+  const pipelineSource = selected ?? Object.values(data)[0]
+
+  return (
+    <div className="space-y-4">
+      {/* Pipeline comparativo teórico */}
+      <div className="rounded-xl bg-gradient-to-br from-slate-900 to-slate-800 border border-violet-500/20 p-4">
+        <h3 className="text-sm font-semibold text-white mb-3">⚙️ Pipeline Teórico — ¿Qué hace cada modelo?</h3>
+        <div className="grid md:grid-cols-2 gap-4">
+          {/* Modelo actual */}
+          <div className="rounded-xl bg-slate-800/50 border border-gray-700/30 p-3">
+            <p className="text-xs font-bold text-amber-400 mb-2 uppercase">Modelo Actual — Mejora Continua {pipelineSource?.modelo_actual ? `(${pipelineSource.modelo_actual})` : ''}</p>
+            <div className="space-y-2">
+              {(pipelineSource?.pipeline_actual ?? []).map(s => (
+                <div key={s.paso} className={`rounded-lg border p-2 ${s.aplicado ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-gray-700/30 bg-slate-900/40'}`}>
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-semibold text-white">{s.paso}. {s.etapa}</span>
+                    <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${s.aplicado ? 'bg-emerald-500/20 text-emerald-400' : 'bg-gray-700/50 text-gray-500'}`}>
+                      {s.aplicado ? 'ACTIVO' : 'INACTIVO'}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-gray-400 mt-1">{s.desc}</p>
+                  <p className="text-[10px] text-gray-500 mt-0.5">{s.detalle}</p>
+                </div>
+              ))}
+              {(!pipelineSource?.pipeline_actual || pipelineSource.pipeline_actual.length === 0) && (
+                <p className="text-xs text-gray-500">Sin pipeline disponible para esta ciudad.</p>
+              )}
+            </div>
+          </div>
+          {/* Kalman propuesto */}
+          <div className="rounded-xl bg-slate-800/50 border border-violet-500/20 p-3">
+            <p className="text-xs font-bold text-violet-400 mb-2 uppercase">
+              Modelo Propuesto — Kalman 1D
+              {pipelineSource && <span className="text-gray-500 font-normal ml-1">(Q={pipelineSource.kalman.q}, R={pipelineSource.kalman.r.toFixed(2)}, último bias={pipelineSource.kalman.ultimo_bias.toFixed(3)}°C)</span>}
+            </p>
+            <div className="space-y-2">
+              {KALMAN_PIPELINE_STEPS.map(s => (
+                <div key={s.paso} className="rounded-lg border border-violet-500/30 bg-violet-500/5 p-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-semibold text-white">{s.paso}. {s.etapa}</span>
+                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-violet-500/20 text-violet-400">ACTIVO</span>
+                  </div>
+                  <p className="text-[11px] text-gray-400 mt-1">{s.desc}</p>
+                  <p className="text-[10px] text-gray-500 mt-0.5">{s.detalle}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+        {/* Tabla comparativa teórica */}
+        <div className="mt-3 rounded-xl bg-slate-800/50 border border-gray-700/30 overflow-hidden">
+          <div className="p-2 border-b border-gray-700/30">
+            <h4 className="text-xs font-semibold text-white">📐 Diferencia Teórica Clave</h4>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="bg-slate-800/50 text-gray-400">
+                  <th className="text-left p-2">Aspecto</th>
+                  <th className="text-left p-2 text-amber-400">Mejora Continua (media histórica)</th>
+                  <th className="text-left p-2 text-violet-400">Kalman 1D</th>
+                </tr>
+              </thead>
+              <tbody>
+                {[
+                  ['Peso del error reciente', '1/N — igual para todos los días', 'K ≈ 7.8% — decae exponencialmente'],
+                  ['Memoria', 'Infinita y plana (toda la historia pesa igual)', '~9 días efectivos (media-vida)'],
+                  ['Adaptación a cambios de régimen', 'Lenta — la media vieja arrastra', 'Rápida — converge al bias actual'],
+                  ['Ruido de proceso (Q)', 'No modelado', 'Sí — cuánto deriva el bias por día'],
+                  ['Ruido de observación (R)', 'No modelado', 'Sí — cuánto confiar en cada error'],
+                  ['Ganancia', 'Fija, decrece con 1/N (se congela)', 'Autoajustada por P (sube si incierto, baja si seguro)'],
+                ].map((row, i) => (
+                  <tr key={i} className="border-t border-gray-800">
+                    <td className="p-2 text-gray-300 font-medium">{row[0]}</td>
+                    <td className="p-2 text-gray-400">{row[1]}</td>
+                    <td className="p-2 text-gray-400">{row[2]}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      {/* Global summary */}
+      <div className="rounded-xl bg-gradient-to-br from-slate-900 to-slate-800 border border-violet-500/20 p-4">
+        <h3 className="text-sm font-semibold text-white mb-3">📊 Mejora Continua vs Kalman — Comparación Global</h3>
+        <div className="grid grid-cols-2 md:grid-cols-6 gap-2 text-xs">
+          <div className="rounded-lg bg-slate-800/50 p-2 text-center">
+            <p className="text-gray-500">Días evaluados</p>
+            <p className="text-xl font-bold text-white">{agg.totalDias}</p>
+          </div>
+          <div className="rounded-lg bg-amber-500/10 p-2 text-center">
+            <p className="text-amber-400">MAE MC Actual</p>
+            <p className="text-lg font-bold text-amber-400">{agg.curMae}°C</p>
+          </div>
+          <div className="rounded-lg bg-violet-500/10 p-2 text-center">
+            <p className="text-violet-400">MAE Kalman</p>
+            <p className="text-lg font-bold text-violet-400">{agg.kalMae}°C</p>
+          </div>
+          <div className="rounded-lg bg-emerald-500/10 p-2 text-center">
+            <p className="text-emerald-400">Aciertos MC Actual</p>
+            <p className="text-lg font-bold text-emerald-400">{agg.curHits} <span className="text-xs text-gray-500">({agg.totalDias > 0 ? (agg.curHits / agg.totalDias * 100).toFixed(0) : '-'}%)</span></p>
+          </div>
+          <div className="rounded-lg bg-sky-500/10 p-2 text-center">
+            <p className="text-sky-400">Aciertos Kalman</p>
+            <p className="text-lg font-bold text-sky-400">{agg.kalHits} <span className="text-xs text-gray-500">({agg.totalDias > 0 ? (agg.kalHits / agg.totalDias * 100).toFixed(0) : '-'}%)</span></p>
+          </div>
+          <div className="rounded-lg bg-indigo-500/10 p-2 text-center">
+            <p className="text-indigo-400">Días mejor: MC/Kalman</p>
+            <p className="text-lg font-bold text-indigo-400">{agg.curWin}/{agg.kalWin}</p>
+            <p className="text-[10px] text-gray-500">empates: {agg.tie}</p>
+          </div>
+        </div>
+        {agg.pendientes > 0 && (
+          <p className="text-xs text-gray-500 mt-2">
+            ⏳ {agg.pendientes} días pendientes (futuro) con predicción de ambos modelos — se evaluarán cuando llegue la temperatura real.
+          </p>
+        )}
+      </div>
+
+      {/* Multi-city summary table */}
+      {ciudadSlug === 'todas' && (
+        <div className="rounded-xl bg-slate-800/50 border border-gray-700/30 overflow-hidden">
+          <div className="p-3 border-b border-gray-700/30">
+            <h3 className="text-sm font-semibold text-white">Resumen por Ciudad</h3>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="bg-slate-800/50 text-gray-400">
+                  <th className="text-left p-2">Ciudad</th>
+                  <th className="text-left p-2">Modelo</th>
+                  <th className="text-right p-2">Días</th>
+                  <th className="text-right p-2">MAE MC</th>
+                  <th className="text-right p-2">MAE Kalman</th>
+                  <th className="text-right p-2">Δ MAE</th>
+                  <th className="text-right p-2">Aciertos MC</th>
+                  <th className="text-right p-2">Aciertos Kal</th>
+                  <th className="text-right p-2">Δ Aciertos</th>
+                  <th className="text-right p-2">Pend.</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredSlugs.map(slug => {
+                  const c = data[slug]
+                  const deltaMae = c.cur_mae !== null && c.kal_mae !== null ? c.cur_mae - c.kal_mae : null
+                  const deltaMaeClass = deltaMae !== null ? (deltaMae > 0.001 ? 'text-emerald-400' : deltaMae < -0.001 ? 'text-red-400' : 'text-gray-500') : ''
+                  const deltaHits = c.kal_hits - c.cur_hits
+                  const deltaHitsClass = deltaHits > 0 ? 'text-emerald-400' : deltaHits < 0 ? 'text-red-400' : 'text-gray-500'
+                  return (
+                    <tr key={slug} className="border-t border-gray-800 hover:bg-slate-800/30 transition">
+                      <td className="p-2 text-white font-medium">{c.nombre}</td>
+                      <td className="p-2 text-gray-400">{c.modelo_actual}</td>
+                      <td className="p-2 text-right text-gray-300">{c.total_dias}</td>
+                      <td className="p-2 text-right text-amber-400">{c.cur_mae?.toFixed(3) ?? '-'}</td>
+                      <td className="p-2 text-right text-violet-400">{c.kal_mae?.toFixed(3) ?? '-'}</td>
+                      <td className={`p-2 text-right font-bold ${deltaMaeClass}`}>{deltaMae !== null ? (deltaMae >= 0 ? '+' : '') + deltaMae.toFixed(3) : '-'}</td>
+                      <td className="p-2 text-right text-emerald-400 font-bold">{c.cur_hits}</td>
+                      <td className="p-2 text-right text-sky-400 font-bold">{c.kal_hits}</td>
+                      <td className={`p-2 text-right font-bold ${deltaHitsClass}`}>{deltaHits > 0 ? '+' : ''}{deltaHits}</td>
+                      <td className="p-2 text-right text-gray-500">{c.pendientes}</td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* Single city day-by-day table */}
+      {selected && (
+        <div className="rounded-xl bg-slate-800/50 border border-gray-700/30 overflow-hidden">
+          <div className="p-3 border-b border-gray-700/30">
+            <h3 className="text-sm font-semibold text-white">
+              📋 Día a Día — {selected.nombre}
+              <span className="text-gray-500 font-normal ml-2 text-xs">
+                {selected.total_dias} días históricos{selected.pendientes > 0 ? ` + ${selected.pendientes} pendientes` : ''}
+              </span>
+            </h3>
+            <p className="text-[11px] text-gray-500 mt-1">
+              Colores: <span className="text-emerald-400">verde = acierto de bucket</span> · <span className="text-violet-400">violeta = mejor modelo del día</span> · <span className="text-purple-300">púrpura = día pendiente (futuro)</span>
+            </p>
+          </div>
+          <div className="overflow-x-auto" style={{ maxHeight: 500 }}>
+            <table className="w-full text-xs">
+              <thead className="sticky top-0 bg-slate-900">
+                <tr className="text-gray-400">
+                  <th className="text-left p-2">Fecha</th>
+                  <th className="text-right p-2">Real</th>
+                  <th colSpan={5} className="text-center p-2 text-amber-400 bg-amber-500/5">MC ACTUAL</th>
+                  <th colSpan={5} className="text-center p-2 text-violet-400 bg-violet-500/5">KALMAN 1D</th>
+                  <th className="text-right p-2">Mejor</th>
+                </tr>
+                <tr className="text-gray-500 bg-slate-900/95">
+                  <th className="text-left p-1" />
+                  <th />
+                  <th className="text-right p-1">10PM</th>
+                  <th className="text-right p-1">11PM</th>
+                  <th className="text-right p-1">Err 10</th>
+                  <th className="text-right p-1">Err 11</th>
+                  <th className="text-right p-1">Gana</th>
+                  <th className="text-right p-1">10PM</th>
+                  <th className="text-right p-1">11PM</th>
+                  <th className="text-right p-1">Err 10</th>
+                  <th className="text-right p-1">Err 11</th>
+                  <th className="text-right p-1">Gana</th>
+                  <th />
+                </tr>
+              </thead>
+              <tbody>
+                {selected.days.slice().reverse().map(d => {
+                  const pendiente = d.temp_real === null
+                  const curGanaAmbos = d.cur_gana === '10PM/11PM'
+                  const kalGanaAmbos = d.kal_gana === '10PM/11PM'
+                  const curColor = d.cur_gana ? 'text-green-400 font-bold' : 'text-gray-500'
+                  const kalColor = d.kal_gana ? 'text-green-400 font-bold' : 'text-gray-500'
+                  const mejorClass = d.mejor === 'actual' ? 'text-amber-400 font-bold' : d.mejor === 'kalman' ? 'text-violet-400 font-bold' : d.mejor === 'empate' ? 'text-gray-400' : 'text-gray-600'
+                  return (
+                    <tr key={d.fecha_objetivo} className={`border-t border-gray-800 hover:bg-slate-800/30 transition ${pendiente ? 'bg-purple-500/5' : d.mejor === 'actual' ? 'bg-amber-500/5' : d.mejor === 'kalman' ? 'bg-violet-500/5' : ''}`}>
+                      <td className="p-2 text-gray-300">{d.fecha_objetivo}{pendiente && <span className="ml-1 text-purple-300">⏳</span>}</td>
+                      <td className="p-2 text-right text-yellow-400 font-medium">{d.temp_real !== null ? d.temp_real.toFixed(1) : '-'}°C</td>
+                      <td className="p-2 text-right text-gray-400">{d.cur_10pm?.toFixed(2) ?? '-'}</td>
+                      <td className={`p-2 text-right ${d.cur_gana === '11PM' || curGanaAmbos ? 'text-green-400 font-bold' : 'text-amber-300'}`}>{d.cur_11pm?.toFixed(2) ?? '-'}°C</td>
+                      <td className="p-2 text-right text-gray-500">{d.cur_err_10pm?.toFixed(2) ?? '-'}</td>
+                      <td className="p-2 text-right text-gray-500">{d.cur_err_11pm?.toFixed(2) ?? '-'}</td>
+                      <td className={`p-2 text-right font-bold ${curColor}`}>{d.cur_gana ?? '-'}</td>
+                      <td className="p-2 text-right text-gray-400">{d.kal_10pm?.toFixed(2) ?? '-'}</td>
+                      <td className={`p-2 text-right ${d.kal_gana === '11PM' || kalGanaAmbos ? 'text-green-400 font-bold' : 'text-violet-300'}`}>{d.kal_11pm?.toFixed(2) ?? '-'}°C</td>
+                      <td className="p-2 text-right text-gray-500">{d.kal_err_10pm?.toFixed(2) ?? '-'}</td>
+                      <td className="p-2 text-right text-gray-500">{d.kal_err_11pm?.toFixed(2) ?? '-'}</td>
+                      <td className={`p-2 text-right font-bold ${kalColor}`}>{d.kal_gana ?? '-'}</td>
+                      <td className={`p-2 text-right font-bold ${mejorClass}`}>
+                        {d.mejor === 'actual' ? 'MC' : d.mejor === 'kalman' ? 'KAL' : d.mejor === 'empate' ? '=' : '-'}
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+          {/* City summary footer */}
+          <div className="p-3 border-t border-gray-700/30 bg-slate-800/30">
+            <div className="grid grid-cols-3 md:grid-cols-6 gap-2 text-xs text-center">
+              <div>
+                <span className="text-gray-500">MAE MC:</span>
+                <span className="text-amber-400 font-bold"> {selected.cur_mae?.toFixed(3) ?? '-'}°C</span>
+              </div>
+              <div>
+                <span className="text-gray-500">MAE Kalman:</span>
+                <span className="text-violet-400 font-bold"> {selected.kal_mae?.toFixed(3) ?? '-'}°C</span>
+              </div>
+              <div>
+                <span className="text-gray-500">Aciertos MC:</span>
+                <span className="text-emerald-400 font-bold"> {selected.cur_hits}</span>
+              </div>
+              <div>
+                <span className="text-gray-500">Aciertos Kal:</span>
+                <span className="text-sky-400 font-bold"> {selected.kal_hits}</span>
+              </div>
+              <div>
+                <span className="text-gray-500">Mejor MC:</span>
+                <span className="text-amber-400 font-bold"> {selected.days.filter(d => d.mejor === 'actual').length}</span>
+              </div>
+              <div>
+                <span className="text-gray-500">Mejor Kal:</span>
+                <span className="text-violet-400 font-bold"> {selected.days.filter(d => d.mejor === 'kalman').length}</span>
+              </div>
+            </div>
+            <p className="text-[10px] text-gray-500 mt-2 text-center">
+              Q={selected.kalman.q} · R={selected.kalman.r.toFixed(2)} · Último bias Kalman: {selected.kalman.ultimo_bias >= 0 ? '+' : ''}{selected.kalman.ultimo_bias.toFixed(3)}°C
+            </p>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function MejoraContinua() {
   const [ciudadesData, setCiudadesData] = useState<Record<string, CityMejoraResult> | null>(null)
   const [loading, setLoading] = useState(true)
@@ -742,11 +1110,18 @@ export default function MejoraContinua() {
   const [nowcastLoading, setNowcastLoading] = useState(false)
   const [nowcastError, setNowcastError] = useState<string | null>(null)
 
+  // Kalman vs Mejora Continua state
+  const [kalmanData, setKalmanData] = useState<Record<string, KalmanCityResult> | null>(null)
+  const [kalmanLoading, setKalmanLoading] = useState(false)
+  const [kalmanError, setKalmanError] = useState<string | null>(null)
+
   const allSlugs = CIUDADES_ASIA.map(c => c.slug)
 
   useEffect(() => {
     if (subView === 'backtest_nowcast') {
       loadNowcast()
+    } else if (subView === 'backtest_kalman') {
+      loadKalman()
     } else if (subView === 'analisis') {
       loadData()
     }
@@ -779,6 +1154,21 @@ export default function MejoraContinua() {
       setNowcastError((e as Error).message)
     } finally {
       setNowcastLoading(false)
+    }
+  }
+
+  async function loadKalman() {
+    setKalmanLoading(true)
+    setKalmanError(null)
+    try {
+      const resp = await fetch(`/api/backtest-kalman?dias=${daysLimit}`)
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+      const json = await resp.json()
+      setKalmanData(json.ciudades)
+    } catch (e) {
+      setKalmanError((e as Error).message)
+    } finally {
+      setKalmanLoading(false)
     }
   }
 
@@ -895,10 +1285,20 @@ export default function MejoraContinua() {
           >
             ⏱ Nowcast 10PM vs 11PM
           </button>
+          <button
+            onClick={() => setSubView('backtest_kalman')}
+            className={`rounded-lg px-4 py-2 text-sm font-medium transition ${
+              subView === 'backtest_kalman'
+                ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/20'
+                : 'bg-slate-700 text-gray-300 hover:bg-slate-600'
+            }`}
+          >
+            🧪 MC Actual vs Kalman
+          </button>
         </div>
 
         {/* Controls */}
-        {(subView === 'analisis' || subView === 'backtest_nowcast') && (
+        {(subView === 'analisis' || subView === 'backtest_nowcast' || subView === 'backtest_kalman') && (
           <>
             <div className="flex flex-wrap gap-3 items-end">
               <div>
@@ -928,11 +1328,11 @@ export default function MejoraContinua() {
                 </select>
               </div>
               <button
-                onClick={subView === 'backtest_nowcast' ? loadNowcast : loadData}
-                disabled={subView === 'backtest_nowcast' ? nowcastLoading : loading}
+                onClick={subView === 'backtest_nowcast' ? loadNowcast : subView === 'backtest_kalman' ? loadKalman : loadData}
+                disabled={subView === 'backtest_nowcast' ? nowcastLoading : subView === 'backtest_kalman' ? kalmanLoading : loading}
                 className="rounded-lg bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-500 transition disabled:opacity-50"
               >
-                {(subView === 'backtest_nowcast' ? nowcastLoading : loading) ? 'Cargando...' : '↻ Actualizar'}
+                {(subView === 'backtest_nowcast' ? nowcastLoading : subView === 'backtest_kalman' ? kalmanLoading : loading) ? 'Cargando...' : '↻ Actualizar'}
               </button>
             </div>
 
@@ -981,6 +1381,35 @@ export default function MejoraContinua() {
           {!nowcastLoading && nowcastData && Object.keys(nowcastData).length > 0 && (
             <NowcastView
               data={nowcastData}
+              ciudadSlug={ciudadSlug}
+              setCiudadSlug={setCiudadSlug}
+            />
+          )}
+        </>
+      )}
+
+      {subView === 'backtest_kalman' && (
+        <>
+          {kalmanError && (
+            <div className="rounded-xl bg-red-500/10 border border-red-500/20 p-4 text-sm text-red-400">⚠️ {kalmanError}</div>
+          )}
+
+          {kalmanLoading && (
+            <div className="text-center py-8 text-gray-400 text-sm">
+              <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-gray-400 border-t-emerald-400 mr-2" />
+              Comparando Mejora Continua vs Kalman 1D...
+            </div>
+          )}
+
+          {!kalmanLoading && kalmanData && Object.keys(kalmanData).length === 0 && (
+            <div className="rounded-xl bg-slate-800/50 border border-gray-700/30 p-8 text-center text-gray-400 text-sm">
+              No hay suficientes datos con doble registro (10PM/11PM) para comparar.
+            </div>
+          )}
+
+          {!kalmanLoading && kalmanData && Object.keys(kalmanData).length > 0 && (
+            <KalmanView
+              data={kalmanData}
               ciudadSlug={ciudadSlug}
               setCiudadSlug={setCiudadSlug}
             />
