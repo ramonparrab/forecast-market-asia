@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { DailyAnalysis, GlobalMetrics } from '@/types'
 import { computeExecutiveSummary, ExecutiveSummary, BetAction } from '@/lib/unified-model'
+import { getModeloNombre } from '@/lib/modelo-selector'
 
 function useCronCountdown(): string {
   const [label, setLabel] = useState('')
@@ -470,7 +471,7 @@ export default function ExecutiveSummaryPanel({ analysis, metrics, previousAnaly
                   <p className={`inline-block rounded-md border px-1 py-px text-[7px] font-bold mt-0.5 ${
                     c.forecast.modelo_activo === 'KALMAN' ? 'bg-cyan-500/15 border-cyan-400/30 text-cyan-300' : 'bg-emerald-500/15 border-emerald-400/30 text-emerald-300'
                   }`}>
-                    {c.forecast.modelo_activo === 'KALMAN' ? 'KALMAN' : 'MC'}
+                    {getModeloNombre(c.slug, c.forecast.modelo_activo)}
                   </p>
                 )}
                 <div className="flex items-center justify-center gap-1 mt-0.5">

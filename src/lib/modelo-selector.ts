@@ -27,6 +27,19 @@ export function getModeloActivo(slug: string): ModeloActivo {
   return MODELO_POR_CIUDAD[slug] ?? 'MEJORA CONTINUA'
 }
 
+/**
+ * Nombre descriptivo del pipeline real aplicado por ciudad:
+ *   KALMAN      -> filtro Kalman 1D (bias adaptativo)
+ *   chongqing   -> combinado_estandar: estación + rango + boost (único MC combinado)
+ *   resto MC    -> pipeline adaptativo solo-estación
+ */
+export function getModeloNombre(slug: string, modelo?: string): string {
+  const m = (modelo ?? getModeloActivo(slug)) as ModeloActivo
+  if (m === 'KALMAN') return 'Kalman 1D'
+  if (slug === 'chongqing') return 'Combinado'
+  return 'St·Adapt'
+}
+
 export function round2(v: number): number {
   return Math.round(v * 100) / 100
 }

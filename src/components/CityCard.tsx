@@ -1,4 +1,5 @@
 import { CityAnalysis, PolymarketContract } from '@/types'
+import { getModeloNombre } from '@/lib/modelo-selector'
 import Tooltip from './Tooltip'
 
 interface CityCardProps {
@@ -302,8 +303,8 @@ export default function CityCard({ data }: CityCardProps) {
             )}
             <span className="text-xl text-emerald-400 ml-2">{forecast.temp_corregida.toFixed(1)}°C</span>
             {forecast.modelo_activo && (
-              <span className={`ml-2 inline-block rounded-md px-1.5 py-0.5 text-[10px] font-bold border ${getModeloBadgeClass(forecast.modelo_activo)}`} title={`Modelo base usado para este pronóstico`}>
-                {forecast.modelo_activo}
+              <span className={`ml-2 inline-block rounded-md px-1.5 py-0.5 text-[10px] font-bold border ${getModeloBadgeClass(forecast.modelo_activo)}`} title={`Modelo base usado para este pronóstico: ${getModeloNombre(data.slug, forecast.modelo_activo)}`}>
+                {getModeloNombre(data.slug, forecast.modelo_activo)}
                 {forecast.modelo_muestras !== undefined && <span className="font-normal"> · {forecast.modelo_muestras} muestras</span>}
               </span>
             )}

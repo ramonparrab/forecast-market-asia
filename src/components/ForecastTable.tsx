@@ -1,4 +1,5 @@
 import { DailyAnalysis } from '@/types'
+import { getModeloNombre } from '@/lib/modelo-selector'
 
 interface ForecastTableProps {
   data: DailyAnalysis
@@ -31,11 +32,11 @@ export default function ForecastTable({ data }: ForecastTableProps) {
         <div className="flex items-center gap-3 text-xs text-gray-400">
           <span>Modelo base por ciudad:</span>
           <span className="inline-flex items-center gap-1">
-            <span className="inline-block rounded-md bg-cyan-500/15 border border-cyan-400/30 px-1.5 py-0.5 text-[10px] font-bold text-cyan-300">KALMAN</span>
+            <span className="inline-block rounded-md bg-cyan-500/15 border border-cyan-400/30 px-1.5 py-0.5 text-[10px] font-bold text-cyan-300">Kalman 1D</span>
             ciudad optimizada con filtro Kalman 1D
           </span>
           <span className="inline-flex items-center gap-1">
-            <span className="inline-block rounded-md bg-emerald-500/15 border border-emerald-400/30 px-1.5 py-0.5 text-[10px] font-bold text-emerald-300">MC</span>
+            <span className="inline-block rounded-md bg-emerald-500/15 border border-emerald-400/30 px-1.5 py-0.5 text-[10px] font-bold text-emerald-300">St·Adapt / Combinado</span>
             ciudad optimizada con Mejora Continua
           </span>
         </div>
@@ -67,7 +68,7 @@ export default function ForecastTable({ data }: ForecastTableProps) {
               <tr key={i} className="border-b border-gray-800/50 hover:bg-slate-700/30">
                 <td className="py-2 pr-3 font-medium text-white">{row.ciudad}</td>
                 <td className="py-2 pr-3">
-                  <ModeloTag modelo={row.modelo} sesgo={row.sesgoModelo} />
+                  <ModeloTag modelo={row.modelo} slug={row.slug} sesgo={row.sesgoModelo} />
                 </td>
                 <td className="py-2 pr-3 text-gray-300">{row.contrato}</td>
                 <td className="py-2 pr-3 text-right text-gray-400">{row.mkt}</td>
@@ -98,13 +99,13 @@ export default function ForecastTable({ data }: ForecastTableProps) {
   )
 }
 
-function ModeloTag({ modelo, sesgo }: { modelo?: string; sesgo?: number }) {
+function ModeloTag({ modelo, slug, sesgo }: { modelo?: string; slug: string; sesgo?: number }) {
   if (!modelo) return <span className="text-[10px] text-gray-600">Ensemble</span>
   const isKal = modelo === 'KALMAN'
   const cls = isKal ? 'bg-cyan-500/15 border-cyan-400/30 text-cyan-300' : 'bg-emerald-500/15 border-emerald-400/30 text-emerald-300'
-  const label = isKal ? 'KALMAN' : 'MC'
+  const label = getModeloNombre(slug, modelo)
   return (
-    <span className={`inline-block rounded-md border px-1.5 py-0.5 text-[10px] font-bold ${cls}`} title={sesgo !== undefined ? `Sesgo del modelo ganador: ${sesgo > 0 ? '+' : ''}${sesgo.toFixed(2)}°C` : modelo}>
+    <span className={`inline-block rounded-md border px-1.5 py-0.5 text-[10px] font-bold ${cls}`} title={sesgo !== undefined ? `Pipeline: ${label} · Sesgo del modelo ganador: ${sesgo > 0 ? '+' : ''}${sesgo.toFixed(2)}°C` : `Pipeline: ${label}`}>
       {label}
     </span>
   )

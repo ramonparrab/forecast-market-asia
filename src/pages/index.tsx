@@ -16,6 +16,7 @@ import BacktestSi from '@/components/BacktestSi'
 import Arquitectura from '@/components/Arquitectura'
 
 import { DailyAnalysis, GlobalMetrics, CityAnalysis } from '@/types'
+import { getModeloNombre } from '@/lib/modelo-selector'
 
 export async function getServerSideProps() {
   const supabaseUrl = String(process.env.NEXT_PUBLIC_SUPABASE_URL || '').replace(/\/rest\/v1\/?$/, '')
@@ -779,11 +780,11 @@ export default function Home({ initialAnalysis, initialMetrics, initialAvailable
           <div className="rounded-xl bg-slate-800/50 border border-gray-700/30 px-4 py-3 text-xs text-gray-400 flex flex-wrap items-center gap-x-5 gap-y-2">
             <span className="text-gray-500 font-medium">🧠 Modelo base del pronóstico por ciudad:</span>
             <span className="inline-flex items-center gap-1.5">
-              <span className="inline-block rounded-md bg-cyan-500/15 border border-cyan-400/30 px-1.5 py-0.5 text-[10px] font-bold text-cyan-300">KALMAN</span>
+              <span className="inline-block rounded-md bg-cyan-500/15 border border-cyan-400/30 px-1.5 py-0.5 text-[10px] font-bold text-cyan-300">Kalman 1D</span>
               Corrección adaptativa 1D (gana en Seúl, Beijing, Shanghái, HK, Shenzhen, Singapur)
             </span>
             <span className="inline-flex items-center gap-1.5">
-              <span className="inline-block rounded-md bg-emerald-500/15 border border-emerald-400/30 px-1.5 py-0.5 text-[10px] font-bold text-emerald-300">MC</span>
+              <span className="inline-block rounded-md bg-emerald-500/15 border border-emerald-400/30 px-1.5 py-0.5 text-[10px] font-bold text-emerald-300">St·Adapt / Combinado</span>
               Mejora Continua (gana en Tokio, Wuhan, Chongqing, Chengdu)
             </span>
           </div>
@@ -814,7 +815,7 @@ export default function Home({ initialAnalysis, initialMetrics, initialAvailable
                     <p className="text-lg sm:text-xl font-bold text-emerald-400">{city.forecast.temp_corregida.toFixed(1)}°C</p>
                     {city.forecast.modelo_activo && (
                       <p className={`text-[8px] font-bold mt-0.5 ${city.forecast.modelo_activo === 'KALMAN' ? 'text-cyan-400' : 'text-emerald-400'}`}>
-                        {city.forecast.modelo_activo === 'KALMAN' ? 'KALMAN' : 'MC'}
+                        {getModeloNombre(city.slug, city.forecast.modelo_activo)}
                       </p>
                     )}
                     <p className="text-[9px] text-gray-600">{city.exito_pct}% acierto</p>
