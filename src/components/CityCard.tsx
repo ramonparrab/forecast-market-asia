@@ -5,6 +5,11 @@ interface CityCardProps {
   data: CityAnalysis
 }
 
+function getModeloBadgeClass(modelo: string): string {
+  if (modelo === 'KALMAN') return 'bg-cyan-500/15 border-cyan-400/30 text-cyan-300'
+  return 'bg-emerald-500/15 border-emerald-400/30 text-emerald-300'
+}
+
 function ConsensoBadge({ consenso }: { consenso: string }) {
   if (consenso === 'MUY FUERTE') return (
     <Tooltip
@@ -296,6 +301,12 @@ export default function CityCard({ data }: CityCardProps) {
               </span>
             )}
             <span className="text-xl text-emerald-400 ml-2">{forecast.temp_corregida.toFixed(1)}°C</span>
+            {forecast.modelo_activo && (
+              <span className={`ml-2 inline-block rounded-md px-1.5 py-0.5 text-[10px] font-bold border ${getModeloBadgeClass(forecast.modelo_activo)}`} title={`Modelo base usado para este pronóstico`}>
+                {forecast.modelo_activo}
+                {forecast.modelo_muestras !== undefined && <span className="font-normal"> · {forecast.modelo_muestras} muestras</span>}
+              </span>
+            )}
           </h3>
           <p className="text-xs text-gray-500">{data.slug} · {modelosCount} modelos</p>
         </div>

@@ -775,6 +775,19 @@ export default function Home({ initialAnalysis, initialMetrics, initialAvailable
       {/* Dashboard View */}
       {activeView === 'dashboard' && analysis && (
         <div className="space-y-6">
+          {/* Model legend */}
+          <div className="rounded-xl bg-slate-800/50 border border-gray-700/30 px-4 py-3 text-xs text-gray-400 flex flex-wrap items-center gap-x-5 gap-y-2">
+            <span className="text-gray-500 font-medium">🧠 Modelo base del pronóstico por ciudad:</span>
+            <span className="inline-flex items-center gap-1.5">
+              <span className="inline-block rounded-md bg-cyan-500/15 border border-cyan-400/30 px-1.5 py-0.5 text-[10px] font-bold text-cyan-300">KALMAN</span>
+              Corrección adaptativa 1D (gana en Seúl, Beijing, Shanghái, HK, Shenzhen, Singapur)
+            </span>
+            <span className="inline-flex items-center gap-1.5">
+              <span className="inline-block rounded-md bg-emerald-500/15 border border-emerald-400/30 px-1.5 py-0.5 text-[10px] font-bold text-emerald-300">MC</span>
+              Mejora Continua (gana en Tokio, Wuhan, Chongqing, Chengdu)
+            </span>
+          </div>
+
           {/* City Success Summary */}
           <CitySuccessSummary cities={analysis.cities} />
 
@@ -799,6 +812,11 @@ export default function Home({ initialAnalysis, initialMetrics, initialAvailable
                   <div key={city.slug} className="p-3 text-center hover:bg-blue-500/5 transition">
                     <p className="text-[10px] text-gray-500 truncate">{city.ciudad.split(',')[0]}</p>
                     <p className="text-lg sm:text-xl font-bold text-emerald-400">{city.forecast.temp_corregida.toFixed(1)}°C</p>
+                    {city.forecast.modelo_activo && (
+                      <p className={`text-[8px] font-bold mt-0.5 ${city.forecast.modelo_activo === 'KALMAN' ? 'text-cyan-400' : 'text-emerald-400'}`}>
+                        {city.forecast.modelo_activo === 'KALMAN' ? 'KALMAN' : 'MC'}
+                      </p>
+                    )}
                     <p className="text-[9px] text-gray-600">{city.exito_pct}% acierto</p>
                     <p className="text-[8px] text-blue-400 mt-0.5">corrección: {city.forecast.sesgo_aplicado > 0 ? '+' : ''}{city.forecast.sesgo_aplicado.toFixed(1)}°C</p>
                     <p className="text-[7px] text-gray-600">{Object.keys(city.forecast.ensemble_raw ?? {}).length} modelos · {city.forecast.consenso}</p>

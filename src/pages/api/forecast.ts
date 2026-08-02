@@ -45,8 +45,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       fecha_objetivo: fecha,
       ciudad: city.ciudad,
       slug: city.slug,
+      // Base del ensemble en forecast_history (entrenamiento MC/Kalman estable);
+      // el valor corregido por el modelo ganador se guarda en daily_runs.
       temp_pronosticada: city.forecast.temp_ponderada,
-      temp_corregida: city.forecast.temp_corregida,
+      temp_corregida: city.forecast.temp_corregida_base ?? city.forecast.temp_corregida,
       temp_real: null,
       error: null,
       modelos_usados: Object.keys(city.forecast.ensemble_raw).length,

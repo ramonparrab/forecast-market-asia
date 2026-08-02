@@ -13,6 +13,8 @@ export default function ForecastTable({ data }: ForecastTableProps) {
       mkt: c.prob_mkt,
       ia: Math.round((c.prob_ia_norm ?? 0) * 10000) / 100,
       temp: city.forecast.temp_corregida,
+      modelo: city.forecast.modelo_activo,
+      sesgoModelo: city.forecast.sesgo_modelo,
       consenso: city.forecast.consenso,
       arb: city.arbitraje.nivel,
     }))
@@ -24,11 +26,25 @@ export default function ForecastTable({ data }: ForecastTableProps) {
 
   return (
     <div className="card overflow-x-auto">
-      <h2 className="mb-4 text-lg font-semibold text-white">📊 Tabla Completa</h2>
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+        <h2 className="text-lg font-semibold text-white">📊 Tabla Completa</h2>
+        <div className="flex items-center gap-3 text-xs text-gray-400">
+          <span>Modelo base por ciudad:</span>
+          <span className="inline-flex items-center gap-1">
+            <span className="inline-block rounded-md bg-cyan-500/15 border border-cyan-400/30 px-1.5 py-0.5 text-[10px] font-bold text-cyan-300">KALMAN</span>
+            ciudad optimizada con filtro Kalman 1D
+          </span>
+          <span className="inline-flex items-center gap-1">
+            <span className="inline-block rounded-md bg-emerald-500/15 border border-emerald-400/30 px-1.5 py-0.5 text-[10px] font-bold text-emerald-300">MC</span>
+            ciudad optimizada con Mejora Continua
+          </span>
+        </div>
+      </div>
       <table className="w-full text-sm">
         <thead>
           <tr className="border-b border-gray-700 text-left text-xs uppercase tracking-wider text-gray-500">
             <th className="pb-2 pr-3">Ciudad</th>
+            <th className="pb-2 pr-3">Modelo</th>
             <th className="pb-2 pr-3">Contrato</th>
             <th className="pb-2 pr-3 text-right">Mkt%</th>
             <th className="pb-2 pr-3 text-right">IA%</th>
@@ -50,6 +66,9 @@ export default function ForecastTable({ data }: ForecastTableProps) {
             return (
               <tr key={i} className="border-b border-gray-800/50 hover:bg-slate-700/30">
                 <td className="py-2 pr-3 font-medium text-white">{row.ciudad}</td>
+                <td className="py-2 pr-3">
+                  <ModeloTag modelo={row.modelo} sesgo={row.sesgoModelo} />
+                </td>
                 <td className="py-2 pr-3 text-gray-300">{row.contrato}</td>
                 <td className="py-2 pr-3 text-right text-gray-400">{row.mkt}</td>
                 <td className="py-2 pr-3 text-right text-blue-300">{row.ia}</td>
@@ -68,7 +87,7 @@ export default function ForecastTable({ data }: ForecastTableProps) {
           })}
           {allBets.length === 0 && (
             <tr>
-              <td colSpan={8} className="py-8 text-center text-gray-500">
+              <td colSpan={9} className="py-8 text-center text-gray-500">
                 No hay datos disponibles. Ejecuta un análisis primero.
               </td>
             </tr>
@@ -76,6 +95,18 @@ export default function ForecastTable({ data }: ForecastTableProps) {
         </tbody>
       </table>
     </div>
+  )
+}
+
+function ModeloTag({ modelo, sesgo }: { modelo?: string; sesgo?: number }) {
+  if (!modelo) return <span className="text-[10px] text-gray-600">Ensemble</span>
+  const isKal = modelo === 'KALMAN'
+  const cls = isKal ? 'bg-cyan-500/15 border-cyan-400/30 text-cyan-300' : 'bg-emerald-500/15 border-emerald-400/30 text-emerald-300'
+  const label = isKal ? 'KALMAN' : 'MC'
+  return (
+    <span className={`inline-block rounded-md border px-1.5 py-0.5 text-[10px] font-bold ${cls}`} title={sesgo !== undefined ? `Sesgo del modelo ganador: ${sesgo > 0 ? '+' : ''}${sesgo.toFixed(2)}°C` : modelo}>
+      {label}
+    </span>
   )
 }
 

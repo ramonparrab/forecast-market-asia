@@ -27,6 +27,14 @@ export interface ForecastResult {
   sesgo_aplicado: number
   ensemble_members?: number[]
   weather?: WeatherCondition
+  /** Modelo ganador aplicado en vivo: 'MEJORA CONTINUA' | 'KALMAN' */
+  modelo_activo?: 'MEJORA CONTINUA' | 'KALMAN'
+  /** Sesgo extra aplicado por el modelo ganador (temp_corregida - base) */
+  sesgo_modelo?: number
+  /** Muestras usadas por el modelo ganador para calibrarse */
+  modelo_muestras?: number
+  /** Base del ensemble (sin el ajuste del modelo ganador), se persiste en forecast_history */
+  temp_corregida_base?: number
 }
 
 export interface PolymarketContract {

@@ -5,9 +5,10 @@ import { computeEnsemble } from './ensemble'
 import { monteCarloProbability, normalizeProbabilidades } from './montecarlo'
 import { fetchPolymarketPrices, parseContract } from './polymarket'
 import { calculateAllocation } from './kelly'
-import { getRecentErrors, getRecentModelErrors, computeGlobalMetrics, getAllCalibrationPairs, getHistoricalAccuracy, getAllHistoricalErrors } from './supabase'
+import { getRecentErrors, getRecentModelErrors, computeGlobalMetrics, getAllCalibrationPairs, getHistoricalAccuracy, getAllHistoricalErrors, getCityHistory } from './supabase'
 import { nowcastTemperature } from './nowcaster'
 import { loadBacktestBias } from './backtest-bias'
+import { aplicarModeloGanador } from './modelo-selector'
 
 const SIMULACIONES = 20000
 
@@ -77,6 +78,31 @@ async function analyzeCity(
   // Apply dynamic bias correction AFTER nowcast
   const tempWithBias = tempFinal + (forecast.sesgo_aplicado ?? 0)
   forecast.temp_corregida = Math.round(Math.max(0, tempWithBias) * 100) / 100
+
+  // 3b. Applying winner model per city (MC or KALMAN) to the LIVE forecast.
+  // Note: the base (temp_corregida) is preserved in forecast.temp_corregida_base so
+  // MC/KALMAN keep training on the raw ensemble error, while the LIVE value shown
+  // to the user is overridden with the winner model's correction.
+  const baseTemp = forecast.temp_corregida
+  forecast.temp_corregida_base = baseTemp
+  try {
+    const cityHistory = await getCityHistory(city.slug)
+    if (cityHistory.length > 0) {
+      const { temp, modelo, bias, muestras } = aplicarModeloGanador(
+        city.slug,
+        city.nombre,
+        baseTemp,
+        cityHistory,
+        fechaObjetivo
+      )
+      forecast.temp_corregida = temp
+      forecast.modelo_activo = modelo
+      forecast.sesgo_modelo = bias
+      forecast.modelo_muestras = muestras
+    }
+  } catch (e) {
+    console.warn(`[${city.slug}] Skip winner-model (${(e as Error).message})`)
+  }
 
   // 4. Polymarket prices
   let contracts: PolymarketContract[] = []

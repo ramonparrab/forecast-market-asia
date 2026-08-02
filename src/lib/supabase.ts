@@ -195,6 +195,35 @@ export async function getHistoricalRecords(
   return (data as any) as HistoricalRecord[]
 }
 
+/**
+ * Historial completo de una ciudad con temp_real confirmada, usado para corregir
+ * el pronóstico vivo con el modelo ganador (MC / KALMAN) sin look-ahead.
+ */
+export async function getCityHistory(slug: string): Promise<HistoricalRecord[]> {
+  const client = getClient()
+  if (!client) return []
+
+  const { data, error } = await client
+    .from('forecast_history' as any)
+    .select('id, fecha_ejecucion, fecha_objetivo, ciudad, slug, temp_pronosticada, temp_corregida, temp_real, error, modelos_usados, consenso')
+    .eq('slug', slug)
+    .not('temp_real', 'is', null)
+    .not('error', 'is', null)
+    .order('fecha_objetivo', { ascending: true } as any)
+
+  if (error || !data) return []
+
+  // Dedup: keep latest id per (slug, fecha_objetivo)
+  const seen = new Map<string, any>()
+  for (const r of (data as any[])) {
+    const key = `${r.slug}|${r.fecha_objetivo}`
+    if (!seen.has(key) || r.id > seen.get(key).id) {
+      seen.set(key, r)
+    }
+  }
+  return Array.from(seen.values()) as HistoricalRecord[]
+}
+
 export async function getDailyRuns(limit = 30): Promise<DailyRun[]> {
   const client = getClient()
   if (!client) return []
