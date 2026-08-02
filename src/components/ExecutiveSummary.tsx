@@ -466,6 +466,13 @@ export default function ExecutiveSummaryPanel({ analysis, metrics, previousAnaly
                 </p>
                 <p className="text-sm font-extrabold text-emerald-400">{c.forecast.temp_corregida.toFixed(1)}°</p>
                 <p className="text-[9px] text-blue-300 font-semibold">{Math.round(c.forecast.temp_corregida)}° entero</p>
+                {c.forecast.modelo_activo && (
+                  <p className={`inline-block rounded-md border px-1 py-px text-[7px] font-bold mt-0.5 ${
+                    c.forecast.modelo_activo === 'KALMAN' ? 'bg-cyan-500/15 border-cyan-400/30 text-cyan-300' : 'bg-emerald-500/15 border-emerald-400/30 text-emerald-300'
+                  }`}>
+                    {c.forecast.modelo_activo === 'KALMAN' ? 'KALMAN' : 'MC'}
+                  </p>
+                )}
                 <div className="flex items-center justify-center gap-1 mt-0.5">
                   {needsAttention && <span className="text-red-400 text-[8px]">⚠</span>}
                   <span className={`text-[8px] font-bold ${c.exito_pct >= 55 ? 'text-emerald-400' : c.exito_pct >= 45 ? 'text-amber-400' : 'text-red-400'}`}>
