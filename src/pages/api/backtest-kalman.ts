@@ -173,7 +173,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         if (drFirst[key]) continue
 
         const cityData = parsed.find((c: any) => c.slug === slug)
-        const tc = cityData?.forecast?.temp_corregida
+        // Usar la BASE del ensemble (temp_corregida_base) si existe: desde el deploy del
+        // modelo ganador, daily_runs guarda el valor YA corregido; aquí se suma la
+        // corrección MC/Kalman de nuevo, así que sin esto habría doble corrección.
+        const tc = cityData?.forecast?.temp_corregida_base ?? cityData?.forecast?.temp_corregida
         if (tc == null) continue
         drFirst[key] = { id: run.id, fecha_ejecucion: run.fecha_ejecucion, tc: Number(tc) }
       }
