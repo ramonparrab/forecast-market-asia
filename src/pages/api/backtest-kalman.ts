@@ -157,9 +157,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       .gte('fecha_ejecucion', startDate.toISOString())
       .order('fecha_ejecucion', { ascending: true } as any)
 
-    // La 10PM de Caracas = 02:00Z (cron "0 2 * * *"). Tomamos el daily_runs de cada
-    // objetivo MÁS CERCANO a esa hora (no "el primer run del día", que puede ser un
-    // run manual de la web anterior). Fallback: si no hay ninguno cercano, el primero.
+    // La 10PM de Caracas = 02:00Z (cron "0 2 * * *"). Tomamos la corrida del cron:
+    // la primera daily_runs de cada objetivo con ts >= 02:00Z (la más cercana al
+    // disparo), no "el primer run del día" que puede ser un run manual de la web
+    // anterior (p.ej. 23:59Z del día previo). Fallback: la más cercana a 02:00Z.
     const drFirst: Record<string, { id: number; fecha_ejecucion: string; tc: number; dist: number }> = {}
 
     for (const run of (runs as any[]) ?? []) {
@@ -185,9 +186,17 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
         const runTs = new Date(run.fecha_ejecucion).getTime()
         const dist = Math.abs(runTs - cronTs)
+        const esCron = runTs >= cronTs
         const prev = drFirst[key]
-        if (!prev || dist < prev.dist) {
-          drFirst[key] = { id: run.id, fecha_ejecucion: run.fecha_ejecucion, tc: Number(tc), dist }
+        if (!prev) {
+          drFirst[key] = { id: run.id, fecha_ejecucion: run.fecha_ejecucion, tc: Number(tc), dist: esCron ? dist : dist + 24 * 60 * 60 * 1000 }
+        } else if (esCron) {
+          if (prev.dist > 24 * 60 * 60 * 1000) {
+            // primero con ts>=02:00Z: reemplaza cualquier pre-cron
+            drFirst[key] = { id: run.id, fecha_ejecucion: run.fecha_ejecucion, tc: Number(tc), dist }
+          } else if (dist < prev.dist) {
+            drFirst[key] = { id: run.id, fecha_ejecucion: run.fecha_ejecucion, tc: Number(tc), dist }
+          }
         }
       }
     }
