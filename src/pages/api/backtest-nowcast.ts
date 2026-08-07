@@ -167,14 +167,17 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       }
     })
 
-    // ============ 3) Read daily_runs first record per (slug, fecha) ============
+    // ============ 3) Read daily_runs: corrida REAL de las 10PM Caracas = cron Vercel 02:00Z ============
     const { data: runs } = await client
       .from('daily_runs' as any)
       .select('id, fecha_ejecucion, fecha_objetivo, resultados')
       .gte('fecha_ejecucion', startDate.toISOString())
       .order('fecha_ejecucion', { ascending: true } as any)
 
-    const drFirst: Record<string, { id: number; fecha_ejecucion: string; tc: number }> = {}
+    // La 10PM de Caracas = 02:00Z (cron "0 2 * * *"). Tomamos el daily_runs de cada
+    // objetivo MÁS CERCANO a esa hora (no "el primer run del día", que puede ser un
+    // run manual de la web anterior). Fallback: si no hay ninguno cercano, el primero.
+    const drFirst: Record<string, { id: number; fecha_ejecucion: string; tc: number; dist: number }> = {}
 
     for (const run of (runs as any[]) ?? []) {
       const fo = run.fecha_objetivo as string
@@ -183,11 +186,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       try { parsed = JSON.parse(run.resultados) } catch { continue }
       if (!Array.isArray(parsed)) continue
 
+      const cronTs = new Date(fo + 'T02:00:00.000Z').getTime()
+
       for (let si = 0; si < allSlugs.length; si++) {
         const slug = allSlugs[si]
         const key = slug + '|' + fo
         if (!fhMap[key]) continue
-        if (drFirst[key]) continue
 
         const cityData = parsed.find((c: any) => c.slug === slug)
         // Usar la BASE del ensemble (temp_corregida_base) si existe: desde el deploy del
@@ -195,7 +199,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         // corrección MC/Kalman de nuevo, así que sin esto habría doble corrección.
         const tc = cityData?.forecast?.temp_corregida_base ?? cityData?.forecast?.temp_corregida
         if (tc == null) continue
-        drFirst[key] = { id: run.id, fecha_ejecucion: run.fecha_ejecucion, tc: Number(tc) }
+
+        const runTs = new Date(run.fecha_ejecucion).getTime()
+        const dist = Math.abs(runTs - cronTs)
+        const prev = drFirst[key]
+        if (!prev || dist < prev.dist) {
+          drFirst[key] = { id: run.id, fecha_ejecucion: run.fecha_ejecucion, tc: Number(tc), dist }
+        }
       }
     }
 
