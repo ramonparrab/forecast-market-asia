@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { PerfGlobalResponse, PerfCiudad, PerfDay, PerfClasificacion } from '@/pages/api/performance'
+import AlertaClimaBanner from '@/components/AlertaClimaBanner'
 
 const RANGE_OPCIONES = [15, 30, 60, 90, 120, 365]
 
@@ -186,6 +187,9 @@ export default function PerformanceAnalisis() {
 
   return (
     <div className="space-y-5">
+      {/* Alerta climática: frente frío/calor/nieve/lluvia para el próximo día pronosticado */}
+      <AlertaClimaBanner compact />
+
       <div className="flex flex-wrap items-center gap-3 rounded-xl bg-slate-800/50 border border-gray-700/30 px-4 py-3">
         <span className="text-xs text-gray-400 font-medium">📊 Ventana de días:</span>
         <div className="flex gap-1">

@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react'
 import { DailyAnalysis, GlobalMetrics } from '@/types'
 import { computeExecutiveSummary, ExecutiveSummary, BetAction } from '@/lib/unified-model'
 import { getModeloNombre } from '@/lib/modelo-selector'
+import AlertaClimaBanner from '@/components/AlertaClimaBanner'
 
 function useCronCountdown(): string {
   const [label, setLabel] = useState('')
@@ -254,6 +255,9 @@ export default function ExecutiveSummaryPanel({ analysis, metrics, previousAnaly
     <div className="space-y-4">
       {/* ===== ALERT BAR ===== */}
       <SystemAlertBar alerts={alerts} />
+
+      {/* ===== ALERTA CLIMÁTICA (FRENTE FRÍO / CALOR / NIEVE / LLUVIA) ===== */}
+      <AlertaClimaBanner />
 
       {/* ===== CRON INFO ===== */}
       <div className="flex items-center justify-between rounded-lg bg-slate-800/30 border border-gray-700/20 px-4 py-2 text-xs">
