@@ -233,17 +233,34 @@ export default function PerformanceAnalisis() {
           {ciudadSel ? (
             <div className="space-y-3">
               {ciudadSel.recomendacion && (
-                <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4">
-                  <p className="text-[10px] uppercase tracking-wider text-emerald-400 mb-1.5">RECOMENDACIÓN · {ciudadSel.nombre} · basada en el historial evaluado</p>
-                  <p className="text-xs text-emerald-100 leading-relaxed">{ciudadSel.recomendacion.texto}</p>
-                  <div className="mt-2 flex flex-wrap gap-2 text-[11px]">
-                    <span className="rounded bg-emerald-500/20 px-2 py-0.5 text-emerald-200">Modelo: <b>{ciudadSel.recomendacion.modelo}</b> a las <b>{ciudadSel.recomendacion.hora}</b></span>
-                    <span className="rounded bg-emerald-500/20 px-2 py-0.5 text-emerald-200">Ajuste: <b>{ciudadSel.recomendacion.ajuste_entero > 0 ? '+' : ''}{ciudadSel.recomendacion.ajuste_entero}°C</b></span>
-                    <span className="rounded bg-emerald-500/20 px-2 py-0.5 text-emerald-200">Sesgo reciente: <b>{ciudadSel.recomendacion.sesgo_entero}°</b></span>
-                    <span className="rounded bg-emerald-500/20 px-2 py-0.5 text-emerald-200">MAE: <b>{ciudadSel.recomendacion.mae_ciudad}°</b> · aciertos {ciudadSel.recomendacion.aciertos_recientes}/{ciudadSel.recomendacion.n_recientes}</span>
-                    {ciudadSel.recomendacion.entero_objetivo != null && (
-                      <span className="rounded bg-emerald-500/30 px-2 py-0.5 text-emerald-100 font-bold">🎯 Objetivo {ciudadSel.recomendacion.entero_objetivo}°C para {ciudadSel.recomendacion.fecha_objetivo}</span>
-                    )}
+                <div className="rounded-2xl border-2 border-emerald-400/60 bg-gradient-to-br from-emerald-500/20 via-emerald-600/10 to-emerald-900/30 overflow-hidden relative">
+                  <div className="absolute -top-8 -right-8 h-32 w-32 rounded-full bg-emerald-400/10 blur-2xl" />
+                  <div className="relative p-5">
+                    <p className="text-[11px] uppercase tracking-[0.2em] text-emerald-400 font-bold mb-2">🎯 RECOMENDACIÓN DE APUESTA · {ciudadSel.nombre.toUpperCase()} · {ciudadSel.recomendacion.fecha_objetivo ?? 'historial evaluado'}</p>
+                    <p className="text-lg sm:text-2xl font-black text-white leading-tight mb-2">
+                      SE RECOMIENDA APOSTAR A LA TEMPERATURA DEL MODELO{' '}
+                      <span className="text-emerald-300 underline decoration-emerald-400/50 underline-offset-4">{ciudadSel.recomendacion.modelo.toUpperCase()}</span>{' '}
+                      A LAS <span className="text-emerald-300">{ciudadSel.recomendacion.hora}</span>
+                    </p>
+                    <p className="text-xl sm:text-3xl font-black mb-3">
+                      {ciudadSel.recomendacion.ajuste_entero === 0 ? (
+                        <span className="text-white">TEMPERATURA PRONOSTICADA <span className="text-emerald-300">SIN AJUSTE</span></span>
+                      ) : (
+                        <span className="text-white">TEMPERATURA PRONOSTICADA <span className="text-amber-300">{ciudadSel.recomendacion.ajuste_entero > 0 ? '+' : ''}{ciudadSel.recomendacion.ajuste_entero}°C</span></span>
+                      )}
+                      {ciudadSel.recomendacion.entero_objetivo != null && (
+                        <span className="block mt-1 text-3xl sm:text-4xl font-black text-yellow-300 drop-shadow-[0_0_12px_rgba(250,204,21,0.4)]">
+                          🎲 → {ciudadSel.recomendacion.entero_objetivo}°C
+                        </span>
+                      )}
+                    </p>
+                    <div className="flex flex-wrap gap-2 text-[11px]">
+                      <span className="rounded-lg bg-emerald-500/20 px-2.5 py-1 text-emerald-100 border border-emerald-400/30">Historial: <b>{ciudadSel.recomendacion.n_recientes} días</b></span>
+                      <span className="rounded-lg bg-emerald-500/20 px-2.5 py-1 text-emerald-100 border border-emerald-400/30">MAE: <b>{ciudadSel.recomendacion.mae_ciudad}°C</b></span>
+                      <span className="rounded-lg bg-emerald-500/20 px-2.5 py-1 text-emerald-100 border border-emerald-400/30">Acierto exacto: <b>{Math.round((ciudadSel.recomendacion.aciertos_recientes / Math.max(1, ciudadSel.recomendacion.n_recientes)) * 100)}%</b></span>
+                      <span className="rounded-lg bg-emerald-500/20 px-2.5 py-1 text-emerald-100 border border-emerald-400/30">Sesgo: <b>{ciudadSel.recomendacion.sesgo_entero > 0 ? '+' : ''}{ciudadSel.recomendacion.sesgo_entero}°</b></span>
+                    </div>
+                    <p className="mt-3 text-xs text-emerald-200/90 leading-relaxed max-w-3xl">{ciudadSel.recomendacion.texto}</p>
                   </div>
                 </div>
               )}

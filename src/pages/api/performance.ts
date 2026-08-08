@@ -247,10 +247,8 @@ function generarRecomendacion(c: PerfCiudad): PerfRecomendacion | null {
     return v != null && d.temp_real != null && roundInt(v) === roundInt(d.temp_real)
   }).length
 
-  const texto = `RECOMENDACIÓN: apostar con ${mejor.label} a las ${mejorHora} (MAE ${round2(mejorMAE)}°C y acierto exacto ${Math.round((yAciertos / recientes.length) * 100)}% en los últimos ${recientes.length} días). Sesgo reciente ${bias >= 0 ? '+' : ''}${round2(bias)}° → ` +
-    (ajuste === 0
-      ? `apostar directo al entero redondeado${enteroObj != null ? ` (objetivo ${enteroObj}°C para ${fechaObj})` : ''}.`
-      : `apostar al pronóstico ${ajuste > 0 ? '+' : ''}${ajuste}°C${enteroObj != null ? ` (objetivo ${enteroObj}°C para ${fechaObj})` : ''}.`)
+  const ajusteStr = ajuste === 0 ? 'la temperatura pronosticada SIN AJUSTE' : `TEMPERATURA PRONOSTICADA ${ajuste > 0 ? '+' : ''}${ajuste}°C`
+  const texto = `SE RECOMIENDA APOSTAR A LA TEMPERATURA DEL MODELO ${mejor.label.toUpperCase()} A LAS ${mejorHora} → ${ajusteStr}${enteroObj != null ? ` = ${enteroObj}°C PARA ${fechaObj}` : ''}. HISTORIAL: ${recientes.length} días evaluados, MAE ${round2(mejorMAE)}°C, acierto exacto ${Math.round((yAciertos / recientes.length) * 100)}%, sesgo ${bias >= 0 ? '+' : ''}${round2(bias)}°.`
 
   return {
     modelo: mejor.label,
