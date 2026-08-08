@@ -67,13 +67,9 @@ function ganaDe(a10: boolean, a11: boolean): KalmanDay['cur_gana'] {
   return null
 }
 
-export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' })
-
+export async function computeBacktestKalman(daysLimit: number, slugFilter: string = ''): Promise<Record<string, KalmanCityResult>> {
   try {
     const client = createClient(supabaseUrl, supabaseKey)
-    const daysLimit = parseInt(req.query.dias as string || '60') || 60
-    const slugFilter = (req.query.ciudad as string || '').trim()
 
     const endDate = new Date()
     const startDate = new Date()
@@ -94,7 +90,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     fhQuery = fhQuery.order('fecha_objetivo', { ascending: true } as any)
 
     const { data: allFh } = await fhQuery
-    if (!allFh || allFh.length === 0) return res.status(200).json({ ciudades: {} })
+    if (!allFh || allFh.length === 0) return {}
 
     const fhBySlug: Record<string, { historical: any[]; pending: any[] }> = {}
     for (const r of allFh as any[]) {
@@ -201,7 +197,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       }
     }
 
-    if (Object.keys(drFirst).length === 0) return res.status(200).json({ ciudades: {} })
+    if (Object.keys(drFirst).length === 0) return {}
 
     // ============ 5) Correcciones: modelo actual + Kalman ============
     const slugCurCorrections: Record<string, Record<string, number>> = {}
@@ -403,6 +399,19 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       }
     })
 
+    return ciudades
+  } catch (error) {
+    console.error('[backtest-kalman]', error)
+    throw error
+  }
+}
+
+export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+  if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' })
+  try {
+    const daysLimit = parseInt(req.query.dias as string || '60') || 60
+    const slugFilter = (req.query.ciudad as string || '').trim()
+    const ciudades = await computeBacktestKalman(daysLimit, slugFilter)
     return res.status(200).json({ ciudades })
   } catch (error) {
     console.error('[backtest-kalman]', error)
