@@ -54,7 +54,7 @@ function CityTable({ ciudad }: { ciudad: PerfCiudad }) {
           </tr>
         </thead>
         <tbody className="divide-y divide-gray-800">
-          {ciudad.dias.filter(d => d.temp_real != null).map(d => (
+          {ciudad.dias.filter(d => d.temp_real != null).slice().sort((a, b) => b.fecha_objetivo.localeCompare(a.fecha_objetivo)).map(d => (
             <tr key={d.fecha_objetivo} className="hover:bg-slate-800/40">
               <td className="px-2 py-1 text-xs text-gray-400 whitespace-nowrap">{d.fecha_objetivo}</td>
               <td className="px-2 py-1 text-center text-sm font-bold text-white">{d.temp_real}°</td>
