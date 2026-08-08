@@ -228,6 +228,21 @@ export default function PerformanceAnalisis() {
 
           {ciudadSel ? (
             <div className="space-y-3">
+              {ciudadSel.recomendacion && (
+                <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4">
+                  <p className="text-[10px] uppercase tracking-wider text-emerald-400 mb-1.5">RECOMENDACIÓN · {ciudadSel.nombre} · basada en el historial evaluado</p>
+                  <p className="text-xs text-emerald-100 leading-relaxed">{ciudadSel.recomendacion.texto}</p>
+                  <div className="mt-2 flex flex-wrap gap-2 text-[11px]">
+                    <span className="rounded bg-emerald-500/20 px-2 py-0.5 text-emerald-200">Modelo: <b>{ciudadSel.recomendacion.modelo}</b> a las <b>{ciudadSel.recomendacion.hora}</b></span>
+                    <span className="rounded bg-emerald-500/20 px-2 py-0.5 text-emerald-200">Ajuste: <b>{ciudadSel.recomendacion.ajuste_entero > 0 ? '+' : ''}{ciudadSel.recomendacion.ajuste_entero}°C</b></span>
+                    <span className="rounded bg-emerald-500/20 px-2 py-0.5 text-emerald-200">Sesgo reciente: <b>{ciudadSel.recomendacion.sesgo_entero}°</b></span>
+                    <span className="rounded bg-emerald-500/20 px-2 py-0.5 text-emerald-200">MAE: <b>{ciudadSel.recomendacion.mae_ciudad}°</b> · aciertos {ciudadSel.recomendacion.aciertos_recientes}/{ciudadSel.recomendacion.n_recientes}</span>
+                    {ciudadSel.recomendacion.entero_objetivo != null && (
+                      <span className="rounded bg-emerald-500/30 px-2 py-0.5 text-emerald-100 font-bold">🎯 Objetivo {ciudadSel.recomendacion.entero_objetivo}°C para {ciudadSel.recomendacion.fecha_objetivo}</span>
+                    )}
+                  </div>
+                </div>
+              )}
               <div className="flex items-center gap-3 flex-wrap">
                 <h3 className="text-sm font-bold text-white">📋 Detalle diario — {ciudadSel.nombre}</h3>
                 <span className="rounded-md bg-slate-800 border border-gray-700 px-2 py-0.5 text-[10px] text-blue-300">modelo activo: {ciudadSel.modelo_nombre}</span>

@@ -44,6 +44,21 @@ export interface PerfStats {
   dist: Record<string, number>
 }
 
+export interface PerfRecomendacion {
+  modelo: string
+  columna: string
+  hora: '10PM' | '11PM'
+  ajuste_entero: number
+  sesgo_entero: number
+  mae_ciudad: number | null
+  n_recientes: number
+  aciertos_recientes: number
+  entero_objetivo: number | null
+  fecha_objetivo: string | null
+  valor_crudo: number | null
+  texto: string
+}
+
 export interface PerfCiudad {
   slug: string
   nombre: string
@@ -55,6 +70,7 @@ export interface PerfCiudad {
   stats_kal: PerfStats
   mejor_modelo_ventana: 'actual' | 'kalman' | 'empate'
   resumen: string
+  recomendacion: PerfRecomendacion | null
 }
 
 export interface PerfGlobalResponse {
@@ -139,10 +155,124 @@ function textModelo(modelo: string): string {
   return modelo === 'KALMAN' ? 'Kalman 1D' : 'Mejora Continua'
 }
 
+interface ColCand {
+  label: string
+  v10: 'act_10pm' | 'act_11pm' | 'cur_10pm' | 'cur_11pm' | 'kal_10pm' | 'kal_11pm'
+  v11: 'act_10pm' | 'act_11pm' | 'cur_10pm' | 'cur_11pm' | 'kal_10pm' | 'kal_11pm'
+}
+
+function colVal(d: PerfDay, col: ColCand['v10']): number | null {
+  return (d as unknown as Record<string, number | null>)[col] ?? null
+}
+
+function generarRecomendacion(c: PerfCiudad): PerfRecomendacion | null {
+  const conReal = c.dias.filter(d => d.temp_real != null)
+  if (conReal.length < 5) return null
+  // Evaluaciones recientes (últimos 15 días con real en la ventana)
+  const recientes = conReal.slice(-15)
+
+  // Candidatos: siempre el modelo ACTIVO de la ciudad más Kalman y Mejora Continua
+  const cands: ColCand[] = [
+    { label: c.modelo_nombre, v10: 'act_10pm', v11: 'act_11pm' },
+    { label: 'Kalman 1D', v10: 'kal_10pm', v11: 'kal_11pm' },
+    { label: 'MC Combinada', v10: 'cur_10pm', v11: 'cur_11pm' },
+  ]
+
+  let mejor: ColCand | null = null
+  let mejorMAE = Infinity
+  let mejorHora: '10PM' | '11PM' = '11PM'
+  let mejorAciertos = 0
+
+  for (const cand of cands) {
+    let mae10 = 0, mae11 = 0, h10 = 0, h11 = 0
+    for (const d of recientes) {
+      const real = d.temp_real as number
+      const v10 = colVal(d, cand.v10)
+      const v11 = colVal(d, cand.v11)
+      const e10 = v10 != null ? Math.abs(v10 - real) : 99
+      const e11 = v11 != null ? Math.abs(v11 - real) : 99
+      mae10 += e10; mae11 += e11
+      if (v10 != null && roundInt(v10) === roundInt(real)) h10++
+      if (v11 != null && roundInt(v11) === roundInt(real)) h11++
+    }
+    const n = recientes.length
+    const maeMejor = Math.min(mae10, mae11) / n
+    const hrs: '10PM' | '11PM' = mae11 < mae10 ? '11PM' : '10PM'
+    const acH = hrs === '11PM' ? h11 : h10
+    if (!mejor || maeMejor < mejorMAE || (maeMejor === mejorMAE && acH > mejorAciertos)) {
+      mejor = cand
+      mejorMAE = maeMejor
+      mejorHora = hrs
+      mejorAciertos = acH
+    }
+  }
+  if (!mejor) return null
+
+  // Sesgo reciente (en enteros) de la columna en la hora ganadora: positivo = pronostica arriba del real
+  let sumaBias = 0
+  let nBias = 0
+  for (const d of recientes) {
+    const v = mejorHora === '11PM' ? colVal(d, mejor.v11) : colVal(d, mejor.v10)
+    if (v != null && d.temp_real != null) {
+      sumaBias += roundInt(v) - roundInt(d.temp_real)
+      nBias++
+    }
+  }
+  const bias = nBias ? sumaBias / nBias : 0
+
+  // Ajuste recomendado en enteros: sesgo de +1.1 → apostar a pronostico -1, etc.
+  let ajuste = 0
+  if (bias >= 1.4) ajuste = -2
+  else if (bias >= 0.85) ajuste = -1
+  else if (bias <= -1.4) ajuste = 2
+  else if (bias <= -0.85) ajuste = 1
+
+  // Día objetivo más reciente (sin real aún)
+  let enteroObj: number | null = null
+  let valorCrudo: number | null = null
+  let fechaObj: string | null = null
+  const sinReal = c.dias.filter(d => d.temp_real == null)
+  const fut = sinReal[sinReal.length - 1]
+  if (fut) {
+    const vF = mejorHora === '11PM' ? colVal(fut, mejor.v11) : colVal(fut, mejor.v10)
+    if (vF != null) {
+      valorCrudo = vF
+      enteroObj = roundInt(vF) + ajuste
+      fechaObj = fut.fecha_objetivo
+    }
+  }
+
+  const yAciertos = recientes.filter(d => {
+    const v = mejorHora === '11PM' ? colVal(d, mejor.v11) : colVal(d, mejor.v10)
+    return v != null && d.temp_real != null && roundInt(v) === roundInt(d.temp_real)
+  }).length
+
+  const texto = `RECOMENDACIÓN: apostar con ${mejor.label} a las ${mejorHora} (MAE ${round2(mejorMAE)}°C y acierto exacto ${Math.round((yAciertos / recientes.length) * 100)}% en los últimos ${recientes.length} días). Sesgo reciente ${bias >= 0 ? '+' : ''}${round2(bias)}° → ` +
+    (ajuste === 0
+      ? `apostar directo al entero redondeado${enteroObj != null ? ` (objetivo ${enteroObj}°C para ${fechaObj})` : ''}.`
+      : `apostar al pronóstico ${ajuste > 0 ? '+' : ''}${ajuste}°C${enteroObj != null ? ` (objetivo ${enteroObj}°C para ${fechaObj})` : ''}.`)
+
+  return {
+    modelo: mejor.label,
+    columna: mejor.v10,
+    hora: mejorHora,
+    ajuste_entero: ajuste,
+    sesgo_entero: round2(bias),
+    mae_ciudad: round2(mejorMAE),
+    n_recientes: recientes.length,
+    aciertos_recientes: yAciertos,
+    entero_objetivo: enteroObj,
+    fecha_objetivo: fechaObj,
+    valor_crudo: valorCrudo != null ? round2(valorCrudo) : null,
+    texto,
+  }
+}
+
 function resumenCiudad(c: PerfCiudad): string {
   const s = c.stats_act
   const acPct = s.n ? Math.round((s.aciertos_mejor / s.n) * 100) : 0
-  return `Usa ${textModelo(c.modelo_activo)}. Acierto exacto ${acPct}% de ${s.n} días, MAE(mejor col) ${s.mae_mejor ?? '-'}°C.`
+  const base = `Usa ${textModelo(c.modelo_activo)}. Acierto exacto ${acPct}% de ${s.n} días, MAE(mejor col) ${s.mae_mejor ?? '-'}°C.`
+  return c.recomendacion ? `${base} ${c.recomendacion.texto}` : base
 }
 
 function generarAnalisisGlobal(ciudades: PerfCiudad[], ranking: PerfCiudad[], ventana: number): string[] {
@@ -334,10 +464,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         stats_kal,
         mejor_modelo_ventana: mejorModelo,
         resumen: '',
-      }
+        recomendacion: null,
+      } as PerfCiudad
     })
 
-    for (const c of ciudades) c.resumen = resumenCiudad(c)
+    for (const c of ciudades) {
+      c.recomendacion = generarRecomendacion(c)
+      c.resumen = resumenCiudad(c)
+    }
 
     const ranking_mae = [...ciudades].sort((a, b) => (a.stats_act.mae_mejor ?? 99) - (b.stats_act.mae_mejor ?? 99))
     const mejor_ciudad = ranking_mae[0]?.slug ?? null
