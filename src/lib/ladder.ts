@@ -18,6 +18,7 @@ export interface LadderPlan {
   ev: number
   peor_caso: number
   sin_contratos: boolean
+  empirica: boolean
 }
 
 export const EDGE_MIN = 0.03
@@ -52,57 +53,46 @@ export function round2(v: number): number {
 }
 
 /**
- * LADDER BETTING — construye la escalera de apuestas sobre contratos exactos.
- * Distribución: gaussiana centrada en temp_corregida (engine 10PM/11PM) con
- * σ según régimen. Entra cada entero con edge = P(IA) - precio >= EDGE_MIN.
- * Monto por escalón ∝ Kelly normalizado × bankroll. P(ganar algo) = Σ P(IA) de escalones.
+ * Histograma de desviación ENTERA por ciudad: e = roundInt(corregida) - roundInt(real).
+ * Es el patrón empírico de "se aleja -1, pega, se aleja +2..." del mejor pronóstico.
  */
-export function calcularLadder(
-  corregida: number,
-  sd: number,
+export function histogramaEnteros(
+  corregidas: number[],
+  reales: number[],
+  maxMuestras = 60
+): { hist: Record<number, number>; n: number } {
+  const hist: Record<number, number> = {}
+  const n = Math.min(corregidas.length, reales.length, maxMuestras)
+  const desde = Math.max(0, corregidas.length - n)
+  for (let i = desde; i < corregidas.length; i++) {
+    const e = roundInt(corregidas[i]) - roundInt(reales[i])
+    hist[e] = (hist[e] || 0) + 1
+  }
+  return { hist, n }
+}
+
+function construirPlan(
+  probs: { k: number; p: number }[],
   bankroll: number,
-  contracts: Record<number, LadderContractPrice>
+  contracts: Record<number, LadderContractPrice>,
+  sd: number,
+  empirica: boolean
 ): LadderPlan {
-  const temps = Object.keys(contracts)
-    .map(Number)
-    .sort((a, b) => a - b)
-    .filter(k => contracts[k].precio >= 0.01 && contracts[k].precio <= 0.95)
+  const sinBase: LadderPlan = { inversion: 0, sd, escalones: [], probabilidad_ganar: 0, ev: 0, peor_caso: 0, sin_contratos: false, empirica }
 
-  if (temps.length === 0) {
-    return { inversion: 0, sd, escalones: [], probabilidad_ganar: 0, ev: 0, peor_caso: 0, sin_contratos: true }
-  }
+  // Escalones con edge SI >= EDGE_MIN
+  let rungs = probs
+    .map(x => ({ k: x.k, p: x.p, c: contracts[x.k], edge: x.p - contracts[x.k].precio }))
+    .filter(r => r.p >= 0.01 && r.c.precio >= 0.01 && r.c.precio <= 0.95 && r.edge >= EDGE_MIN)
 
-  const probs = new Map<number, number>()
-  for (const k of temps) probs.set(k, probGaussInt(k, corregida, sd))
+  if (rungs.length === 0) return sinBase
 
-  // Escalones candidatos con edge SI >= EDGE_MIN
-  let rungs = temps
-    .map(k => ({
-      k,
-      p: probs.get(k) as number,
-      contrato: contracts[k],
-      edge: (probs.get(k) as number) - contracts[k].precio,
-    }))
-    .filter(r => r.p >= 0.01 && r.edge >= EDGE_MIN)
-
-  if (rungs.length === 0) {
-    return { inversion: 0, sd, escalones: [], probabilidad_ganar: 0, ev: 0, peor_caso: 0, sin_contratos: false }
-  }
-
-  // Montos Kelly normalizados a bankroll, con mínimo por escalón
-  let ws = rungs.map(r => ({
-    k: r.k, p: r.p, contrato: r.contrato, edge: r.edge,
-    w: Math.max(0, kellyShare(r.p, r.contrato.precio)),
-  }))
+  let ws = rungs.map(r => ({ ...r, w: Math.max(0, kellyShare(r.p, r.c.precio)) }))
   let sumW = ws.reduce((s, x) => s + x.w, 0)
-
-  if (sumW <= 0) {
-    return { inversion: 0, sd, escalones: [], probabilidad_ganar: 0, ev: 0, peor_caso: 0, sin_contratos: false }
-  }
+  if (sumW <= 0) return sinBase
 
   let montos = ws.map(x => ({ ...x, monto: (bankroll * x.w) / sumW }))
 
-  // Quitar escalones que queden bajo el mínimo y re-normalizar
   const bajoMinimo = montos.some(m => m.monto > 0 && m.monto < MONTO_MIN)
   if (bajoMinimo && montos.length > 1) {
     montos = montos.filter(m => m.monto >= MONTO_MIN)
@@ -112,7 +102,6 @@ export function calcularLadder(
     }
   }
 
-  // Ajuste fino: que la suma sea exactamente bankroll (el excedente va al mayor edge SI)
   const total = montos.reduce((s, x) => s + x.monto, 0)
   if (Math.abs(total - bankroll) > 0.5 && montos.length) {
     const maxEdge = Math.max(...montos.map(m => m.edge))
@@ -124,18 +113,58 @@ export function calcularLadder(
   const escalones: Escalon[] = montos.map(m => ({
     temp: m.k,
     p_ia: round2(m.p),
-    p_mkt: round2(m.contrato.precio),
-    si_pct: m.contrato.si,
-    no_pct: m.contrato.no,
+    p_mkt: round2(m.c.precio),
+    si_pct: m.c.si,
+    no_pct: m.c.no,
     edge: round2(m.edge * 100),
-    edge_no: round2(((1 - m.p) - m.contrato.no / 100) * 100),
+    edge_no: round2(((1 - m.p) - m.c.no / 100) * 100),
     monto: round2(m.monto),
-    pago_si_gana: round2(m.monto / m.contrato.precio),
+    pago_si_gana: round2(m.monto / m.c.precio),
   }))
 
   const probabilidad_ganar = round2(montos.reduce((s, m) => s + m.p, 0))
   const inversion = round2(montos.reduce((s, m) => s + m.monto, 0))
-  const ev = round2(montos.reduce((s, m) => s + m.p * (m.monto / m.contrato.precio), 0) - inversion)
+  const ev = round2(montos.reduce((s, m) => s + m.p * (m.monto / m.c.precio), 0) - inversion)
 
-  return { inversion, sd, escalones, probabilidad_ganar, ev, peor_caso: round2(-inversion), sin_contratos: false }
+  return { inversion, sd, escalones, probabilidad_ganar, ev, peor_caso: round2(-inversion), sin_contratos: false, empirica }
+}
+
+/**
+ * LADDER con distribución GAUSSIANA (épsilon σ según régimen).
+ * Útil como fallback con poco historial.
+ */
+export function calcularLadderGauss(
+  corregida: number,
+  sd: number,
+  bankroll: number,
+  contracts: Record<number, LadderContractPrice>
+): LadderPlan {
+  const temps = Object.keys(contracts).map(Number).sort((a, b) => a - b)
+  const probs = temps.map(k => ({ k, p: probGaussInt(k, corregida, sd) }))
+  return construirPlan(probs, bankroll, contracts, sd, false)
+}
+
+/**
+ * LADDER EMPÍRICO por ciudad: distribución = histograma de desviación entera del
+ * mejor modelo (KALMAN/MC) sobre el historial. En TRANSICIÓN se mezcla 50/50 con
+ * gaussiana σ amplia para absorber frentes. En ESTABLE se usa el histograma puro.
+ */
+export function calcularLadderEmpirica(
+  corregida: number,
+  hist: Record<number, number>,
+  nHist: number,
+  sd: number,
+  bankroll: number,
+  contracts: Record<number, LadderContractPrice>,
+  mezclaGauss: boolean
+): LadderPlan {
+  const r = roundInt(corregida)
+  const temps = Object.keys(contracts).map(Number).sort((a, b) => a - b)
+  const probs = temps.map(k => {
+    const e = k - r
+    const pEmp = nHist > 0 ? (hist[e] ?? 0) / nHist : 0
+    const p = mezclaGauss ? 0.5 * pEmp + 0.5 * probGaussInt(k, corregida, sd) : pEmp
+    return { k, p }
+  })
+  return construirPlan(probs, bankroll, contracts, sd, true)
 }

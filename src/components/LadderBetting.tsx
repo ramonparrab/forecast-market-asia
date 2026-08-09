@@ -23,6 +23,7 @@ interface Plan {
   ev: number
   peor_caso: number
   sin_contratos: boolean
+  empirica: boolean
 }
 
 interface RegimenDetalle {
@@ -46,12 +47,21 @@ interface LadderData {
   timestamp_analisis: string
   crudo: number | null
   corregida: number | null
+  modelo_ganador: 'KALMAN' | 'MEJORA CONTINUA'
+  modelo_asignado: 'KALMAN' | 'MEJORA CONTINUA'
+  mae_kalman: number
+  mae_mc: number
+  ventana_modelos: number
+  hist_error_entero: Record<string, number>
+  muestras_hist: number
+  valor_hoy_modelo: number
   regimen: 'ESTABLE' | 'TRANSICION' | 'CRITICO'
   regimen_detalle: RegimenDetalle
   bankroll_solicitado: number
   plan: Plan
   contratos_disponibles: number
   hora_snapshot: string
+  nota_horas: string
   metodologia: string
 }
 
@@ -247,7 +257,64 @@ export default function LadderBetting() {
             </div>
           </div>
 
-          {/* NO APOSTAR (crítico) */}
+          {/* Modelo ganador + patrón histórico */}
+          <div className="rounded-xl bg-gradient-to-br from-cyan-500/10 to-cyan-500/5 border border-cyan-500/20 p-3 sm:p-4">
+            <div className="flex flex-wrap items-center gap-2 mb-2">
+              <h3 className="text-sm sm:text-base font-bold text-cyan-300">MODELO GANADOR (histórico walk-forward)</h3>
+              <span className={`text-[10px] sm:text-xs font-bold px-2 py-0.5 rounded-full ${
+                data.modelo_ganador === 'KALMAN'
+                  ? 'bg-cyan-500/15 border border-cyan-400/30 text-cyan-300'
+                  : 'bg-emerald-500/15 border border-emerald-400/30 text-emerald-300'
+              }`}>
+                {data.modelo_ganador === 'KALMAN' ? 'KAL' : 'MC'} — MEJOR
+              </span>
+              {data.modelo_ganador !== data.modelo_asignado && (
+                <span className="text-[9px] sm:text-[10px] text-amber-400 font-semibold">
+                  ⚠️ difiere del asignado ({data.modelo_asignado === 'KALMAN' ? 'KAL' : 'MC'})
+                </span>
+              )}
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-3">
+              <div className="bg-slate-800/60 rounded-lg p-2">
+                <div className="text-[9px] sm:text-[10px] text-gray-500">VALOR HOY (modelo ganador)</div>
+                <div className="text-base sm:text-lg font-bold text-white">{data.valor_hoy_modelo.toFixed(2)}°C</div>
+              </div>
+              <div className="bg-slate-800/60 rounded-lg p-2">
+                <div className="text-[9px] sm:text-[10px] text-gray-500">MAE KALMAN ({data.ventana_modelos}d)</div>
+                <div className={`text-base sm:text-lg font-bold ${data.mae_kalman <= data.mae_mc ? 'text-cyan-400' : 'text-gray-300'}`}>{data.mae_kalman.toFixed(2)}°</div>
+              </div>
+              <div className="bg-slate-800/60 rounded-lg p-2">
+                <div className="text-[9px] sm:text-[10px] text-gray-500">MAE MEJORA CONT. ({data.ventana_modelos}d)</div>
+                <div className={`text-base sm:text-lg font-bold ${data.mae_mc <= data.mae_kalman ? 'text-emerald-400' : 'text-gray-300'}`}>{data.mae_mc.toFixed(2)}°</div>
+              </div>
+              <div className="bg-slate-800/60 rounded-lg p-2">
+                <div className="text-[9px] sm:text-[10px] text-gray-500">DISTRIBUCIÓN LADDER</div>
+                <div className="text-base sm:text-lg font-bold text-white">{data.plan.empirica ? `EMPÍRICA (${data.muestras_hist} días)` : 'GAUSS'}</div>
+              </div>
+            </div>
+
+            <div className="text-[10px] sm:text-xs text-gray-400 mb-1">
+              Cómo se desvía el pronóstico ganador del real en {data.muestras_hist} días (e = entero pronóstico − entero real):
+            </div>
+            <div className="flex flex-wrap gap-1.5 mb-2">
+              {Object.entries(data.hist_error_entero).map(([e, pct]) => (
+                <span
+                  key={e}
+                  className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] sm:text-xs font-mono border ${
+                    pct >= 20
+                      ? 'bg-amber-500/20 border-amber-500/40 text-amber-300'
+                      : 'bg-slate-800 border-gray-700 text-gray-400'
+                  }`}
+                >
+                  {Number(e) >= 0 ? '+' : ''}{e}: {pct}%
+                </span>
+              ))}
+            </div>
+            <div className="text-[9px] sm:text-[10px] text-gray-500">
+              📌 {data.nota_horas}
+            </div>
+          </div>
           {data.regimen === 'CRITICO' && (
             <div className="rounded-xl bg-red-500/10 border border-red-500/40 p-4 text-center">
               <div className="text-xs sm:text-sm text-red-300 font-bold">
