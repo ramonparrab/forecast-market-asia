@@ -48,6 +48,11 @@ interface LadderData {
   crudo: number | null
   corregida: number | null
   modelo_ganador: 'KALMAN' | 'MEJORA CONTINUA'
+  hora_ganadora: '10PM' | '11PM' | null
+  combos_mae: Record<string, number | null>
+  muestras_horas: number
+  base_10pm_hoy: number | null
+  base_11pm_hoy: number | null
   modelo_asignado: 'KALMAN' | 'MEJORA CONTINUA'
   mae_kalman: number
   mae_mc: number
@@ -68,6 +73,13 @@ interface LadderData {
 const fmtSigned = (v: number | null): string => {
   if (v === null) return '—'
   return `${v >= 0 ? '+' : ''}${Math.round(v * 100) / 100}°`
+}
+
+const comboLabel: Record<string, string> = {
+  kal_10pm: 'KAL @ 10PM',
+  kal_11pm: 'KAL @ 11PM',
+  mc_10pm: 'MC @ 10PM',
+  mc_11pm: 'MC @ 11PM',
 }
 
 export default function LadderBetting() {
@@ -266,7 +278,7 @@ export default function LadderBetting() {
                   ? 'bg-cyan-500/15 border border-cyan-400/30 text-cyan-300'
                   : 'bg-emerald-500/15 border border-emerald-400/30 text-emerald-300'
               }`}>
-                {data.modelo_ganador === 'KALMAN' ? 'KAL' : 'MC'} — MEJOR
+                {data.modelo_ganador === 'KALMAN' ? 'KAL' : 'MC'}{data.hora_ganadora ? ' @ ' + data.hora_ganadora : ''} — MEJOR
               </span>
               {data.modelo_ganador !== data.modelo_asignado && (
                 <span className="text-[9px] sm:text-[10px] text-amber-400 font-semibold">
@@ -277,7 +289,7 @@ export default function LadderBetting() {
 
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-3">
               <div className="bg-slate-800/60 rounded-lg p-2">
-                <div className="text-[9px] sm:text-[10px] text-gray-500">VALOR HOY (modelo ganador)</div>
+                <div className="text-[9px] sm:text-[10px] text-gray-500">VALOR HOY {data.hora_ganadora ? `(${data.modelo_ganador === 'KALMAN' ? 'KAL' : 'MC'} @ ${data.hora_ganadora})` : '(modelo ganador)'}</div>
                 <div className="text-base sm:text-lg font-bold text-white">{data.valor_hoy_modelo.toFixed(2)}°C</div>
               </div>
               <div className="bg-slate-800/60 rounded-lg p-2">
@@ -293,6 +305,35 @@ export default function LadderBetting() {
                 <div className="text-base sm:text-lg font-bold text-white">{data.plan.empirica ? `EMPÍRICA (${data.muestras_hist} días)` : 'GAUSS'}</div>
               </div>
             </div>
+
+            {data.muestras_horas >= 10 && (
+              <>
+                <div className="text-[10px] sm:text-xs text-gray-400 mb-1">
+                  MAE de los 4 combos modelo × hora con corridas reales de daily_runs ({data.muestras_horas} días):
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 mb-2">
+                  {Object.entries(data.combos_mae || {}).map(([k, v]) => {
+                    const keyGanador = (data.modelo_ganador === 'KALMAN' ? 'kal' : 'mc') + '_' + (data.hora_ganadora === '10PM' ? '10pm' : data.hora_ganadora === '11PM' ? '11pm' : '')
+                    const esGanador = k === keyGanador
+                    return (
+                      <span
+                        key={k}
+                        className={`rounded-lg px-2 py-1 text-center text-[10px] sm:text-xs font-mono border ${
+                          esGanador
+                            ? 'bg-cyan-500/20 border-cyan-400/50 text-cyan-300 font-bold'
+                            : 'bg-slate-800/70 border-gray-700 text-gray-400'
+                        }`}
+                      >
+                        {comboLabel[k]}: {v != null ? v.toFixed(2) + '°' : '—'}
+                      </span>
+                    )
+                  })}
+                </div>
+                <div className="text-[10px] sm:text-xs text-gray-500 mb-2">
+                  Base hoy: 10PM={data.base_10pm_hoy != null ? data.base_10pm_hoy.toFixed(2) + '°' : '—'} · 11PM={data.base_11pm_hoy != null ? data.base_11pm_hoy.toFixed(2) + '°' : '—'} (corrida {data.hora_ganadora === '10PM' ? '02:00Z' : '03:00Z'} + modelo)
+                </div>
+              </>
+            )}
 
             <div className="text-[10px] sm:text-xs text-gray-400 mb-1">
               Cómo se desvía el pronóstico ganador del real en {data.muestras_hist} días (e = entero pronóstico − entero real):

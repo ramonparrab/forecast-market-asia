@@ -14,6 +14,7 @@ const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
 const ciudadMap = new Map(CIUDADES_ASIA.map(c => [c.slug, c.nombre]))
 const VENTANA_MODELOS = 45
 const MIN_MUESTRAS_EMPIRICA = 15
+const MIN_MUESTRAS_HORA = 10
 
 function partsTz(tz: string, d: Date, extra: 'date' | 'both'): { fecha: string; hora: string } {
   const fmt = new Intl.DateTimeFormat('en-CA', {
@@ -41,6 +42,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const monto = parseFloat(req.query.monto as string) || 10
     const nombre = ciudadMap.get(slug) || slug
     const client = createClient(supabaseUrl, supabaseKey)
+    const ahora = new Date()
 
     // 1. Historial completo de la ciudad (régimen + walk-forward de modelos)
     const { data: allHistory } = await client
@@ -65,7 +67,40 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const currentRecord = (pendingRaw as any[])[0]
     const history = (allHistory || []) as any[]
 
-    // 3. Régimen del día (deltas sobre el crudo)
+    // 3. Corridas horarias desde daily_runs: base del cron 02:00Z (= 10PM Caracas) y 03:00Z (= 11PM Caracas)
+    const startHour = new Date(ahora.getTime() - (VENTANA_MODELOS + 10) * 24 * 60 * 60 * 1000)
+    const { data: runsRaw } = await client
+      .from('daily_runs' as any)
+      .select('fecha_ejecucion, fecha_objetivo, resultados')
+      .gte('fecha_ejecucion', startHour.toISOString())
+
+    // basePorHora[slug|fecha] = { base10, base11, ts10, ts11 }
+    const basePorHora: Record<string, { base10: number | null; base11: number | null; ts10: number | null; ts11: number | null }> = {}
+    for (const run of (runsRaw as any[]) ?? []) {
+      const fo = run.fecha_objetivo as string
+      if (!fo) continue
+      let parsed: any[]
+      try { parsed = JSON.parse(run.resultados) } catch { continue }
+      if (!Array.isArray(parsed)) continue
+      const cityData = parsed.find((c: any) => c.slug === slug)
+      if (!cityData) continue
+      const tc = cityData?.forecast?.temp_corregida_base ?? cityData?.forecast?.temp_corregida
+      if (tc == null) continue
+      const runTs = new Date(run.fecha_ejecucion).getTime()
+      const key = slug + '|' + fo
+      const entry = basePorHora[key] || { base10: null, base11: null, ts10: null, ts11: null }
+      basePorHora[key] = entry
+      const cron10 = new Date(fo + 'T02:00:00.000Z').getTime()
+      const cron11 = new Date(fo + 'T03:00:00.000Z').getTime()
+      if (runTs >= cron10 && (entry.ts10 == null || runTs < entry.ts10!)) {
+        entry.base10 = Number(tc); entry.ts10 = runTs
+      }
+      if (runTs >= cron11 && (entry.ts11 == null || runTs < entry.ts11!)) {
+        entry.base11 = Number(tc); entry.ts11 = runTs
+      }
+    }
+
+    // 4. Régimen del día (deltas sobre el crudo)
     const regimen = detectarRegimen(
       history.map((h: any) => ({ fecha_objetivo: h.fecha_objetivo, temp_pronosticada: h.temp_pronosticada ?? null })),
       currentRecord.fecha_objetivo
@@ -90,19 +125,65 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       nombre
     )
     const seriesM = mc.dailyResults.map(d => d.combinado.temp)
+    const mcCorr = mc.dailyResults.map((d, i) => d.combinado.temp - Number(validos[i].temp_corregida))
 
     const desde = Math.max(0, validos.length - VENTANA_MODELOS)
+
+    // ==== 4b. Combos modelo x hora (base 10PM/11PM de daily_runs + corrección del modelo) ====
+    const combosMae: Record<string, number | null> = { kal_10pm: null, kal_11pm: null, mc_10pm: null, mc_11pm: null }
+    let muestrasHoras = 0
+    const errCombo: Record<string, number[]> = { kal_10pm: [], kal_11pm: [], mc_10pm: [], mc_11pm: [] }
+    for (let i = desde; i < validos.length; i++) {
+      const h = validos[i]
+      const bH = basePorHora[slug + '|' + h.fecha_objetivo]
+      if (!bH) continue
+      const real = Number(h.temp_real)
+      let tuvo = false
+      if (bH.base10 != null) {
+        errCombo.kal_10pm.push(real - (bH.base10 + preds[i]))
+        errCombo.mc_10pm.push(real - (bH.base10 + mcCorr[i]))
+        tuvo = true
+      }
+      if (bH.base11 != null) {
+        errCombo.kal_11pm.push(real - (bH.base11 + preds[i]))
+        errCombo.mc_11pm.push(real - (bH.base11 + mcCorr[i]))
+        tuvo = true
+      }
+      if (tuvo) muestrasHoras++
+    }
+    const horarioDisponible = muestrasHoras >= MIN_MUESTRAS_HORA
+    Object.keys(errCombo).forEach(k => {
+      const arr = errCombo[k]
+      combosMae[k] = arr.length >= MIN_MUESTRAS_HORA ? mae(arr) : null
+    })
+
+    // ==== 4c. Stored-series comparison (fallback) ====
     const errsK = validos.slice(desde).map((h: any, i: number) => Number(h.temp_real) - seriesK[desde + i])
     const errsM = validos.slice(desde).map((h: any, i: number) => Number(h.temp_real) - seriesM[desde + i])
     const maeK = mae(errsK)
     const maeM = mae(errsM)
-    const ganador = maeK <= maeM ? 'KALMAN' : 'MEJORA CONTINUA'
+    const ganadorStored = maeK <= maeM ? 'KALMAN' : 'MEJORA CONTINUA'
 
-    // Valor del día pendiente con el modelo ganador del historial reciente
+    // Mejor combo global: modelo x hora (si hay suficientes corridas horarias)
+    let modeloGanador = ganadorStored
+    let horaGanadora: '10PM' | '11PM' | null = null
+    if (horarioDisponible) {
+      const mejor = (Object.entries(combosMae).filter(([, v]) => v != null) as [string, number][])
+        .sort((a, b) => a[1] - b[1])[0]
+      if (mejor) {
+        modeloGanador = mejor[0].startsWith('kal') ? 'KALMAN' : 'MEJORA CONTINUA'
+        horaGanadora = mejor[0].endsWith('_10pm') ? '10PM' : '11PM'
+      }
+    }
+
+    // Valor del día pendiente: base de la hora ganadora + modelo ganador
     const pendCorr = Number(currentRecord.temp_corregida)
-    const baseForModel = pendCorr
+    const bHoy = basePorHora[slug + '|' + currentRecord.fecha_objetivo]
+    const base10Hoy = bHoy?.base10 ?? null
+    const base11Hoy = bHoy?.base11 ?? null
+    const baseForModel = horaGanadora === '10PM' ? (base10Hoy ?? pendCorr) : horaGanadora === '11PM' ? (base11Hoy ?? pendCorr) : pendCorr
     let valorHoy: number
-    if (ganador === 'KALMAN') {
+    if (modeloGanador === 'KALMAN') {
       valorHoy = errs.length > 0 ? baseForModel + kalmanNextBias(errs, KALMAN_Q, R) : baseForModel
     } else {
       const cf = computeCurrentForecast(validos as HistoricalRecord[], {
@@ -120,12 +201,28 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       valorHoy = cf?.combinado ?? baseForModel
     }
 
-    // 5. Histograma empírico de desviación entera del ganador (últimos N días)
-    const { hist, n } = histogramaEnteros(
-      ganador === 'KALMAN' ? seriesK.slice(desde) : seriesM.slice(desde),
-      validos.slice(desde).map((h: any) => Number(h.temp_real)),
-      VENTANA_MODELOS
-    )
+    // 5. Histograma empírico del combo ganador (o stored si no hay horas)
+    let histSeriesCorr: number[] = []
+    let histSeriesReal: number[] = []
+    if (horarioDisponible) {
+      for (let i = desde; i < validos.length; i++) {
+        const h = validos[i]
+        const bH = basePorHora[slug + '|' + h.fecha_objetivo]
+        if (!bH) continue
+        const b = horaGanadora === '11PM' ? bH.base11 : bH.base10
+        if (b == null) continue
+        const v = modeloGanador === 'KALMAN' ? b + preds[i] : b + mcCorr[i]
+        histSeriesCorr.push(v)
+        histSeriesReal.push(Number(h.temp_real))
+      }
+    }
+    const { hist, n } = horarioDisponible
+      ? histogramaEnteros(histSeriesCorr, histSeriesReal, VENTANA_MODELOS)
+      : histogramaEnteros(
+          ganadorStored === 'KALMAN' ? seriesK.slice(desde) : seriesM.slice(desde),
+          validos.slice(desde).map((h: any) => Number(h.temp_real)),
+          VENTANA_MODELOS
+        )
     const histPct = Object.fromEntries(
       Object.entries(hist)
         .map(([e, c]) => [e, Math.round((100 * (c as number)) / Math.max(n, 1))])
@@ -148,7 +245,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     // 7. Verificación de fecha objetivo vs ventana 10-11PM Caracas
-    const ahora = new Date()
     const caracas = partsTz('America/Caracas', ahora, 'both')
     const [hC = 0, mC = 0] = (caracas.hora.split(':') || []).map(Number)
     const ventana_10_11pm = (hC === 22 || hC === 23) || (hC === 21 && mC >= 30)
@@ -181,7 +277,17 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       timestamp_analisis: new Date().toISOString(),
       crudo: currentRecord.temp_pronosticada != null ? Number(currentRecord.temp_pronosticada) : null,
       corregida: pendCorr,
-      modelo_ganador: ganador,
+      modelo_ganador: modeloGanador,
+      hora_ganadora: horaGanadora,
+      combos_mae: {
+        kal_10pm: combosMae.kal_10pm != null ? round2(combosMae.kal_10pm) : null,
+        kal_11pm: combosMae.kal_11pm != null ? round2(combosMae.kal_11pm) : null,
+        mc_10pm: combosMae.mc_10pm != null ? round2(combosMae.mc_10pm) : null,
+        mc_11pm: combosMae.mc_11pm != null ? round2(combosMae.mc_11pm) : null,
+      },
+      muestras_horas: muestrasHoras,
+      base_10pm_hoy: base10Hoy != null ? round2(base10Hoy) : null,
+      base_11pm_hoy: base11Hoy != null ? round2(base11Hoy) : null,
       modelo_asignado: getModeloActivo(slug),
       mae_kalman: round2(maeK),
       mae_mc: round2(maeM),
@@ -200,9 +306,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       bankroll_solicitado: monto,
       plan,
       contratos_disponibles: contratos.length,
-      hora_snapshot: '~10-11pm Caracas',
-      nota_horas: 'El sistema guarda UNA corrida por día dentro de la ventana 10-11PM Caracas (02-03Z) — no se almacenan 10PM y 11PM por separado, por lo que no es posible comparar horas dentro del mismo día.',
-      metodologia: 'walk-forward KALMAN vs MEJORA CONTINUA (ventana ' + (validos.length - desde) + 'd) · distribucion = histograma empirico del ganador (' + n + ' muestras) + mezcla gauss en TRANSICION · edge SI>=3% · Kelly normalizado · CRITICO=no apostar',
+      hora_snapshot: horaGanadora ? 'Corrida ' + (horaGanadora === '10PM' ? '02:00Z' : '03:00Z') + ' (10PM/11PM Caracas)' : '~10-11pm Caracas',
+      nota_horas: horarioDisponible
+        ? 'daily_runs guarda corridas por hora (02:00Z=10PM y 03:00Z=11PM Caracas). El LADDER compara los 4 combos modelo×hora y usa el mejor: ' + modeloGanador + ' @ ' + (horaGanadora || '—') + ' (MAE ' + (combosMae[horaGanadora === '10PM' ? (modeloGanador === 'KALMAN' ? 'kal_10pm' : 'mc_10pm') : horaGanadora === '11PM' ? (modeloGanador === 'KALMAN' ? 'kal_11pm' : 'mc_11pm') : 'kal_10pm']) + '°) — ' + muestrasHoras + ' días con corrida horaria.'
+        : 'No hubo suficientes corridas horarias en daily_runs (' + muestrasHoras + ' < ' + MIN_MUESTRAS_HORA + '): se usó la serie almacenada sin comparación 10PM/11PM.',
+      metodologia: 'combos modelo×hora de daily_runs (KALMAN|MC) × (10PM|11PM): ' + (horarioDisponible ? 'best = ' + modeloGanador + ' @ ' + (horaGanadora || '—') : 'solo stored KALMAN vs MC') + ' · distribucion = histograma empirico (' + n + ' muestras) + mezcla gauss en TRANSICION · edge SI>=3% · Kelly normalizado · CRITICO=no apostar',
     })
   } catch (error) {
     console.error('[ladder-betting]', error)
