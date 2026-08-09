@@ -246,8 +246,8 @@ export default function LadderBetting() {
               <div className="text-base sm:text-lg font-bold text-white">{data.crudo != null ? data.crudo.toFixed(1) + '°C' : '—'}</div>
             </div>
             <div className="bg-slate-800/60 rounded-lg p-2">
-              <div className="text-[9px] sm:text-[10px] text-gray-500">CORREGIDA 10/11PM</div>
-              <div className="text-base sm:text-lg font-bold text-blue-300">{data.corregida != null ? data.corregida.toFixed(1) + '°C' : '—'}</div>
+              <div className="text-[9px] sm:text-[10px] text-gray-500">CORREGIDA GANADORA {data.hora_ganadora ? `— ${data.modelo_ganador === 'KALMAN' ? 'KAL' : 'MC'} @ ${data.hora_ganadora}` : `— ${data.modelo_ganador === 'KALMAN' ? 'KAL' : 'MC'}`}</div>
+              <div className="text-base sm:text-lg font-bold text-blue-300">{data.valor_hoy_modelo.toFixed(2)}°C</div>
             </div>
             <div className="bg-slate-800/60 rounded-lg p-2">
               <div className="text-[9px] sm:text-[10px] text-gray-500">INVERSIÓN TOTAL</div>
@@ -288,10 +288,6 @@ export default function LadderBetting() {
             </div>
 
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-3">
-              <div className="bg-slate-800/60 rounded-lg p-2">
-                <div className="text-[9px] sm:text-[10px] text-gray-500">VALOR HOY {data.hora_ganadora ? `(${data.modelo_ganador === 'KALMAN' ? 'KAL' : 'MC'} @ ${data.hora_ganadora})` : '(modelo ganador)'}</div>
-                <div className="text-base sm:text-lg font-bold text-white">{data.valor_hoy_modelo.toFixed(2)}°C</div>
-              </div>
               <div className="bg-slate-800/60 rounded-lg p-2">
                 <div className="text-[9px] sm:text-[10px] text-gray-500">MAE KALMAN ({data.ventana_modelos}d)</div>
                 <div className={`text-base sm:text-lg font-bold ${data.mae_kalman <= data.mae_mc ? 'text-cyan-400' : 'text-gray-300'}`}>{data.mae_kalman.toFixed(2)}°</div>
