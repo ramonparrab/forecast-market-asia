@@ -1,0 +1,286 @@
+import { useState, useEffect } from 'react'
+import { CIUDADES_ASIA } from '@/lib/cities'
+
+const allSlugs = CIUDADES_ASIA.map(c => ({ slug: c.slug, nombre: c.nombre }))
+
+interface Escalon {
+  temp: number
+  p_ia: number
+  p_mkt: number
+  edge: number
+  monto: number
+  pago_si_gana: number
+}
+
+interface Plan {
+  inversion: number
+  sd: number
+  escalones: Escalon[]
+  probabilidad_ganar: number
+  ev: number
+  peor_caso: number
+  sin_contratos: boolean
+}
+
+interface RegimenDetalle {
+  delta1: number | null
+  tendencia: number | null
+  motivo: string
+  sd: number
+  factor_bankroll: number
+}
+
+interface LadderData {
+  fecha: string
+  fecha_ejecucion_forecast: string
+  slug: string
+  ciudad: string
+  timestamp_analisis: string
+  crudo: number | null
+  corregida: number | null
+  regimen: 'ESTABLE' | 'TRANSICION' | 'CRITICO'
+  regimen_detalle: RegimenDetalle
+  bankroll_solicitado: number
+  plan: Plan
+  contratos_disponibles: number
+  hora_snapshot: string
+  metodologia: string
+}
+
+const fmtSigned = (v: number | null): string => {
+  if (v === null) return '—'
+  return `${v >= 0 ? '+' : ''}${Math.round(v * 100) / 100}°`
+}
+
+export default function LadderBetting() {
+  const [slug, setSlug] = useState('wuhan')
+  const [monto, setMonto] = useState(10)
+  const [inputMonto, setInputMonto] = useState('10')
+  const [loading, setLoading] = useState(false)
+  const [data, setData] = useState<LadderData | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  const analyze = async (s: string, m: number) => {
+    setLoading(true)
+    setError(null)
+    try {
+      const params = new URLSearchParams({ slug: s, monto: String(m) })
+      const res = await fetch(`/api/ladder-betting?${params}`)
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: res.statusText }))
+        throw new Error(err.error || 'Error al cargar datos')
+      }
+      setData(await res.json())
+    } catch (e) {
+      setData(null)
+      setError((e as Error).message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => { analyze(slug, monto) }, [slug, monto])
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      const val = parseFloat(inputMonto) || 1
+      setMonto(Math.max(1, val))
+    }
+  }
+
+  const regimenBanner = () => {
+    if (!data) return null
+    const r = data.regimen
+    const d = data.regimen_detalle
+    if (r === 'CRITICO') {
+      return (
+        <div className="rounded-xl bg-red-600/20 border-2 border-red-500/70 p-4 mb-4 animate-pulse">
+          <div className="text-lg sm:text-2xl font-black text-red-400 text-center tracking-wide">🚫 NO APOSTAR EN {data.ciudad.toUpperCase()}</div>
+          <div className="mt-2 text-center text-xs sm:text-sm text-red-300 font-semibold">{d.motivo}</div>
+          <div className="mt-2 flex flex-wrap justify-center gap-2 text-[10px] sm:text-xs">
+            <span className="bg-red-500/20 border border-red-500/40 rounded px-2 py-0.5">Δ 1d: {fmtSigned(d.delta1)}</span>
+            <span className="bg-red-500/20 border border-red-500/40 rounded px-2 py-0.5">Tendencia: {fmtSigned(d.tendencia)}</span>
+          </div>
+        </div>
+      )
+    }
+    if (r === 'TRANSICION') {
+      return (
+        <div className="rounded-xl bg-amber-500/15 border-2 border-amber-500/60 p-4 mb-4">
+          <div className="text-base sm:text-xl font-black text-amber-400 tracking-wide">⚠️ PRONÓSTICO EN TRANSICIÓN</div>
+          <div className="mt-1 text-xs sm:text-sm text-amber-300 font-medium">{d.motivo}</div>
+          <div className="mt-1 text-[10px] sm:text-xs text-amber-200/80">
+            σ ampliada a {d.sd} (×1.5) · bankroll reducido a la mitad (${data.bankroll_solicitado / 2}) · edge mínimo 3%
+          </div>
+        </div>
+      )
+    }
+    return (
+      <div className="rounded-xl bg-emerald-500/10 border-2 border-emerald-500/40 p-4 mb-4">
+        <div className="text-base sm:text-xl font-black text-emerald-400 tracking-wide">✅ RÉGIMEN ESTABLE — JUEGO COMPLETO</div>
+        <div className="mt-1 text-xs sm:text-sm text-emerald-300/90 font-medium">{d.motivo}</div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="rounded-2xl bg-gradient-to-br from-slate-900 to-slate-800 border border-gray-700/30 p-4 sm:p-6 overflow-hidden">
+      {/* Header & Controls */}
+      <div className="flex flex-col gap-3 mb-4">
+        <h2 className="text-lg sm:text-xl font-bold text-white">🪜 LADDER BETTING — EN VIVO</h2>
+        <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+          <div className="flex items-center gap-1.5">
+            <label className="text-[10px] sm:text-xs text-gray-400 whitespace-nowrap">Ciudad</label>
+            <select
+              value={slug}
+              onChange={e => setSlug(e.target.value)}
+              className="bg-slate-700 border border-gray-600 rounded-lg px-2 py-1.5 text-xs sm:text-sm text-white w-28 sm:w-36"
+            >
+              {allSlugs.map(c => (
+                <option key={c.slug} value={c.slug}>{c.nombre}</option>
+              ))}
+            </select>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <label className="text-[10px] sm:text-xs text-gray-400 whitespace-nowrap">Bankroll $</label>
+            <input
+              type="number"
+              value={inputMonto}
+              onChange={e => setInputMonto(e.target.value)}
+              onKeyDown={handleKeyDown}
+              className="bg-slate-700 border border-gray-600 rounded-lg px-2 py-1.5 text-xs sm:text-sm text-white w-16 sm:w-20 text-center"
+            />
+            <button
+              onClick={() => {
+                const val = parseFloat(inputMonto) || 1
+                if (val !== monto) setMonto(Math.max(1, val))
+              }}
+              className="bg-blue-600 hover:bg-blue-500 text-white text-[10px] sm:text-xs font-bold px-2.5 py-1.5 rounded-lg transition"
+            >
+              {loading ? '...' : 'Aplicar'}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Régimen Banner */}
+      {data && !loading && regimenBanner()}
+
+      {/* Loading */}
+      {loading && <div className="text-center py-8 text-gray-500 text-sm">Cargando datos en vivo...</div>}
+
+      {/* Error */}
+      {error && (
+        <div className="text-center py-4 text-red-400 text-xs sm:text-sm border border-red-500/20 rounded-lg bg-red-500/5 mb-4">{error}</div>
+      )}
+
+      {/* Results */}
+      {data && !loading && (
+        <div className="space-y-4">
+          {/* Pronóstico y métricas */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-2">
+            <div className="bg-slate-800/60 rounded-lg p-2">
+              <div className="text-[9px] sm:text-[10px] text-gray-500">PRONÓSTICO (crudo)</div>
+              <div className="text-base sm:text-lg font-bold text-white">{data.crudo != null ? data.crudo.toFixed(1) + '°C' : '—'}</div>
+            </div>
+            <div className="bg-slate-800/60 rounded-lg p-2">
+              <div className="text-[9px] sm:text-[10px] text-gray-500">CORREGIDA 10/11PM</div>
+              <div className="text-base sm:text-lg font-bold text-blue-300">{data.corregida != null ? data.corregida.toFixed(1) + '°C' : '—'}</div>
+            </div>
+            <div className="bg-slate-800/60 rounded-lg p-2">
+              <div className="text-[9px] sm:text-[10px] text-gray-500">INVERSIÓN TOTAL</div>
+              <div className="text-base sm:text-lg font-bold text-amber-300">${data.plan.inversion.toFixed(2)}</div>
+            </div>
+            <div className="bg-slate-800/60 rounded-lg p-2">
+              <div className="text-[9px] sm:text-[10px] text-gray-500">P(GANAR ALGO)</div>
+              <div className="text-base sm:text-lg font-bold text-emerald-400">{Math.round(data.plan.probabilidad_ganar * 100)}%</div>
+            </div>
+            <div className="bg-slate-800/60 rounded-lg p-2">
+              <div className="text-[9px] sm:text-[10px] text-gray-500">EV</div>
+              <div className={`text-base sm:text-lg font-bold ${data.plan.ev >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                {data.plan.ev >= 0 ? '+' : ''}${data.plan.ev.toFixed(2)}
+              </div>
+            </div>
+            <div className="bg-slate-800/60 rounded-lg p-2">
+              <div className="text-[9px] sm:text-[10px] text-gray-500">PEOR CASO</div>
+              <div className="text-base sm:text-lg font-bold text-red-400">${data.plan.peor_caso.toFixed(2)}</div>
+            </div>
+          </div>
+
+          {/* NO APOSTAR (crítico) */}
+          {data.regimen === 'CRITICO' && (
+            <div className="rounded-xl bg-red-500/10 border border-red-500/40 p-4 text-center">
+              <div className="text-xs sm:text-sm text-red-300 font-bold">
+                Bankroll ${data.bankroll_solicitado} NO se invierte. Ningún escalón es válido en régimen crítico.
+              </div>
+              <div className="mt-1 text-[10px] sm:text-xs text-red-400/70">
+                Historial: en saltos ≥2° con tendencia ≥3°, el error de la corrección es la cola gruesa del sistema (hasta 5.5°).
+              </div>
+            </div>
+          )}
+
+          {/* Sin contratos */}
+          {data.plan.sin_contratos && (
+            <div className="rounded-xl bg-amber-500/10 border border-amber-500/30 p-3 text-center text-xs sm:text-sm text-amber-300">
+              No hay contratos exactos con edge ≥ 3% en Polymarket para esta ciudad/fecha.
+            </div>
+          )}
+
+          {/* Ladder table */}
+          {data.plan.escalones.length > 0 && (
+            <div className="rounded-xl bg-gradient-to-br from-blue-500/10 to-blue-500/5 border border-blue-500/20 p-3 sm:p-4">
+              <h3 className="text-sm sm:text-base font-bold text-blue-300 mb-2">
+                🪜 ESCALERA ({data.plan.escalones.length} escalones, σ={data.plan.sd})
+              </h3>
+              <div className="overflow-x-auto">
+                <table className="w-full text-[10px] sm:text-xs">
+                  <thead>
+                    <tr className="text-gray-500 border-b border-gray-700/30">
+                      <th className="text-left py-1.5 pr-2">Escalón</th>
+                      <th className="text-right py-1.5 pr-2">P(IA)</th>
+                      <th className="text-right py-1.5 pr-2">Precio mkt</th>
+                      <th className="text-right py-1.5 pr-2">Edge</th>
+                      <th className="text-right py-1.5 pr-2">Monto $</th>
+                      <th className="text-right py-1.5 pr-2">Pago si gana $</th>
+                      <th className="text-right py-1.5 pr-2">Ganancia $</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data.plan.escalones.map((e, idx) => {
+                      const ganancia = e.pago_si_gana - e.monto
+                      return (
+                        <tr key={e.temp} className={`border-b border-gray-700/20 ${idx === 0 ? 'bg-yellow-500/5' : ''}`}>
+                          <td className="py-1.5 pr-2">
+                            <span className={`${idx === 0 ? 'text-yellow-400 font-bold' : 'text-gray-300'}`}>{e.temp}°C</span>
+                            {idx === 0 && (
+                              <span className="ml-1.5 text-[8px] sm:text-[9px] font-bold text-yellow-500 bg-yellow-500/20 px-1 py-0.5 rounded-full">TOP EDGE</span>
+                            )}
+                          </td>
+                          <td className="text-right py-1.5 pr-2 font-mono text-white">{Math.round(e.p_ia * 100)}%</td>
+                          <td className="text-right py-1.5 pr-2 font-mono text-gray-400">{Math.round(e.p_mkt * 100)}¢</td>
+                          <td className={`text-right py-1.5 pr-2 font-mono font-bold ${e.edge >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                            {e.edge >= 0 ? '+' : ''}{e.edge.toFixed(1)}pp
+                          </td>
+                          <td className="text-right py-1.5 pr-2 font-mono text-amber-300">${e.monto.toFixed(2)}</td>
+                          <td className="text-right py-1.5 pr-2 font-mono text-emerald-400">${e.pago_si_gana.toFixed(2)}</td>
+                          <td className={`text-right py-1.5 pr-2 font-mono font-bold ${ganancia >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                            {ganancia >= 0 ? '+' : ''}${ganancia.toFixed(2)}
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* Footer Info */}
+          <div className="text-center text-[9px] sm:text-[10px] text-gray-600 pt-2 border-t border-gray-700/30">
+            {data.contratos_disponibles} contratos en Polymarket (Gamma) · {data.metodologia} · Forecast: {data.fecha_ejecucion_forecast?.slice(0, 10) ?? '—'}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}

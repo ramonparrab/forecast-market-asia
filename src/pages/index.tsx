@@ -14,6 +14,7 @@ import CoberturaSiNo from '@/components/CoberturaSiNo'
 import MejoraContinua from '@/components/MejoraContinua'
 import BacktestSi from '@/components/BacktestSi'
 import PerformanceAnalisis from '@/components/PerformanceAnalisis'
+import LadderBetting from '@/components/LadderBetting'
 import Arquitectura from '@/components/Arquitectura'
 
 import { DailyAnalysis, GlobalMetrics, CityAnalysis } from '@/types'
@@ -189,7 +190,7 @@ export async function getServerSideProps() {
   }
 }
 
-type View = 'executive' | 'dashboard' | 'table' | 'metrics' | 'comparison' | 'backtest' | 'arbitrage' | 'architecture' | 'signals' | 'coverage' | 'mejora-continua' | 'backtest-si' | 'performance'
+type View = 'executive' | 'dashboard' | 'table' | 'metrics' | 'comparison' | 'backtest' | 'arbitrage' | 'architecture' | 'signals' | 'coverage' | 'mejora-continua' | 'backtest-si' | 'performance' | 'ladder'
 
 /** Returns a friendly confidence label + color class */
 function getConfidence(city: CityAnalysis): { label: string; color: string; bg: string } {
@@ -645,6 +646,7 @@ export default function Home({ initialAnalysis, initialMetrics, initialAvailable
     { key: 'mejora-continua', label: 'MEJORA CONTINUA', icon: '🔬', desc: 'Current vs Improvements comparison' },
     { key: 'backtest-si', label: 'BACKTEST SI', icon: '🎲', desc: 'Simular apuestas SI en Polymarket' },
     { key: 'performance', label: 'ANÁLISIS PERFORMANCE', icon: '📈', desc: 'Precisión por ciudad y global (10PM/11PM vs Real)' },
+    { key: 'ladder', label: 'LADDER BETTING', icon: '🪜', desc: 'Escalera por régimen con Kelly vs Polymarket' },
   ]
 
   return (
@@ -907,6 +909,9 @@ export default function Home({ initialAnalysis, initialMetrics, initialAvailable
 
       {/* Análisis Performance View */}
       {activeView === 'performance' && <PerformanceAnalisis />}
+
+      {/* Ladder Betting View */}
+      {activeView === 'ladder' && <LadderBetting />}
 
       {/* System Architecture View */}
       {activeView === 'architecture' && <Arquitectura />}
