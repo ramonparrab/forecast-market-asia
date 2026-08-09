@@ -45,6 +45,9 @@ export interface PolymarketContract {
   prob_mkt: number
   prob_ia_raw?: number
   prob_ia_norm?: number
+  // Precios SI/NO crudos de Polymarket (pct)
+  si_pct?: number
+  no_pct?: number
   // Liquidity fields
   volume_24h?: number
   spread?: number

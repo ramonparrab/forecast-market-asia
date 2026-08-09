@@ -3,7 +3,7 @@ import { createClient } from '@supabase/supabase-js'
 import { fetchPolymarketPrices } from '@/lib/polymarket'
 import { CIUDADES_ASIA } from '@/lib/cities'
 import { detectarRegimen } from '@/lib/regime'
-import { calcularLadder, LadderPlan } from '@/lib/ladder'
+import { calcularLadder, LadderPlan, LadderContractPrice } from '@/lib/ladder'
 
 const supabaseUrl = String(process.env.NEXT_PUBLIC_SUPABASE_URL || '').replace(/\/rest\/v1\/?$/, '')
 const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
@@ -13,6 +13,18 @@ interface HistRow {
   fecha_objetivo: string
   temp_pronosticada: number | null
   temp_corregida: number | null
+}
+
+function partsTz(tz: string, d: Date, extra: 'date' | 'both'): { fecha: string; hora: string } {
+  const fmt = new Intl.DateTimeFormat('en-CA', {
+    timeZone: tz, hour12: false,
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    ...(extra === 'both' ? { hour: '2-digit', minute: '2-digit' } : {}),
+  })
+  const parts = fmt.formatToParts(d)
+  const get = (t: string) => (parts.find(p => p.type === t) || { value: '00' }).value
+  const dia = `${get('year')}-${get('month')}-${get('day')}`
+  return { fecha: dia, hora: `${get('hour')}:${get('minute')}` }
 }
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
@@ -54,16 +66,34 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       currentRecord.fecha_objetivo
     )
 
-    // 4. Precios Polymarket live (contratos exactos)
+    // 4. Precios Polymarket live (contratos exactos con SI% y NO% crudos)
     const contratos = await fetchPolymarketPrices(slug, currentRecord.fecha_objetivo)
-    const priceMap: Record<number, number> = {}
+    const priceMap: Record<number, LadderContractPrice> = {}
     for (const c of contratos) {
       if (c.tipo !== 'exacto' || typeof c.valor !== 'number') continue
       if (c.prob_mkt <= 0) continue
-      priceMap[c.valor] = Math.round((c.prob_mkt / 100) * 1000) / 1000
+      const si = c.si_pct != null ? c.si_pct : c.prob_mkt
+      const no = c.no_pct != null ? c.no_pct : 100 - si
+      priceMap[c.valor] = {
+        precio: Math.round((c.prob_mkt / 100) * 1000) / 1000,
+        si,
+        no,
+      }
     }
 
-    // 5. Plan ladder según régimen (A2: trans = σ amplia + bankroll/2; crit = NO apostar)
+    // 5. Verificación de fecha objetivo vs ventana 10-11PM Caracas
+    const ahora = new Date()
+    const caracas = partsTz('America/Caracas', ahora, 'both')
+    const [hC = 0, mC = 0] = (caracas.hora.split(':') || []).map(Number)
+    const ventana_10_11pm = (hC === 22 || hC === 23) || (hC === 21 && mC >= 30)
+    const manana = new Date(ahora.getTime() + 24 * 60 * 60 * 1000)
+    // Dentro de la ventana 10-11PM la diana es el día siguiente en Asia; durante el día, el evento abierto es el día de Asia en curso
+    const diana_esperada = ventana_10_11pm
+      ? partsTz('Asia/Shanghai', manana, 'date').fecha
+      : partsTz('Asia/Shanghai', ahora, 'date').fecha
+    const fecha_coincide = currentRecord.fecha_objetivo === diana_esperada
+
+    // 6. Plan ladder según régimen (A2: trans = σ amplia + bankroll/2; crit = NO apostar)
     let plan: LadderPlan
     if (regimen.regimen === 'CRITICO') {
       plan = { inversion: 0, sd: regimen.sd, escalones: [], probabilidad_ganar: 0, ev: 0, peor_caso: 0, sin_contratos: false }
@@ -77,6 +107,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     return res.json({
       fecha: currentRecord.fecha_objetivo,
+      fecha_caracas: caracas.fecha,
+      hora_caracas: caracas.hora,
+      ventana_10_11pm,
+      diana_esperada,
+      fecha_coincide,
       fecha_ejecucion_forecast: currentRecord.fecha_ejecucion,
       slug,
       ciudad: nombre,
@@ -95,7 +130,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       plan,
       contratos_disponibles: contratos.length,
       hora_snapshot: '~10-11pm Caracas',
-      metodologia: 'blend sesgo-corregido (engine 10PM/11PM) · edge>=3% · Kelly normalizado · regimen ESTABLE=σ0.85 · TRANSICION=σ1.25 bankroll/2 · CRITICO=no apostar',
+      metodologia: 'blend sesgo-corregido (engine 10PM/11PM) · edge SI>=3% · Kelly normalizado · regimen ESTABLE=σ0.85 · TRANSICION=σ1.25 bankroll/2 · CRITICO=no apostar · precio=mid sin vig SI/NO',
     })
   } catch (error) {
     console.error('[ladder-betting]', error)

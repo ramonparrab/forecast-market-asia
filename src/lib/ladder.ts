@@ -2,7 +2,10 @@ export interface Escalon {
   temp: number
   p_ia: number
   p_mkt: number
+  si_pct: number
+  no_pct: number
   edge: number
+  edge_no: number
   monto: number
   pago_si_gana: number
 }
@@ -19,6 +22,12 @@ export interface LadderPlan {
 
 export const EDGE_MIN = 0.03
 export const MONTO_MIN = 0.5
+
+export interface LadderContractPrice {
+  precio: number
+  si: number
+  no: number
+}
 
 function erf(z: number): number {
   const t = 1 / (1 + 0.3275911 * Math.abs(z))
@@ -52,12 +61,12 @@ export function calcularLadder(
   corregida: number,
   sd: number,
   bankroll: number,
-  priceMap: Record<number, number>
+  contracts: Record<number, LadderContractPrice>
 ): LadderPlan {
-  const temps = Object.keys(priceMap)
+  const temps = Object.keys(contracts)
     .map(Number)
     .sort((a, b) => a - b)
-    .filter(k => priceMap[k] >= 0.01 && priceMap[k] <= 0.95)
+    .filter(k => contracts[k].precio >= 0.01 && contracts[k].precio <= 0.95)
 
   if (temps.length === 0) {
     return { inversion: 0, sd, escalones: [], probabilidad_ganar: 0, ev: 0, peor_caso: 0, sin_contratos: true }
@@ -66,9 +75,14 @@ export function calcularLadder(
   const probs = new Map<number, number>()
   for (const k of temps) probs.set(k, probGaussInt(k, corregida, sd))
 
-  // Escalones candidatos con edge >= EDGE_MIN
+  // Escalones candidatos con edge SI >= EDGE_MIN
   let rungs = temps
-    .map(k => ({ k, p: probs.get(k) as number, precio: priceMap[k], edge: (probs.get(k) as number) - priceMap[k] }))
+    .map(k => ({
+      k,
+      p: probs.get(k) as number,
+      contrato: contracts[k],
+      edge: (probs.get(k) as number) - contracts[k].precio,
+    }))
     .filter(r => r.p >= 0.01 && r.edge >= EDGE_MIN)
 
   if (rungs.length === 0) {
@@ -76,7 +90,10 @@ export function calcularLadder(
   }
 
   // Montos Kelly normalizados a bankroll, con mínimo por escalón
-  let ws = rungs.map(r => ({ k: r.k, p: r.p, precio: r.precio, edge: r.edge, w: Math.max(0, kellyShare(r.p, r.precio)) }))
+  let ws = rungs.map(r => ({
+    k: r.k, p: r.p, contrato: r.contrato, edge: r.edge,
+    w: Math.max(0, kellyShare(r.p, r.contrato.precio)),
+  }))
   let sumW = ws.reduce((s, x) => s + x.w, 0)
 
   if (sumW <= 0) {
@@ -95,7 +112,7 @@ export function calcularLadder(
     }
   }
 
-  // Ajuste fino: que la suma sea exactamente bankroll (el excedente va al mayor edge)
+  // Ajuste fino: que la suma sea exactamente bankroll (el excedente va al mayor edge SI)
   const total = montos.reduce((s, x) => s + x.monto, 0)
   if (Math.abs(total - bankroll) > 0.5 && montos.length) {
     const maxEdge = Math.max(...montos.map(m => m.edge))
@@ -107,15 +124,18 @@ export function calcularLadder(
   const escalones: Escalon[] = montos.map(m => ({
     temp: m.k,
     p_ia: round2(m.p),
-    p_mkt: round2(m.precio),
+    p_mkt: round2(m.contrato.precio),
+    si_pct: m.contrato.si,
+    no_pct: m.contrato.no,
     edge: round2(m.edge * 100),
+    edge_no: round2(((1 - m.p) - m.contrato.no / 100) * 100),
     monto: round2(m.monto),
-    pago_si_gana: round2(m.monto / m.precio),
+    pago_si_gana: round2(m.monto / m.contrato.precio),
   }))
 
   const probabilidad_ganar = round2(montos.reduce((s, m) => s + m.p, 0))
   const inversion = round2(montos.reduce((s, m) => s + m.monto, 0))
-  const ev = round2(montos.reduce((s, m) => s + m.p * (m.monto / m.precio), 0) - inversion)
+  const ev = round2(montos.reduce((s, m) => s + m.p * (m.monto / m.contrato.precio), 0) - inversion)
 
   return { inversion, sd, escalones, probabilidad_ganar, ev, peor_caso: round2(-inversion), sin_contratos: false }
 }

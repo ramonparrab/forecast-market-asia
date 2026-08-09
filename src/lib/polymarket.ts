@@ -174,6 +174,8 @@ export async function fetchPolymarketPrices(
         tipo,
         valor,
         prob_mkt: probMkt,
+        si_pct: Math.round(yesPrice * 100),
+        no_pct: Math.round((1 - noPrice) * 100),
         volume_24h: market.volumeNum || parseFloat(market.volume || '0'),
         spread: yesPrice && noPrice ? Math.round((yesPrice - noPrice) * 10000) / 10000 : undefined,
       })

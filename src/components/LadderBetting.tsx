@@ -7,7 +7,10 @@ interface Escalon {
   temp: number
   p_ia: number
   p_mkt: number
+  si_pct: number
+  no_pct: number
   edge: number
+  edge_no: number
   monto: number
   pago_si_gana: number
 }
@@ -32,6 +35,11 @@ interface RegimenDetalle {
 
 interface LadderData {
   fecha: string
+  fecha_caracas: string
+  hora_caracas: string
+  ventana_10_11pm: boolean
+  diana_esperada: string
+  fecha_coincide: boolean
   fecha_ejecucion_forecast: string
   slug: string
   ciudad: string
@@ -163,6 +171,38 @@ export default function LadderBetting() {
         </div>
       </div>
 
+      {/* Fecha objetivo del análisis */}
+      {data && !loading && (
+        <div className="rounded-xl bg-blue-600/15 border border-blue-500/40 p-3 sm:p-4 mb-4">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1">
+            <div>
+              <div className="text-[9px] sm:text-[10px] text-blue-400 font-semibold tracking-wide">FECHA OBJETIVO DEL ANÁLISIS — {data.ciudad.toUpperCase()}</div>
+              <div className="text-xl sm:text-2xl font-black text-white">{data.fecha} <span className="text-blue-300 text-xs sm:text-sm font-semibold">(día del evento en Asia)</span></div>
+            </div>
+            <div className="flex flex-col items-start sm:items-end gap-1 text-[10px] sm:text-xs">
+              <span className="text-gray-300">
+                Snapshot: <span className="font-bold text-white">{data.hora_caracas}</span> Caracas · {data.fecha_caracas}
+              </span>
+              {data.ventana_10_11pm ? (
+                <span className="text-emerald-400 font-bold">✅ Dentro de la ventana 10-11PM — pronóstico listo</span>
+              ) : (
+                <span className="text-amber-400 font-bold">⚠️ Fuera de la ventana 10-11PM — los precios aún pueden moverse</span>
+              )}
+              {data.fecha_coincide ? (
+                <span className="text-emerald-400 font-semibold">✅ Coincide con la fecha esperada ({data.diana_esperada})</span>
+              ) : (
+                <span className="text-red-400 font-semibold">⚠️ Esperado para {data.diana_esperada} (Asia) — verifica que sea el día que quieres apostar</span>
+              )}
+            </div>
+          </div>
+          {data.fecha_ejecucion_forecast && (
+            <div className="mt-1.5 text-[10px] sm:text-xs text-gray-500">
+              Forecast ejecutado: {String(data.fecha_ejecucion_forecast).slice(0, 10)} · {data.contratos_disponibles} contratos en Polymarket para esta fecha
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Régimen Banner */}
       {data && !loading && regimenBanner()}
 
@@ -238,8 +278,11 @@ export default function LadderBetting() {
                     <tr className="text-gray-500 border-b border-gray-700/30">
                       <th className="text-left py-1.5 pr-2">Escalón</th>
                       <th className="text-right py-1.5 pr-2">P(IA)</th>
-                      <th className="text-right py-1.5 pr-2">Precio mkt</th>
-                      <th className="text-right py-1.5 pr-2">Edge</th>
+                      <th className="text-right py-1.5 pr-2">Mkt SI%</th>
+                      <th className="text-right py-1.5 pr-2">Mkt NO%</th>
+                      <th className="text-right py-1.5 pr-2">Precio mid</th>
+                      <th className="text-right py-1.5 pr-2">Edge SI</th>
+                      <th className="text-right py-1.5 pr-2">Edge NO</th>
                       <th className="text-right py-1.5 pr-2">Monto $</th>
                       <th className="text-right py-1.5 pr-2">Pago si gana $</th>
                       <th className="text-right py-1.5 pr-2">Ganancia $</th>
@@ -257,11 +300,16 @@ export default function LadderBetting() {
                             )}
                           </td>
                           <td className="text-right py-1.5 pr-2 font-mono text-white">{Math.round(e.p_ia * 100)}%</td>
-                          <td className="text-right py-1.5 pr-2 font-mono text-gray-400">{Math.round(e.p_mkt * 100)}¢</td>
+                          <td className="text-right py-1.5 pr-2 font-mono text-gray-400">{e.si_pct}%</td>
+                          <td className="text-right py-1.5 pr-2 font-mono text-gray-400">{e.no_pct}%</td>
+                          <td className="text-right py-1.5 pr-2 font-mono text-amber-300">{Math.round(e.p_mkt * 100)}¢</td>
                           <td className={`text-right py-1.5 pr-2 font-mono font-bold ${e.edge >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
                             {e.edge >= 0 ? '+' : ''}{e.edge.toFixed(1)}pp
                           </td>
-                          <td className="text-right py-1.5 pr-2 font-mono text-amber-300">${e.monto.toFixed(2)}</td>
+                          <td className={`text-right py-1.5 pr-2 font-mono ${e.edge_no >= 3 ? 'text-emerald-400 font-bold' : 'text-gray-500'}`}>
+                            {e.edge_no >= 3 ? '+' + e.edge_no.toFixed(1) + 'pp ⭐' : e.edge_no.toFixed(1) + 'pp'}
+                          </td>
+                          <td className="text-right py-1.5 pr-2 font-mono text-white">${e.monto.toFixed(2)}</td>
                           <td className="text-right py-1.5 pr-2 font-mono text-emerald-400">${e.pago_si_gana.toFixed(2)}</td>
                           <td className={`text-right py-1.5 pr-2 font-mono font-bold ${ganancia >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
                             {ganancia >= 0 ? '+' : ''}${ganancia.toFixed(2)}
@@ -272,6 +320,9 @@ export default function LadderBetting() {
                   </tbody>
                 </table>
               </div>
+              <p className="text-[9px] sm:text-[10px] text-gray-500 mt-2">
+                Precio mid sin vig = (SI + (1 − NO)) / 2 · Edge SI = P(IA) − mid · Edge NO = (1 − P(IA)) − NO% (⭐ si ≥ 3pp: el NO de ese escalón también vale la pena)
+              </p>
             </div>
           )}
 
