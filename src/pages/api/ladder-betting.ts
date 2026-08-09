@@ -295,6 +295,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       hist_error_entero: histPct,
       muestras_hist: n,
       valor_hoy_modelo: round2(valorHoy),
+      base_usada: round2(baseForModel),
+      bias_hoy: round2(valorHoy - baseForModel),
       regimen: regimen.regimen,
       regimen_detalle: {
         delta1: regimen.delta1,

@@ -60,6 +60,8 @@ interface LadderData {
   hist_error_entero: Record<string, number>
   muestras_hist: number
   valor_hoy_modelo: number
+  base_usada: number
+  bias_hoy: number
   regimen: 'ESTABLE' | 'TRANSICION' | 'CRITICO'
   regimen_detalle: RegimenDetalle
   bankroll_solicitado: number
@@ -248,6 +250,9 @@ export default function LadderBetting() {
             <div className="bg-slate-800/60 rounded-lg p-2">
               <div className="text-[9px] sm:text-[10px] text-gray-500">CORREGIDA GANADORA {data.hora_ganadora ? `— ${data.modelo_ganador === 'KALMAN' ? 'KAL' : 'MC'} @ ${data.hora_ganadora}` : `— ${data.modelo_ganador === 'KALMAN' ? 'KAL' : 'MC'}`}</div>
               <div className="text-base sm:text-lg font-bold text-blue-300">{data.valor_hoy_modelo.toFixed(2)}°C</div>
+              <div className="text-[9px] sm:text-[10px] text-gray-500 font-mono">
+                base {data.base_usada.toFixed(2)} + bias {data.bias_hoy >= 0 ? '+' : ''}{data.bias_hoy.toFixed(2)}
+              </div>
             </div>
             <div className="bg-slate-800/60 rounded-lg p-2">
               <div className="text-[9px] sm:text-[10px] text-gray-500">INVERSIÓN TOTAL</div>
