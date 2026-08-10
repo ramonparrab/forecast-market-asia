@@ -13,6 +13,7 @@ interface Escalon {
   edge_no: number
   monto: number
   pago_si_gana: number
+  ancla: boolean
 }
 
 interface Plan {
@@ -72,6 +73,24 @@ interface LadderData {
   metodologia: string
 }
 
+interface RankingFila {
+  slug: string
+  ciudad: string
+  regimen: string
+  modelo: string
+  hora: string | null
+  mae_combo: number | null
+  hit_pronostico: number
+  valor_hoy: number | null
+  escalones: number
+  inversion: number
+  probabilidad_ganar: number
+  ev: number
+  ev_dolar: number
+  score: number
+  error?: string
+}
+
 const fmtSigned = (v: number | null): string => {
   if (v === null) return '—'
   return `${v >= 0 ? '+' : ''}${Math.round(v * 100) / 100}°`
@@ -91,6 +110,23 @@ export default function LadderBetting() {
   const [loading, setLoading] = useState(false)
   const [data, setData] = useState<LadderData | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [ranking, setRanking] = useState<RankingFila[] | null>(null)
+  const [loadingRanking, setLoadingRanking] = useState(false)
+
+  const cargarRanking = async () => {
+    setLoadingRanking(true)
+    try {
+      const res = await fetch('/api/ladder-ranking')
+      const j = await res.json().catch(() => null)
+      if (j?.filas) setRanking(j.filas)
+    } catch {
+      setRanking(null)
+    } finally {
+      setLoadingRanking(false)
+    }
+  }
+
+  useEffect(() => { cargarRanking() }, [])
 
   const analyze = async (s: string, m: number) => {
     setLoading(true)
@@ -142,7 +178,7 @@ export default function LadderBetting() {
           <div className="text-base sm:text-xl font-black text-amber-400 tracking-wide">⚠️ PRONÓSTICO EN TRANSICIÓN</div>
           <div className="mt-1 text-xs sm:text-sm text-amber-300 font-medium">{d.motivo}</div>
           <div className="mt-1 text-[10px] sm:text-xs text-amber-200/80">
-            σ ampliada a {d.sd} (×1.5) · bankroll reducido a la mitad (${data.bankroll_solicitado / 2}) · edge mínimo 3%
+            σ ampliada a {d.sd} (×1.5) · bankroll reducido a la mitad (${data.bankroll_solicitado / 2}) · ancla = pronóstico siempre incluido, escalones con edge ≥ 0
           </div>
         </div>
       )
@@ -371,7 +407,7 @@ export default function LadderBetting() {
           {/* Sin contratos */}
           {data.plan.sin_contratos && (
             <div className="rounded-xl bg-amber-500/10 border border-amber-500/30 p-3 text-center text-xs sm:text-sm text-amber-300">
-              No hay contratos exactos con edge ≥ 3% en Polymarket para esta ciudad/fecha.
+              No hay contratos válidos en Polymarket para esta ciudad/fecha — sin escalón posible (ni siquiera el pronóstico).
             </div>
           )}
 
@@ -401,11 +437,13 @@ export default function LadderBetting() {
                     {data.plan.escalones.map((e, idx) => {
                       const ganancia = e.pago_si_gana - e.monto
                       return (
-                        <tr key={e.temp} className={`border-b border-gray-700/20 ${idx === 0 ? 'bg-yellow-500/5' : ''}`}>
+                        <tr key={e.temp} className={`border-b border-gray-700/20 ${e.ancla ? 'bg-yellow-500/10' : idx === 0 ? 'bg-yellow-500/5' : ''}`}>
                           <td className="py-1.5 pr-2">
-                            <span className={`${idx === 0 ? 'text-yellow-400 font-bold' : 'text-gray-300'}`}>{e.temp}°C</span>
-                            {idx === 0 && (
-                              <span className="ml-1.5 text-[8px] sm:text-[9px] font-bold text-yellow-500 bg-yellow-500/20 px-1 py-0.5 rounded-full">TOP EDGE</span>
+                            <span className={`${e.ancla ? 'text-yellow-400 font-bold' : idx === 0 ? 'text-yellow-400 font-bold' : 'text-gray-300'}`}>{e.temp}°C</span>
+                            {(e.ancla || idx === 0) && (
+                              <span className="ml-1.5 text-[8px] sm:text-[9px] font-bold text-yellow-500 bg-yellow-500/20 px-1 py-0.5 rounded-full">
+                                {e.ancla ? 'PRONÓSTICO' : 'TOP EDGE'}
+                              </span>
                             )}
                           </td>
                           <td className="text-right py-1.5 pr-2 font-mono text-white">{Math.round(e.p_ia * 100)}%</td>
@@ -441,6 +479,85 @@ export default function LadderBetting() {
           </div>
         </div>
       )}
+
+      {/* Ranking global: mejores ciudades del día (precisión histórica × edge Polymarket) */}
+      <div className="mt-6 rounded-2xl bg-gradient-to-br from-purple-900/40 to-slate-900 border border-purple-500/30 p-3 sm:p-4">
+        <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+          <h3 className="text-sm sm:text-base font-bold text-purple-300">🏆 MEJORES CIUDADES HOY — ESCALERA</h3>
+          <button
+            onClick={cargarRanking}
+            disabled={loadingRanking}
+            className="text-[10px] sm:text-xs font-bold text-purple-300 bg-purple-500/15 border border-purple-500/30 rounded-lg px-2 py-1 hover:bg-purple-500/25 transition"
+          >
+            {loadingRanking ? '...' : '↻ Actualizar'}
+          </button>
+        </div>
+        <div className="text-[9px] sm:text-[10px] text-gray-500 mb-2">
+          Mezcla precisión histórica del modelo (P del pronóstico entero) × valor de Polymarket (EV por $1) — rankea por EV esperado del plan de $10. CRÍTICO = no apostar.
+        </div>
+        {ranking == null && !loadingRanking && <div className="text-center py-4 text-gray-500 text-xs">Cargando ranking...</div>}
+        {ranking != null && (
+          <div className="overflow-x-auto">
+            <table className="w-full text-[10px] sm:text-xs">
+              <thead>
+                <tr className="text-gray-500 border-b border-gray-700/30">
+                  <th className="text-left py-1.5 pr-2">#</th>
+                  <th className="text-left py-1.5 pr-2">Ciudad</th>
+                  <th className="text-right py-1.5 pr-2">Régimen</th>
+                  <th className="text-right py-1.5 pr-2">Modelo</th>
+                  <th className="text-right py-1.5 pr-2">MAE</th>
+                  <th className="text-right py-1.5 pr-2">Hit pronóstico</th>
+                  <th className="text-right py-1.5 pr-2">Escalones</th>
+                  <th className="text-right py-1.5 pr-2">P(ganar)</th>
+                  <th className="text-right py-1.5 pr-2">EV $10</th>
+                  <th className="text-right py-1.5 pr-2">EV/$</th>
+                </tr>
+              </thead>
+              <tbody>
+                {ranking.map((r, i) => {
+                  if (r.error) {
+                    return (
+                      <tr key={r.slug} className="border-b border-gray-700/20">
+                        <td className="py-1.5 pr-2 text-gray-600">{i + 1}</td>
+                        <td className="py-1.5 pr-2 text-gray-600">{r.ciudad}</td>
+                        <td colSpan={8} className="py-1.5 pr-2 text-gray-600">sin pronóstico pendiente o error: {r.error}</td>
+                      </tr>
+                    )
+                  }
+                  const top = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : '·'
+                  const critico = r.regimen === 'CRITICO'
+                  return (
+                    <tr key={r.slug} className={`border-b border-gray-700/20 ${critico ? 'bg-red-500/5' : i === 0 ? 'bg-purple-500/10' : ''}`}>
+                      <td className="py-1.5 pr-2">{top}</td>
+                      <td className="py-1.5 pr-2">
+                        <span className={`font-bold ${critico ? 'text-red-400' : 'text-white'}`}>{r.ciudad}</span>
+                        {r.valor_hoy != null && <span className="ml-1.5 text-[9px] text-gray-500 font-mono">{r.valor_hoy.toFixed(1)}°</span>}
+                      </td>
+                      <td className="text-right py-1.5 pr-2 font-mono text-[9px]">
+                        <span className={`rounded px-1 py-0.5 ${critico ? 'bg-red-500/20 text-red-300' : r.regimen === 'TRANSICION' ? 'bg-amber-500/20 text-amber-300' : 'bg-emerald-500/20 text-emerald-300'}`}>
+                          {r.regimen}
+                        </span>
+                      </td>
+                      <td className="text-right py-1.5 pr-2 font-mono text-gray-300">{r.modelo}{r.hora ? ' @ ' + r.hora : ''}</td>
+                      <td className="text-right py-1.5 pr-2 font-mono text-gray-400">{r.mae_combo != null ? r.mae_combo.toFixed(2) + '°' : '—'}</td>
+                      <td className="text-right py-1.5 pr-2 font-mono text-cyan-300">{Math.round(r.hit_pronostico * 100)}%</td>
+                      <td className="text-right py-1.5 pr-2 font-mono text-gray-300">{r.escalones}</td>
+                      <td className="text-right py-1.5 pr-2 font-mono text-emerald-400">{Math.round(r.probabilidad_ganar * 100)}%</td>
+                      <td className={`text-right py-1.5 pr-2 font-mono font-bold ${r.ev >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                        {r.ev >= 0 ? '+' : ''}${r.ev.toFixed(2)}
+                      </td>
+                      <td className={`text-right py-1.5 pr-2 font-mono font-bold ${r.ev_dolar >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                        {r.ev_dolar >= 0 ? '+' : ''}{r.ev_dolar.toFixed(2)}
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+        <div className="text-[9px] text-gray-600 mt-2">score = hit pronóstico × (1 + EV/$) · ordenado por EV del plan (maximizar ganancia) y P(ganar)</div>
+      </div>
     </div>
   )
 }

@@ -8,6 +8,7 @@ export interface Escalon {
   edge_no: number
   monto: number
   pago_si_gana: number
+  ancla: boolean
 }
 
 export interface LadderPlan {
@@ -23,6 +24,7 @@ export interface LadderPlan {
 
 export const EDGE_MIN = 0.03
 export const MONTO_MIN = 0.5
+export const ANCLA_FRACCION = 0.15
 
 export interface LadderContractPrice {
   precio: number
@@ -76,15 +78,22 @@ function construirPlan(
   bankroll: number,
   contracts: Record<number, LadderContractPrice>,
   sd: number,
-  empirica: boolean
+  empirica: boolean,
+  ancla: number | null = null
 ): LadderPlan {
   const sinBase: LadderPlan = { inversion: 0, sd, escalones: [], probabilidad_ganar: 0, ev: 0, peor_caso: 0, sin_contratos: false, empirica }
 
-  // Escalones con edge SI >= EDGE_MIN
-  let rungs = probs
-    .map(x => ({ k: x.k, p: x.p, c: contracts[x.k], edge: x.p - contracts[x.k].precio }))
-    .filter(r => r.p >= 0.01 && r.c.precio >= 0.01 && r.c.precio <= 0.95 && r.edge >= EDGE_MIN)
-
+  // Escalera centrada: el pronóstico entero (ancla) SIEMPRE entra; el resto se
+  // elige por MEJOR VALOR (edge >= 0 sobre los precios de Polymarket), para
+  // maximizar la ganancia con máxima cobertura y casi nunca perder.
+  const base = probs.map(x => ({ k: x.k, p: x.p, c: contracts[x.k], edge: x.p - contracts[x.k].precio, ancla: false }))
+  let rungs = base.filter(r => r.p >= 0.01 && r.c.precio >= 0.01 && r.c.precio <= 0.95 && r.edge >= (ancla != null ? 0 : EDGE_MIN))
+  if (ancla != null) {
+    const rA = base.find(x => x.k === ancla)
+    if (rA && rA.p >= 0.01 && rA.c.precio >= 0.01 && rA.c.precio <= 0.95 && !rungs.some(x => x.k === ancla)) {
+      rungs.push({ ...rA, ancla: true })
+    }
+  }
   if (rungs.length === 0) return sinBase
 
   let ws = rungs.map(r => ({ ...r, w: Math.max(0, kellyShare(r.p, r.c.precio)) }))
@@ -93,9 +102,22 @@ function construirPlan(
 
   let montos = ws.map(x => ({ ...x, monto: (bankroll * x.w) / sumW }))
 
-  const bajoMinimo = montos.some(m => m.monto > 0 && m.monto < MONTO_MIN)
+  // El ancla (pronóstico) mantiene un piso de monto aunque su edge sea negativo
+  const ancM = montos.find(m => (m as any).ancla)
+  const anclaMin = Math.max(MONTO_MIN, bankroll * ANCLA_FRACCION)
+  if (ancM && ancM.monto < anclaMin && montos.length > 1) {
+    const deficit = anclaMin - ancM.monto
+    const resto = montos.filter(m => !(m as any).ancla)
+    const sumResto = resto.reduce((s, m) => s + Math.max(0, m.monto), 0)
+    if (sumResto > 0) {
+      ancM.monto = anclaMin
+      for (const m of resto) m.monto = Math.max(0, m.monto - (deficit * Math.max(0, m.monto)) / sumResto)
+    }
+  }
+
+  const bajoMinimo = montos.some(m => m.monto > 0 && m.monto < MONTO_MIN && !(m as any).ancla)
   if (bajoMinimo && montos.length > 1) {
-    montos = montos.filter(m => m.monto >= MONTO_MIN)
+    montos = montos.filter(m => (m as any).ancla || m.monto >= MONTO_MIN)
     if (montos.length) {
       const s2 = montos.reduce((s, x) => s + x.monto, 0)
       montos = montos.map(m => ({ ...m, monto: (bankroll * m.monto) / s2 }))
@@ -120,6 +142,7 @@ function construirPlan(
     edge_no: round2(((1 - m.p) - m.c.no / 100) * 100),
     monto: round2(m.monto),
     pago_si_gana: round2(m.monto / m.c.precio),
+    ancla: !!(m as any).ancla,
   }))
 
   const probabilidad_ganar = round2(montos.reduce((s, m) => s + m.p, 0))
@@ -141,7 +164,7 @@ export function calcularLadderGauss(
 ): LadderPlan {
   const temps = Object.keys(contracts).map(Number).sort((a, b) => a - b)
   const probs = temps.map(k => ({ k, p: probGaussInt(k, corregida, sd) }))
-  return construirPlan(probs, bankroll, contracts, sd, false)
+  return construirPlan(probs, bankroll, contracts, sd, false, roundInt(corregida))
 }
 
 /**
@@ -166,5 +189,5 @@ export function calcularLadderEmpirica(
     const p = mezclaGauss ? 0.5 * pEmp + 0.5 * probGaussInt(k, corregida, sd) : pEmp
     return { k, p }
   })
-  return construirPlan(probs, bankroll, contracts, sd, true)
+  return construirPlan(probs, bankroll, contracts, sd, true, r)
 }

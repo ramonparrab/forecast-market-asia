@@ -36,13 +36,20 @@ function mae(arr: number[]): number {
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' })
   if (!supabaseUrl || !supabaseKey) return res.status(500).json({ error: 'Supabase not configured' })
-
   try {
     const slug = (req.query.slug as string) || 'chongqing'
     const monto = parseFloat(req.query.monto as string) || 10
-    const nombre = ciudadMap.get(slug) || slug
-    const client = createClient(supabaseUrl, supabaseKey)
-    const ahora = new Date()
+    return res.json(await buildPlanData(slug, monto))
+  } catch (error) {
+    console.error('[ladder-betting]', error)
+    return res.status(500).json({ error: (error as Error).message })
+  }
+}
+
+export async function buildPlanData(slug: string, monto: number): Promise<Record<string, unknown>> {
+  const nombre = ciudadMap.get(slug) || slug
+  const client = createClient(supabaseUrl, supabaseKey)
+  const ahora = new Date()
 
     // 1. Historial completo de la ciudad (régimen + walk-forward de modelos)
     const { data: allHistory } = await client
@@ -61,7 +68,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       .limit(1)
 
     if (!pendingRaw || !(pendingRaw as any[]).length) {
-      return res.status(404).json({ error: 'No hay pronóstico pendiente para ' + nombre })
+      throw new Error('[404] No hay pronóstico pendiente para ' + nombre)
     }
 
     const currentRecord = (pendingRaw as any[])[0]
@@ -264,7 +271,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       plan = calcularLadderGauss(valorHoy, regimen.sd, monto * regimen.factorBankroll, priceMap)
     }
 
-    return res.json({
+    return {
       fecha: currentRecord.fecha_objetivo,
       fecha_caracas: caracas.fecha,
       hora_caracas: caracas.hora,
@@ -312,10 +319,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       nota_horas: horarioDisponible
         ? 'daily_runs guarda corridas por hora (02:00Z=10PM y 03:00Z=11PM Caracas). El LADDER compara los 4 combos modelo×hora y usa el mejor: ' + modeloGanador + ' @ ' + (horaGanadora || '—') + ' (MAE ' + (combosMae[horaGanadora === '10PM' ? (modeloGanador === 'KALMAN' ? 'kal_10pm' : 'mc_10pm') : horaGanadora === '11PM' ? (modeloGanador === 'KALMAN' ? 'kal_11pm' : 'mc_11pm') : 'kal_10pm']) + '°) — ' + muestrasHoras + ' días con corrida horaria.'
         : 'No hubo suficientes corridas horarias en daily_runs (' + muestrasHoras + ' < ' + MIN_MUESTRAS_HORA + '): se usó la serie almacenada sin comparación 10PM/11PM.',
-      metodologia: 'combos modelo×hora de daily_runs (KALMAN|MC) × (10PM|11PM): ' + (horarioDisponible ? 'best = ' + modeloGanador + ' @ ' + (horaGanadora || '—') : 'solo stored KALMAN vs MC') + ' · distribucion = histograma empirico (' + n + ' muestras) + mezcla gauss en TRANSICION · edge SI>=3% · Kelly normalizado · CRITICO=no apostar',
-    })
-  } catch (error) {
-    console.error('[ladder-betting]', error)
-    return res.status(500).json({ error: (error as Error).message })
-  }
+      metodologia: 'escalera centrada: pronóstico entero (ancla) SIEMPRE incluido + escalones r±1/r±2 con mejor valor (edge ≥ 0) sobre precios Polymarket · Kelly normalizado · CRITICO=no apostar',
+    }
 }
