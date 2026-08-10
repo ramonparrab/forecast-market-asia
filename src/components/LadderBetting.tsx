@@ -14,6 +14,7 @@ interface Escalon {
   monto: number
   pago_si_gana: number
   ancla: boolean
+  forzado?: boolean
 }
 
 interface Plan {
@@ -436,13 +437,14 @@ export default function LadderBetting() {
                   <tbody>
                     {data.plan.escalones.map((e, idx) => {
                       const ganancia = e.pago_si_gana - e.monto
+                      const destacado = e.ancla || e.forzado || idx === 0
                       return (
-                        <tr key={e.temp} className={`border-b border-gray-700/20 ${e.ancla ? 'bg-yellow-500/10' : idx === 0 ? 'bg-yellow-500/5' : ''}`}>
+                        <tr key={e.temp} className={`border-b border-gray-700/20 ${e.ancla ? 'bg-yellow-500/10' : e.forzado ? 'bg-emerald-500/10' : idx === 0 ? 'bg-yellow-500/5' : ''}`}>
                           <td className="py-1.5 pr-2">
-                            <span className={`${e.ancla ? 'text-yellow-400 font-bold' : idx === 0 ? 'text-yellow-400 font-bold' : 'text-gray-300'}`}>{e.temp}°C</span>
-                            {(e.ancla || idx === 0) && (
+                            <span className={`${e.ancla || e.forzado || idx === 0 ? 'text-yellow-400 font-bold' : 'text-gray-300'}`}>{e.temp}°C</span>
+                            {destacado && (
                               <span className="ml-1.5 text-[8px] sm:text-[9px] font-bold text-yellow-500 bg-yellow-500/20 px-1 py-0.5 rounded-full">
-                                {e.ancla ? 'PRONÓSTICO' : 'TOP EDGE'}
+                                {e.ancla ? 'PRONÓSTICO' : e.forzado ? 'COBERTURA' : 'TOP EDGE'}
                               </span>
                             )}
                           </td>
