@@ -88,8 +88,11 @@ function construirPlan(
   let rungs = base.filter(r => r.p >= 0.01 && r.c.precio >= 0.01 && r.c.precio <= 0.95 && r.edge >= (ancla != null ? 0 : EDGE_MIN))
   if (ancla != null) {
     const rA = base.find(x => x.k === ancla)
-    if (rA && rA.p >= 0.01 && rA.c.precio >= 0.01 && rA.c.precio <= 0.95 && !rungs.some(x => x.k === ancla)) {
-      rungs.push({ ...rA, ancla: true })
+    if (rA && rA.p >= 0.01 && rA.c.precio >= 0.01 && rA.c.precio <= 0.95) {
+      // El pronóstico se marca SIEMPRE como ancla (no dropeable): aunque entre por
+      // edge propio, la regla de viabilidad (Σ ≤ 95%) NO puede expulsarlo.
+      const yaEnRungs = rungs.some(x => x.k === ancla)
+      rungs = yaEnRungs ? rungs.map(r => (r.k === ancla ? { ...r, ancla: true } : r)) : [...rungs, { ...rA, ancla: true }]
     }
     for (const k of [ancla - 1, ancla + 1]) {
       const rV = base.find(x => x.k === k)
