@@ -339,7 +339,7 @@ export async function buildPlanData(slug: string, monto: number, ctx?: PlanCtx):
       nota_horas: horarioDisponible
         ? 'daily_runs guarda corridas por hora (02:00Z=10PM y 03:00Z=11PM Caracas). El LADDER compara los 4 combos modelo×hora y usa el mejor: ' + modeloGanador + ' @ ' + (horaGanadora || '—') + ' (MAE ' + (combosMae[horaGanadora === '10PM' ? (modeloGanador === 'KALMAN' ? 'kal_10pm' : 'mc_10pm') : horaGanadora === '11PM' ? (modeloGanador === 'KALMAN' ? 'kal_11pm' : 'mc_11pm') : 'kal_10pm']) + '°) — ' + muestrasHoras + ' días con corrida horaria.'
         : 'No hubo suficientes corridas horarias en daily_runs (' + muestrasHoras + ' < ' + MIN_MUESTRAS_HORA + '): se usó la serie almacenada sin comparación 10PM/11PM.',
-      metodologia: 'escalera centrada: pronóstico (ancla) SIEMPRE + vecinos r±1 con P≥15% por COBERTURA (aunque el mercado los tenga caros) + resto con mejor valor (edge ≥ 0) · Kelly normalizado · CRITICO=no apostar',
+      metodologia: 'escalera NO-PERDER: montos proporcionales al % de Polymarket (más dinero a los % más altos) → todo escalón paga > inversión si Σ precios ≤ 95% · se descartan escalones de peor valor hasta cumplir, si no → NO-BET · CRITICO=no apostar',
     }
     if (!ctx) planCache.set(slug + '|' + monto, { ts: Date.now(), data: out })
     return out

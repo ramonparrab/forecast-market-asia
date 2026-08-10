@@ -21,12 +21,12 @@ export interface LadderPlan {
   peor_caso: number
   sin_contratos: boolean
   empirica: boolean
+  motivo_no_bet?: string
 }
 
 export const EDGE_MIN = 0.03
 export const MONTO_MIN = 0.5
-export const ANCLA_FRACCION = 0.15
-export const FORZADO_FRACCION = 0.1
+export const LIMITE_SUMA_PRECIOS = 0.95
 
 export interface LadderContractPrice {
   precio: number
@@ -42,10 +42,6 @@ function erf(z: number): number {
 
 export function probGaussInt(k: number, mu: number, sd: number): number {
   return Math.max(0, 0.5 * (erf((k + 0.5 - mu) / (sd * Math.SQRT2)) - erf((k - 0.5 - mu) / (sd * Math.SQRT2))))
-}
-
-function kellyShare(p: number, precio: number): number {
-  return (p - precio) / (1 - precio)
 }
 
 export function roundInt(v: number): number {
@@ -85,9 +81,9 @@ function construirPlan(
 ): LadderPlan {
   const sinBase: LadderPlan = { inversion: 0, sd, escalones: [], probabilidad_ganar: 0, ev: 0, peor_caso: 0, sin_contratos: false, empirica }
 
-  // Escalera centrada: el pronóstico entero (ancla) SIEMPRE entra; el resto se
-  // elige por MEJOR VALOR (edge >= 0 sobre los precios de Polymarket), para
-  // maximizar la ganancia con máxima cobertura y casi nunca perder.
+  // Escalera NO-PERDER: montos proporcionales al % de cada contrato en Polymarket
+  // (más dinero a los % más altos). Con Σ precios < 100% cada escalón paga
+  // igual: bankroll / Σp > bankroll → NUNCA se pierde si el real cae en la escalera.
   const base = probs.map(x => ({ k: x.k, p: x.p, c: contracts[x.k], edge: x.p - contracts[x.k].precio, ancla: false, forzado: false }))
   let rungs = base.filter(r => r.p >= 0.01 && r.c.precio >= 0.01 && r.c.precio <= 0.95 && r.edge >= (ancla != null ? 0 : EDGE_MIN))
   if (ancla != null) {
@@ -95,8 +91,6 @@ function construirPlan(
     if (rA && rA.p >= 0.01 && rA.c.precio >= 0.01 && rA.c.precio <= 0.95 && !rungs.some(x => x.k === ancla)) {
       rungs.push({ ...rA, ancla: true })
     }
-    // Cobertura: el vecino del pronóstico (r±1) con P(IA) ≥ 15% entra SIEMPRE,
-    // aunque el mercado lo tenga caro (sin edge) — protege el "casi nunca pierda".
     for (const k of [ancla - 1, ancla + 1]) {
       const rV = base.find(x => x.k === k)
       if (rV && rV.p >= 0.15 && rV.c.precio >= 0.01 && rV.c.precio <= 0.95 && !rungs.some(x => x.k === k)) {
@@ -106,45 +100,28 @@ function construirPlan(
   }
   if (rungs.length === 0) return sinBase
 
-  let ws = rungs.map(r => ({ ...r, w: Math.max(0, kellyShare(r.p, r.c.precio)) }))
-  let sumW = ws.reduce((s, x) => s + x.w, 0)
-  if (sumW <= 0) return sinBase
-
-  let montos = ws.map(x => ({ ...x, monto: (bankroll * x.w) / sumW }))
-
-  // Pisos: ancla (pronóstico) y cubiertos (r±1 forzados) mantienen monto mínimo
-  // aunque su edge sea negativo.
-  const piso = (m: any) =>
-    m.ancla ? Math.max(MONTO_MIN, bankroll * ANCLA_FRACCION) : m.forzado ? Math.max(MONTO_MIN, bankroll * FORZADO_FRACCION) : 0
-  for (let pass = 0; pass < 6; pass++) {
-    const need = montos.find(m => !(m as any).subio && m.monto < piso(m))
-    if (!need) break
-    const deficit = piso(need) - need.monto
-    const otros = montos.filter(m => m !== need && !(m as any).ancla && !(m as any).forzado && m.monto > 0)
-    const sumOtros = otros.reduce((s, m) => s + m.monto, 0)
-    if (sumOtros <= 0) break
-    need.monto = piso(need)
-    ;(need as any).subio = true
-    for (const m of otros) m.monto = Math.max(0, m.monto - (deficit * m.monto) / sumOtros)
-  }
-
-  const bajoMinimo = montos.some(m => m.monto > 0 && m.monto < MONTO_MIN && !(m as any).ancla && !(m as any).forzado)
-  if (bajoMinimo && montos.length > 1) {
-    montos = montos.filter(m => (m as any).ancla || (m as any).forzado || m.monto >= MONTO_MIN)
-    if (montos.length) {
-      const s2 = montos.reduce((s, x) => s + x.monto, 0)
-      montos = montos.map(m => ({ ...m, monto: (bankroll * m.monto) / s2 }))
+  // Regla de viabilidad: si Σ precios > 95% no se puede garantizar no-perder con
+  // todos; se descartan los escalones de peor valor (edge más bajo) que no sean
+  // ancla/cobertura. Si ni aun así cabe → NO-BET (descartado el día).
+  let sel = [...rungs]
+  for (;;) {
+    const sumP = sel.reduce((s, r) => s + r.c.precio, 0)
+    if (sumP <= LIMITE_SUMA_PRECIOS) break
+    const dropeables = sel.filter(r => !r.ancla && !r.forzado)
+    if (!dropeables.length) {
+      return { ...sinBase, motivo_no_bet: 'Σ precios de ancla+cobertura > 95% — imposible garantizar no-perder hoy. Día descartado.' }
     }
+    const peor = dropeables.reduce((a, b) => (a.edge < b.edge ? a : b))
+    sel = sel.filter(r => r !== peor)
   }
+  if (sel.length === 0) return sinBase
+
+  let sumP = sel.reduce((s, r) => s + r.c.precio, 0)
+  // En modo NO-PERDER se mantienen TODOS los escalones seleccionados: un escalón
+  // barato (1¢, monto $0.11) cubre otro resultado a precio de mercado — seguro gratis.
+  const montos = sel.map(x => ({ ...x, monto: (bankroll * x.c.precio) / sumP }))
 
   const total = montos.reduce((s, x) => s + x.monto, 0)
-  if (Math.abs(total - bankroll) > 0.5 && montos.length) {
-    const maxEdge = Math.max(...montos.map(m => m.edge))
-    montos = montos.map(m =>
-      m.edge === maxEdge && m.monto > 0 ? { ...m, monto: m.monto + (bankroll - total) } : m
-    )
-  }
-
   const escalones: Escalon[] = montos.map(m => ({
     temp: m.k,
     p_ia: round2(m.p),
@@ -160,7 +137,7 @@ function construirPlan(
   }))
 
   const probabilidad_ganar = round2(montos.reduce((s, m) => s + m.p, 0))
-  const inversion = round2(montos.reduce((s, m) => s + m.monto, 0))
+  const inversion = round2(total)
   const ev = round2(montos.reduce((s, m) => s + m.p * (m.monto / m.c.precio), 0) - inversion)
 
   return { inversion, sd, escalones, probabilidad_ganar, ev, peor_caso: round2(-inversion), sin_contratos: false, empirica }

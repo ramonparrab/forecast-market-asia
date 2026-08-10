@@ -26,6 +26,7 @@ interface Plan {
   peor_caso: number
   sin_contratos: boolean
   empirica: boolean
+  motivo_no_bet?: string
 }
 
 interface RegimenDetalle {
@@ -412,12 +413,26 @@ export default function LadderBetting() {
             </div>
           )}
 
+          {/* No-bet por viabilidad */}
+          {data.plan.motivo_no_bet && (
+            <div className="rounded-xl bg-red-500/10 border-2 border-red-500/40 p-4 text-center">
+              <div className="text-sm sm:text-base font-black text-red-400">🚫 NO-BET HOY — ESCALERA DESCARTADA</div>
+              <div className="mt-1 text-[10px] sm:text-xs text-red-300">{data.plan.motivo_no_bet}</div>
+              <div className="mt-1 text-[9px] sm:text-[10px] text-red-400/70">
+                Regla automática: si ni quitando los escalones de peor valor los % de Polymarket suman ≤ 95%, no hay forma de garantizar "no perder" — mejor no apostar.
+              </div>
+            </div>
+          )}
+
           {/* Ladder table */}
           {data.plan.escalones.length > 0 && (
             <div className="rounded-xl bg-gradient-to-br from-blue-500/10 to-blue-500/5 border border-blue-500/20 p-3 sm:p-4">
-              <h3 className="text-sm sm:text-base font-bold text-blue-300 mb-2">
-                🪜 ESCALERA ({data.plan.escalones.length} escalones, σ={data.plan.sd})
+              <h3 className="text-sm sm:text-base font-bold text-blue-300 mb-1">
+                🪜 ESCALERA NO-PERDER ({data.plan.escalones.length} escalones, σ={data.plan.sd})
               </h3>
+              <div className="text-[10px] sm:text-xs text-emerald-300 mb-2">
+                💎 Montos ∝ % de Polymarket (más dinero a los % más altos) · cada escalón paga ${data.plan.escalones[0] ? (data.plan.escalones[0].pago_si_gana).toFixed(2) : '—'} &gt; inversión ${data.plan.inversion.toFixed(2)} → nunca pierdes si el real cae en la escalera ({Math.round(data.plan.probabilidad_ganar * 100)}% de los casos)
+              </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-[10px] sm:text-xs">
                   <thead>
