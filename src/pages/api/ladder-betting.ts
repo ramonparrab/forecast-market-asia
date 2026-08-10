@@ -15,6 +15,14 @@ const ciudadMap = new Map(CIUDADES_ASIA.map(c => [c.slug, c.nombre]))
 const VENTANA_MODELOS = 45
 const MIN_MUESTRAS_EMPIRICA = 15
 const MIN_MUESTRAS_HORA = 10
+const PLAN_TTL = 120 * 1000
+const planCache = new Map<string, { ts: number; data: Record<string, unknown> }>()
+
+export interface PlanCtx {
+  pending?: any
+  history?: any[]
+  runs?: any[]
+}
 
 function partsTz(tz: string, d: Date, extra: 'date' | 'both'): { fecha: string; hora: string } {
   const fmt = new Intl.DateTimeFormat('en-CA', {
@@ -46,44 +54,56 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   }
 }
 
-export async function buildPlanData(slug: string, monto: number): Promise<Record<string, unknown>> {
+export async function buildPlanData(slug: string, monto: number, ctx?: PlanCtx): Promise<Record<string, unknown>> {
   const nombre = ciudadMap.get(slug) || slug
+  if (!ctx) {
+    const ck = slug + '|' + monto
+    const hit = planCache.get(ck)
+    if (hit && Date.now() - hit.ts < PLAN_TTL) return hit.data
+  }
   const client = createClient(supabaseUrl, supabaseKey)
   const ahora = new Date()
 
-    // 1. Historial completo de la ciudad (régimen + walk-forward de modelos)
-    const { data: allHistory } = await client
-      .from('forecast_history' as any)
-      .select('fecha_objetivo, temp_pronosticada, temp_corregida, temp_real, error')
-      .eq('slug', slug)
-      .order('fecha_objetivo', { ascending: true } as any)
+  // 1. Último pronóstico pendiente (target del día)
+  const pendingRes = ctx?.pending != null
+    ? { data: [ctx.pending] }
+    : await client
+        .from('forecast_history' as any)
+        .select('id, fecha_ejecucion, fecha_objetivo, slug, temp_pronosticada, temp_corregida, temp_real')
+        .eq('slug', slug)
+        .is('temp_real', null)
+        .order('fecha_ejecucion', { ascending: false } as any)
+        .limit(1)
 
-    // 2. Último pronóstico pendiente (target del día)
-    const { data: pendingRaw } = await client
-      .from('forecast_history' as any)
-      .select('id, fecha_ejecucion, fecha_objetivo, slug, temp_pronosticada, temp_corregida, temp_real')
-      .eq('slug', slug)
-      .is('temp_real', null)
-      .order('fecha_ejecucion', { ascending: false } as any)
-      .limit(1)
-
-    if (!pendingRaw || !(pendingRaw as any[]).length) {
+    if (!(pendingRes as any).data || !(pendingRes as any).data.length) {
       throw new Error('[404] No hay pronóstico pendiente para ' + nombre)
     }
 
-    const currentRecord = (pendingRaw as any[])[0]
-    const history = (allHistory || []) as any[]
-
-    // 3. Corridas horarias desde daily_runs: base del cron 02:00Z (= 10PM Caracas) y 03:00Z (= 11PM Caracas)
+    const currentRecord = (pendingRes as any).data[0]
     const startHour = new Date(ahora.getTime() - (VENTANA_MODELOS + 10) * 24 * 60 * 60 * 1000)
-    const { data: runsRaw } = await client
-      .from('daily_runs' as any)
-      .select('fecha_ejecucion, fecha_objetivo, resultados')
-      .gte('fecha_ejecucion', startHour.toISOString())
+
+    // 1b. Historial + corridas horarias en paralelo (o compartidas vía ctx para el ranking)
+    const [allHistoryRes, runsRes] = await Promise.all([
+      ctx?.history != null
+        ? Promise.resolve({ data: ctx.history })
+        : client
+            .from('forecast_history' as any)
+            .select('fecha_objetivo, temp_pronosticada, temp_corregida, temp_real, error')
+            .eq('slug', slug)
+            .order('fecha_objetivo', { ascending: true } as any),
+      ctx?.runs != null
+        ? Promise.resolve({ data: ctx.runs })
+        : client
+            .from('daily_runs' as any)
+            .select('fecha_ejecucion, fecha_objetivo, resultados')
+            .gte('fecha_ejecucion', startHour.toISOString()),
+    ])
+
+    const history = (allHistoryRes as any).data || []
 
     // basePorHora[slug|fecha] = { base10, base11, ts10, ts11 }
     const basePorHora: Record<string, { base10: number | null; base11: number | null; ts10: number | null; ts11: number | null }> = {}
-    for (const run of (runsRaw as any[]) ?? []) {
+    for (const run of ((runsRes as any).data ?? []) as any[]) {
       const fo = run.fecha_objetivo as string
       if (!fo) continue
       let parsed: any[]
@@ -271,7 +291,7 @@ export async function buildPlanData(slug: string, monto: number): Promise<Record
       plan = calcularLadderGauss(valorHoy, regimen.sd, monto * regimen.factorBankroll, priceMap)
     }
 
-    return {
+    const out = {
       fecha: currentRecord.fecha_objetivo,
       fecha_caracas: caracas.fecha,
       hora_caracas: caracas.hora,
@@ -321,4 +341,6 @@ export async function buildPlanData(slug: string, monto: number): Promise<Record
         : 'No hubo suficientes corridas horarias en daily_runs (' + muestrasHoras + ' < ' + MIN_MUESTRAS_HORA + '): se usó la serie almacenada sin comparación 10PM/11PM.',
       metodologia: 'escalera centrada: pronóstico entero (ancla) SIEMPRE incluido + escalones r±1/r±2 con mejor valor (edge ≥ 0) sobre precios Polymarket · Kelly normalizado · CRITICO=no apostar',
     }
+    if (!ctx) planCache.set(slug + '|' + monto, { ts: Date.now(), data: out })
+    return out
 }
