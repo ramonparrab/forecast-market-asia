@@ -204,6 +204,9 @@ export async function buildPlanData(slug: string, monto: number, ctx?: PlanCtx):
     }
 
     // Valor del día pendiente: base de la hora ganadora + modelo ganador
+    if (currentRecord.temp_corregida == null) {
+      throw new Error('[404] El pronóstico pendiente de ' + nombre + ' no tiene temp_corregida — no hay valor para armar ladder')
+    }
     const pendCorr = Number(currentRecord.temp_corregida)
     const bHoy = basePorHora[slug + '|' + currentRecord.fecha_objetivo]
     const base10Hoy = bHoy?.base10 ?? null

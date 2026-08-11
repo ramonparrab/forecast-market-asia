@@ -96,8 +96,11 @@ function construirPlan(
     }
     for (const k of [ancla - 1, ancla + 1]) {
       const rV = base.find(x => x.k === k)
-      if (rV && rV.p >= 0.15 && rV.c.precio >= 0.01 && rV.c.precio <= 0.95 && !rungs.some(x => x.k === k)) {
-        rungs.push({ ...rV, forzado: true })
+      if (rV && rV.p >= 0.15 && rV.c.precio >= 0.01 && rV.c.precio <= 0.95) {
+        // Los vecinos ±1 con P≥15% se marcan SIEMPRE como cobertura (no dropeables),
+        // aunque ya hayan entrado por edge propio: la regla Σ ≤ 95% no puede deshacerlos.
+        const yaEnRungs = rungs.some(x => x.k === k)
+        rungs = yaEnRungs ? rungs.map(r => (r.k === k && !r.forzado ? { ...r, forzado: true } : r)) : [...rungs, { ...rV, forzado: true }]
       }
     }
   }
