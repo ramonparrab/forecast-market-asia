@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { ForecastVsActual } from '@/types'
 import {
   LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -35,9 +35,28 @@ export default function ForecastVsActualChart({ metrics, currentForecasts = [], 
   const [btLoading, setBtLoading] = useState(false)
   const [viewMode, setViewMode] = useState<'general' | 'per-city' | 'bollinger'>('general')
 
-  // Load data on mount
+  // Load data on mount — y descarga automáticamente las temperaturas reales de los
+  // días ya terminados (mismo proceso que el botón Cargar temps, sin clics)
+  const autoBackfillDone = useRef(false)
   useEffect(() => {
-    fetchData()
+    if (autoBackfillDone.current) return
+    autoBackfillDone.current = true
+    setLoading(true)
+    ;(async () => {
+      try {
+        await fetch('/api/backfill', { method: 'POST' })
+      } catch { /* silencioso: el cron nocturno lo reintenta */ }
+      const slugParam = selectedCity !== 'all' ? `?slug=${selectedCity}` : ''
+      try {
+        const resp = await fetch(`/api/forecast-vs-actual${slugParam}`)
+        if (resp.ok) {
+          const json = await resp.json()
+          if (json.status === 'ok') setData(json.records || [])
+        }
+      } catch { /* ignore */ } finally {
+        setLoading(false)
+      }
+    })()
     loadBacktest()
   }, [])
 

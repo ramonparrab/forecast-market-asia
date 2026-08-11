@@ -17,7 +17,17 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const limit = parseInt(req.query.limit as string || '50')
     const records = await getRecordsWithoutActuals(limit)
 
-    if (records.length === 0) {
+    // Guarda: solo se registran días que YA terminaron en Asia (Beijing UTC+8 termina
+    // a las 16:00Z del día objetivo; Tokio/Seúl a las 15:00Z). Evita escribir el "real"
+    // de un día en curso con la máxima parcial de Weather.com.
+    const ahoraUtc = Date.now()
+    const pendientes = records.filter(r => {
+      if (!r.fecha_objetivo) return true
+      const finDia = new Date(r.fecha_objetivo + 'T16:00:00.000Z').getTime()
+      return ahoraUtc >= finDia
+    })
+
+    if (pendientes.length === 0) {
       return res.status(200).json({
         status: 'ok',
         message: 'No hay registros pendientes por actualizar',
@@ -26,13 +36,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       })
     }
 
-    console.log(`[BACKFILL] Fetching actual temps for ${records.length} records...`)
+    console.log(`[BACKFILL] Fetching actual temps for ${pendientes.length} records (${records.length - pendientes.length} en curso omitidos)...`)
 
     let updated = 0
     let errors = 0
     const results: { slug: string; fecha: string; temp_real: number | null; error: string | null }[] = []
 
-    for (const record of records) {
+    for (const record of pendientes) {
       // Try Polymarket settlement first, then TWC/HKO fallback (matches Polymarket resolution)
       const tempReal = await fetchStationMaxTemp(record.slug, record.fecha_objetivo)
 
@@ -57,7 +67,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       message: `Backfill completado: ${updated} actualizados, ${errors} errores`,
       updated,
       errors,
-      total: records.length,
+      total: pendientes.length,
+      omitidos_en_curso: records.length - pendientes.length,
       results,
     })
   } catch (error) {
