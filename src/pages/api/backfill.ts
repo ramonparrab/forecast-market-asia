@@ -1,5 +1,5 @@
 import { NextApiRequest, NextApiResponse } from 'next'
-import { getRecordsWithoutActuals, updateActualTemperature } from '@/lib/supabase'
+import { getClient, updateActualTemperature } from '@/lib/supabase'
 import { fetchStationMaxTemp } from '@/lib/station-weather'
 
 /**
@@ -14,8 +14,19 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   }
 
   try {
-    const limit = parseInt(req.query.limit as string || '50')
-    const records = await getRecordsWithoutActuals(limit)
+    const limit = parseInt(req.query.limit as string || '100')
+
+    // Todos los registros SIN real (a diferencia de getRecordsWithoutActuals, que omite
+    // el día UTC actual — aquí SÍ queremos el día de hoy una vez que ya terminó en Asia).
+    const client = getClient()
+    if (!client) return res.status(500).json({ status: 'error', message: 'Supabase no configurado' })
+    const { data } = await client
+      .from('forecast_history' as any)
+      .select('id, slug, fecha_objetivo')
+      .is('temp_real', null)
+      .order('fecha_objetivo', { ascending: false } as any)
+      .limit(limit)
+    const records = ((data as any[]) || []) as { id: number; slug: string; fecha_objetivo: string }[]
 
     // Guarda: solo se registran días que YA terminaron en Asia (Beijing UTC+8 termina
     // a las 16:00Z del día objetivo; Tokio/Seúl a las 15:00Z). Evita escribir el "real"
