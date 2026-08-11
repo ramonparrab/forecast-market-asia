@@ -662,7 +662,7 @@ export default function Home({ initialAnalysis, initialMetrics, initialAvailable
             {loading ? (
               <>
                 <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white"></span>
-                Analizando 9 ciudades...
+                Analizando 10 ciudades...
               </>
             ) : (
               <>
@@ -755,7 +755,7 @@ export default function Home({ initialAnalysis, initialMetrics, initialAvailable
           <div className="mb-4 text-6xl">🌤️</div>
           <h2 className="mb-2 text-2xl font-bold text-white">Forecast Market · Asia</h2>
           <p className="mb-2 text-gray-400 max-w-lg mx-auto">
-            Pronóstico de temperatura máxima para <span className="font-semibold text-blue-400">{getDefaultTargetDate()}</span> en 9 ciudades asiáticas
+            Pronóstico de temperatura máxima para <span className="font-semibold text-blue-400">{getDefaultTargetDate()}</span> en 10 ciudades asiáticas
           </p>
           <p className="mb-6 text-sm text-gray-500 max-w-md mx-auto">
             Ejecuta el análisis a las 22:00 hora Caracas. El sistema compara la temperatura máxima pronosticada por 6 modelos meteorológicos contra los precios de cierre en Polymarket, identificando ineficiencias y calculando la asignación óptima vía Kelly.
