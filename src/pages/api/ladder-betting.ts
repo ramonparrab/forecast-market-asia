@@ -1,6 +1,8 @@
 import { NextApiRequest, NextApiResponse } from 'next'
 import { createClient } from '@supabase/supabase-js'
-import { fetchPolymarketPrices } from '@/lib/polymarket'
+import { fetchPolymarketPrices, fetchEventoCerrado } from '@/lib/polymarket'
+import { runDailyAnalysis } from '@/lib/forecast-engine'
+import { saveDailyRun, saveForecastRecords } from '@/lib/supabase'
 import { CIUDADES_ASIA } from '@/lib/cities'
 import { detectarRegimen } from '@/lib/regime'
 import { calcularLadderEmpirica, calcularLadderGauss, LadderPlan, LadderContractPrice, roundInt, round2, histogramaEnteros } from '@/lib/ladder'
@@ -17,6 +19,46 @@ const MIN_MUESTRAS_EMPIRICA = 15
 const MIN_MUESTRAS_HORA = 10
 const PLAN_TTL = 120 * 1000
 const planCache = new Map<string, { ts: number; data: Record<string, unknown> }>()
+
+export const maxDuration = 120
+
+const generacionEnCurso = new Map<string, Promise<void>>()
+
+function addDias(fecha: string, n: number): string {
+  const d = new Date(fecha + 'T12:00:00Z')
+  d.setUTCDate(d.getUTCDate() + n)
+  return d.toISOString().slice(0, 10)
+}
+
+async function asegurarGeneracionManana(fechaNext: string): Promise<void> {
+  const enCurso = generacionEnCurso.get(fechaNext)
+  if (enCurso) return enCurso
+  const gen = (async () => {
+    const result = await runDailyAnalysis(fechaNext, true)
+    const records = result.cities.map(city => ({
+      fecha_ejecucion: result.fecha,
+      fecha_objetivo: fechaNext,
+      ciudad: city.ciudad,
+      slug: city.slug,
+      temp_pronosticada: city.forecast.temp_ponderada,
+      temp_corregida: city.forecast.temp_corregida_base ?? city.forecast.temp_corregida,
+      temp_real: null,
+      error: null,
+      modelos_usados: Object.keys(city.forecast.ensemble_raw || {}).length,
+      consenso: city.forecast.consenso,
+    }))
+    await saveForecastRecords(records)
+    await saveDailyRun({
+      fecha_ejecucion: result.fecha,
+      fecha_objetivo: fechaNext,
+      resultados: result.cities,
+      recomendaciones: result.recommendations,
+      total_asignado: result.total_allocated,
+    })
+  })().finally(() => generacionEnCurso.delete(fechaNext))
+  generacionEnCurso.set(fechaNext, gen)
+  await gen
+}
 
 export interface PlanCtx {
   pending?: any
@@ -79,25 +121,61 @@ export async function buildPlanData(slug: string, monto: number, ctx?: PlanCtx):
       throw new Error('[404] No hay pronóstico pendiente para ' + nombre)
     }
 
-    const currentRecord = (pendingRes as any).data[0]
+    let currentRecord = (pendingRes as any).data[0]
+    const fechaOriginal = currentRecord.fecha_objetivo
+    let objetivoAvanzado = false
     const startHour = new Date(ahora.getTime() - (VENTANA_MODELOS + 10) * 24 * 60 * 60 * 1000)
 
-    // 1b. Historial + corridas horarias en paralelo (o compartidas vía ctx para el ranking)
-    const [allHistoryRes, runsRes] = await Promise.all([
-      ctx?.history != null
-        ? Promise.resolve({ data: ctx.history })
-        : client
-            .from('forecast_history' as any)
-            .select('fecha_objetivo, temp_pronosticada, temp_corregida, temp_real, error')
-            .eq('slug', slug)
-            .order('fecha_objetivo', { ascending: true } as any),
-      ctx?.runs != null
-        ? Promise.resolve({ data: ctx.runs })
-        : client
-            .from('daily_runs' as any)
-            .select('fecha_ejecucion, fecha_objetivo, resultados')
-            .gte('fecha_ejecucion', startHour.toISOString()),
+    // 1b. Historial + corridas horarias + estado del mercado (paralelo)
+    let mercadoCerrado = false
+    const [[allHistoryRes, runsRes], estadoMercado] = await Promise.all([
+      Promise.all([
+        ctx?.history != null
+          ? Promise.resolve({ data: ctx.history })
+          : client
+              .from('forecast_history' as any)
+              .select('fecha_objetivo, temp_pronosticada, temp_corregida, temp_real, error')
+              .eq('slug', slug)
+              .order('fecha_objetivo', { ascending: true } as any),
+        ctx?.runs != null
+          ? Promise.resolve({ data: ctx.runs })
+          : client
+              .from('daily_runs' as any)
+              .select('fecha_ejecucion, fecha_objetivo, resultados')
+              .gte('fecha_ejecucion', startHour.toISOString()),
+      ]),
+      fetchEventoCerrado(slug, currentRecord.fecha_objetivo),
     ])
+    mercadoCerrado = estadoMercado
+
+    // 1c. Si el mercado del día objetivo ya CERRÓ/RESOLVIÓ → la escalera avanza
+    // automáticamente al próximo día: usa el pendiente existente o lo GENERA bajo
+    // demanda la primera vez (mismo pipeline del cron), dedup en memoria.
+    if (mercadoCerrado) {
+      const nextDate = addDias(currentRecord.fecha_objetivo, 1)
+      const queryNext = () =>
+        client
+          .from('forecast_history' as any)
+          .select('id, fecha_ejecucion, fecha_objetivo, slug, temp_pronosticada, temp_corregida, temp_real')
+          .eq('slug', slug)
+          .eq('fecha_objetivo', nextDate)
+          .is('temp_real', null)
+          .order('fecha_ejecucion', { ascending: false } as any)
+          .limit(1)
+      let nextRes = await queryNext()
+      let nextRecord = (nextRes as any).data?.[0] ?? null
+      if (!nextRecord) {
+        await asegurarGeneracionManana(nextDate)
+        nextRes = await queryNext()
+        nextRecord = (nextRes as any).data?.[0] ?? null
+        if (!nextRecord) {
+          throw new Error(`[404] Mercado de ${nombre} [${currentRecord.fecha_objetivo}] cerrado y no se pudo generar el pronóstico para ${nextDate}`)
+        }
+      }
+      currentRecord = nextRecord
+      objetivoAvanzado = true
+      mercadoCerrado = await fetchEventoCerrado(slug, currentRecord.fecha_objetivo)
+    }
 
     const history = (allHistoryRes as any).data || []
 
@@ -286,7 +364,13 @@ export async function buildPlanData(slug: string, monto: number, ctx?: PlanCtx):
 
     // 8. Plan ladder: empírico del ganador (mezcla gauss en TRANSICIÓN), gauss si poco historial
     let plan: LadderPlan
-    if (regimen.regimen === 'CRITICO') {
+    if (mercadoCerrado) {
+      plan = {
+        inversion: 0, sd: regimen.sd, escalones: [], probabilidad_ganar: 0, ev: 0, peor_caso: 0,
+        sin_contratos: false, empirica: false,
+        motivo_no_bet: `🔒 MERCADO CERRADO/RESUELTO — el evento [${nombre} ${currentRecord.fecha_objetivo}] ya cerró. Este día NO es apostable; la escalera espera el próximo día objetivo.`,
+      }
+    } else if (regimen.regimen === 'CRITICO') {
       plan = { inversion: 0, sd: regimen.sd, escalones: [], probabilidad_ganar: 0, ev: 0, peor_caso: 0, sin_contratos: false, empirica: false }
     } else if (n >= MIN_MUESTRAS_EMPIRICA) {
       plan = calcularLadderEmpirica(valorHoy, hist, n, regimen.sd, monto * regimen.factorBankroll, priceMap, regimen.regimen === 'TRANSICION')
@@ -336,6 +420,9 @@ export async function buildPlanData(slug: string, monto: number, ctx?: PlanCtx):
         factor_bankroll: regimen.factorBankroll,
       },
       bankroll_solicitado: monto,
+      mercado_cerrado: mercadoCerrado,
+      objetivo_avanzado: objetivoAvanzado,
+      objetivo_cerrado_saltado: objetivoAvanzado ? fechaOriginal : null,
       plan,
       contratos_disponibles: contratos.length,
       hora_snapshot: horaGanadora ? 'Corrida ' + (horaGanadora === '10PM' ? '02:00Z' : '03:00Z') + ' (10PM/11PM Caracas)' : '~10-11pm Caracas',

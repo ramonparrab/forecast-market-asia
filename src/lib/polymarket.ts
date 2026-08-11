@@ -95,6 +95,33 @@ export async function fetchActualTempFromPolymarket(
  * Fetch Polymarket contracts for a given city/date using Gamma API.
  * Builds the exact event slug instead of searching by title.
  */
+/**
+ * Detects if the Polymarket event for a city/date is CLOSED (resolved, or locked
+ * for resolution) → the day is not bettable anymore. Cached 10 min.
+ */
+const estadoCache = new Map<string, { cerrado: boolean; ts: number }>()
+const ESTADO_TTL = 10 * 60 * 1000
+
+export async function fetchEventoCerrado(slug: string, fechaObjetivo: string): Promise<boolean> {
+  const key = slug + '|' + fechaObjetivo
+  const hit = estadoCache.get(key)
+  if (hit && Date.now() - hit.ts < ESTADO_TTL) return hit.cerrado
+  try {
+    const date = new Date(fechaObjetivo + 'T12:00:00Z')
+    const monthName = MONTHS[date.getUTCMonth()]
+    const eventSlug = `highest-temperature-in-${slug}-on-${monthName}-${date.getUTCDate()}-${date.getUTCFullYear()}`
+    const eventsResp = await fetch(`${GAMMA_API}/events?slug=${encodeURIComponent(eventSlug)}`, { signal: AbortSignal.timeout(15000) })
+    if (!eventsResp.ok) return false
+    const events = await eventsResp.json()
+    const cerrado = !!events?.[0]?.closed
+    estadoCache.set(key, { cerrado, ts: Date.now() })
+    return cerrado
+  } catch (e) {
+    console.error(`[Polymarket] closed-check error for ${slug} ${fechaObjetivo}:`, (e as Error).message)
+    return false
+  }
+}
+
 export async function fetchPolymarketPrices(
   slug: string,
   fechaObjetivo: string

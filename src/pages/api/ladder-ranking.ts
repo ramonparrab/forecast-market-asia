@@ -28,6 +28,8 @@ const DIAS_RUNS = 55
 let cache: { ts: number; filas: RankingFila[] } | null = null
 const TTL = 120 * 1000
 
+export const maxDuration = 120
+
 function round2(v: number): number {
   return Math.round(v * 100) / 100
 }
