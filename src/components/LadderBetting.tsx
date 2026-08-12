@@ -508,7 +508,7 @@ export default function LadderBetting() {
                 🪜 ESCALERA NO-PERDER ({data.plan.escalones.length} escalones, σ={data.plan.sd})
               </h3>
               <div className="text-[10px] sm:text-xs text-emerald-300 mb-2">
-                💎 Montos ∝ % de Polymarket (más dinero a los % más altos) · cada escalón paga ${data.plan.escalones[0] ? (data.plan.escalones[0].pago_si_gana).toFixed(2) : '—'} &gt; inversión ${data.plan.inversion.toFixed(2)} → nunca pierdes si el real cae en la escalera ({Math.round(data.plan.probabilidad_ganar * 100)}% de los casos)
+                💎 Montos ∝ % Polymarket (mín $1/escalón) · inversión ${data.plan.inversion.toFixed(2)} → si el real cae en la escalera ganas ({Math.round(data.plan.probabilidad_ganar * 100)}% P histórica)
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-[10px] sm:text-xs">

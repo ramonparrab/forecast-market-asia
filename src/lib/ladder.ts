@@ -25,7 +25,7 @@ export interface LadderPlan {
 }
 
 export const EDGE_MIN = 0.03
-export const MONTO_MIN = 0.5
+export const MONTO_MIN = 1.0  // Polymarket mínimo real = $1 por apuesta
 export const LIMITE_SUMA_PRECIOS = 0.95
 
 export interface LadderContractPrice {
@@ -123,12 +123,31 @@ function construirPlan(
   if (sel.length === 0) return sinBase
 
   let sumP = sel.reduce((s, r) => s + r.c.precio, 0)
-  // En modo NO-PERDER se mantienen TODOS los escalones seleccionados: un escalón
-  // barato (1¢, monto $0.11) cubre otro resultado a precio de mercado — seguro gratis.
-  const montos = sel.map(x => ({ ...x, monto: (bankroll * x.c.precio) / sumP }))
 
-  const total = montos.reduce((s, x) => s + x.monto, 0)
-  const escalones: Escalon[] = montos.map(m => ({
+  // === FILTRO $1 MÍNIMO POR ESCALÓN (Polymarket no acepta apuestas < $1) ===
+  // Se eliminan escalones no protegidos cuyo monto sería < $1 con el bankroll dado.
+  for (;;) {
+    const mc = sel.map(x => ({ ...x, _m: (bankroll * x.c.precio) / sumP }))
+    const bajoMinimo = mc.filter(m => m._m < MONTO_MIN && !m.ancla && !m.forzado)
+    if (bajoMinimo.length === 0) break
+    const peor = bajoMinimo.reduce((a, b) => (a.c.precio < b.c.precio ? a : b))
+    sel = sel.filter(r => r.k !== peor.k)
+    if (sel.length === 0) {
+      return { ...sinBase, motivo_no_bet: `Todos los escalones quedan por debajo del mínimo de $1 (Polymarket). Bankroll $${bankroll} insuficiente.` }
+    }
+    sumP = sel.reduce((s, r) => s + r.c.precio, 0)
+  }
+
+  // Verificar que ancla/cobertura también cumplen $1 mínimo
+  const montoFinal = sel.map(x => ({ ...x, monto: (bankroll * x.c.precio) / sumP }))
+  const protegidoBajo = montoFinal.filter(m => m.monto < MONTO_MIN && (m.ancla || m.forzado))
+  if (protegidoBajo.length > 0) {
+    const minBankroll = Math.ceil(sumP * MONTO_MIN / Math.min(...protegidoBajo.map(m => m.c.precio)))
+    return { ...sinBase, motivo_no_bet: `El escalón ancla/cobertura requiere < $1 con bankroll $${bankroll}. Mínimo necesario: $${minBankroll}.` }
+  }
+
+  const total = montoFinal.reduce((s, x) => s + x.monto, 0)
+  const escalones: Escalon[] = montoFinal.map(m => ({
     temp: m.k,
     p_ia: round2(m.p),
     p_mkt: round2(m.c.precio),
@@ -142,9 +161,9 @@ function construirPlan(
     forzado: !!(m as any).forzado,
   }))
 
-  const probabilidad_ganar = round2(montos.reduce((s, m) => s + m.p, 0))
+  const probabilidad_ganar = round2(montoFinal.reduce((s, m) => s + m.p, 0))
   const inversion = round2(total)
-  const ev = round2(montos.reduce((s, m) => s + m.p * (m.monto / m.c.precio), 0) - inversion)
+  const ev = round2(montoFinal.reduce((s, m) => s + m.p * (m.monto / m.c.precio), 0) - inversion)
 
   return { inversion, sd, escalones, probabilidad_ganar, ev, peor_caso: round2(-inversion), sin_contratos: false, empirica }
 }
