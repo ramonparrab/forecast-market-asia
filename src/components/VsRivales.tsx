@@ -27,6 +27,7 @@ interface RivalResponse {
     best_match: number
   }
   total_con_real: number
+  dias_historicos: number
 }
 
 function errorColor(err: number | null): string {
@@ -196,8 +197,9 @@ export default function VsRivales() {
             ))}
           </div>
 
-          <div className="text-[11px] text-gray-500 text-right">
-            {data.total_con_real} de {data.ciudades.length} ciudades con temp. real registrada
+          <div className="flex items-center justify-between text-[11px] text-gray-500">
+            <span>{data.total_con_real} de {data.ciudades.length} ciudades con temp. real registrada</span>
+            <span>MAE basado en {data.dias_historicos} registros históricos con temp. real</span>
           </div>
 
           {/* Comparison Table */}
@@ -218,7 +220,13 @@ export default function VsRivales() {
               <tbody>
                 {[...data.ciudades]
                   .sort((a, b) => {
-                    // Sort by our error ascending (best first). Nulls go last.
+                    // 1) Ciudades donde NOSOTROS gana van primero
+                    const bestA = getBestSource(a)
+                    const bestB = getBestSource(b)
+                    const winA = bestA === 'NOSOTROS' ? 0 : 1
+                    const winB = bestB === 'NOSOTROS' ? 0 : 1
+                    if (winA !== winB) return winA - winB
+                    // 2) Dentro de cada grupo, ordenar por nuestro error (menor primero)
                     const ea = a.error_nuestro ?? 999
                     const eb = b.error_nuestro ?? 999
                     return ea - eb
@@ -226,12 +234,14 @@ export default function VsRivales() {
                   .map((city) => {
                   const best = getBestSource(city)
                   const hasReal = city.real !== null
+                  const nosotrosGana = best === 'NOSOTROS'
                   return (
                     <tr
                       key={city.slug}
-                      className={`border-t border-gray-800 ${hasReal ? '' : 'opacity-60'}`}
+                      className={`border-t border-gray-800 ${hasReal ? '' : 'opacity-60'} ${nosotrosGana ? 'bg-cyan-500/5' : ''}`}
                     >
                       <td className="px-3 py-2 text-white font-medium whitespace-nowrap">
+                        {nosotrosGana && <span className="mr-1 text-cyan-400">✓</span>}
                         {city.nombre}
                       </td>
                       <td className={`text-center px-2 py-2 ${errorBg(city.error_nuestro)} rounded-l`}>

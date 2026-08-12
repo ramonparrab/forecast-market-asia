@@ -37,6 +37,7 @@ interface RivalResponse {
     best_match: number
   }
   total_con_real: number
+  dias_historicos: number
 }
 
 /**
@@ -164,6 +165,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return valid.length > 0 ? valid.reduce((a, b) => a + b, 0) / valid.length : 0
     }
 
+    // 4. Count total historical days with real data (for MAE context)
+    const { count: totalHistoricos } = await client
+      .from('forecast_history' as any)
+      .select('id', { count: 'exact', head: true } as any)
+      .not('temp_real', 'is', null)
+      .not('error', 'is', null)
+
     const response: RivalResponse = {
       fecha,
       ciudades,
@@ -175,6 +183,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         best_match: avg(withReal.map(c => c.error_best)),
       },
       total_con_real: withReal.length,
+      dias_historicos: totalHistoricos ?? 0,
     }
 
     return res.status(200).json(response)
