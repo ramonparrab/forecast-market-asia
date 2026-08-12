@@ -36,7 +36,7 @@ export function calculateAllocation(
   const candidates = recommendations.filter(r => {
     const edgeOk = r.edge > MIN_EDGE
     const consensoOk = r.consenso === 'MUY FUERTE' || r.consenso === 'FUERTE'
-    const arbOk = r.arbitraje !== 'ALTO'
+    const arbOk = !r.arbitraje.includes('ALTO')
     return edgeOk && consensoOk && arbOk
   })
 
