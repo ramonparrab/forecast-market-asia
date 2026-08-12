@@ -5,6 +5,7 @@ import { fetchStationMaxTemp } from '@/lib/station-weather'
 import { fetchActualMaxTemp } from '@/lib/openmeteo'
 import { CIUDADES_ASIA } from '@/lib/cities'
 import { computeBacktestBiasFromResults } from '@/lib/backtest-bias'
+import { getModelSelectionCache } from '@/lib/modelo-selector'
 
 /**
  * Vercel Cron Job - runs at 2:00 AM UTC (10:00 PM Caracas UTC-4)
@@ -25,6 +26,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   }
 
   try {
+    // ===== Determinar si es corrida de 10PM o 11PM Caracas =====
+    const caracasOffset = -4 * 60 * 60000
+    const nowCaracas = new Date(Date.now() + caracasOffset)
+    const caracasHour = nowCaracas.getUTCHours()
+    const runLabel = caracasHour >= 22 || caracasHour < 1
+      ? (caracasHour >= 23 || caracasHour < 1 ? '11PM' : '10PM')
+      : `${caracasHour}:00`
+    console.log(`[CRON] === CORRIDA ${runLabel} CARACAS === Fecha: ${nowCaracas.toISOString().slice(0, 10)} ${nowCaracas.toISOString().slice(11, 16)} Caracas`)
+
     // ===== STEP 1: Backfill actual temps for pending records =====
     console.log('[CRON] Backfilling actual temperatures...')
     const pendingRecords = await getRecordsWithoutActuals(50)
@@ -73,10 +83,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     // ===== STEP 3: Run forecast for tomorrow (Caracas timezone) =====
-    const caracasOffset = -4 * 60 * 60000
-    const nowCaracas = new Date(Date.now() + caracasOffset)
-    nowCaracas.setDate(nowCaracas.getDate() + 1)
-    const fechaObjetivo = nowCaracas.toISOString().slice(0, 10)
+    // nowCaracas ya fue calculado arriba para el runLabel
+    const tomorrowCaracas = new Date(nowCaracas.getTime())
+    tomorrowCaracas.setDate(tomorrowCaracas.getDate() + 1)
+    const fechaObjetivo = tomorrowCaracas.toISOString().slice(0, 10)
 
     console.log(`[CRON] Running daily analysis for ${fechaObjetivo}`)
     const result = await runDailyAnalysis(fechaObjetivo, true)
@@ -109,11 +119,30 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     console.log(`[CRON] Saved ${records.length} city forecasts + daily run to Supabase`)
 
+    // Log selección de modelo por ciudad
+    const modelCache = getModelSelectionCache()
+    const modelEntries = Object.entries(modelCache)
+    if (modelEntries.length > 0) {
+      console.log(`[CRON] Selección dinámica de modelo (${runLabel}):`)
+      for (const [slug, sel] of modelEntries) {
+        console.log(`  ${slug}: ${sel.modelo} (KALMAN MAE=${sel.mae_kalman}, MC MAE=${sel.mae_mc}) — ${sel.reason}`)
+      }
+      const changed = modelEntries.filter(([slug, sel]) => {
+        const prev = slug === 'tokyo' || slug === 'wuhan' || slug === 'chongqing' || slug === 'chengdu' ? 'MEJORA CONTINUA' : 'KALMAN'
+        return sel.modelo !== prev
+      })
+      if (changed.length > 0) {
+        console.log(`[CRON] ⚠️ ${changed.length} ciudad(es) cambiaron de modelo vs default: ${changed.map(([s, v]) => `${s}→${v.modelo}`).join(', ')}`)
+      }
+    }
+
     return res.status(200).json({
       status: 'ok',
-      message: `Pipeline completado: ${backfilled} reales backfilled, ${records.length} pronósticos guardados para ${fechaObjetivo}`,
+      message: `Pipeline completado (${runLabel}): ${backfilled} reales backfilled, ${records.length} pronósticos guardados para ${fechaObjetivo}`,
+      run_type: runLabel,
       backfill: { updated: backfilled, errors: backfillErrors.length },
       forecast: { cities: records.length, recommendations: result.recommendations.length, total_allocated: result.total_allocated },
+      model_selection: modelCache,
     })
   } catch (error) {
     console.error('[CRON] Error:', error)

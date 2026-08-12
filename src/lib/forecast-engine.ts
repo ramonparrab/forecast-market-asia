@@ -1,4 +1,4 @@
-import { CityAnalysis, BetRecommendation, DailyAnalysis, PolymarketContract, ForecastResult } from '@/types'
+import { CityAnalysis, BetRecommendation, DailyAnalysis, HistoricalRecord, PolymarketContract, ForecastResult } from '@/types'
 import { CIUDADES_ASIA } from './cities'
 import { fetchWeatherModels } from './openmeteo'
 import { computeEnsemble } from './ensemble'
@@ -8,7 +8,7 @@ import { calculateAllocation } from './kelly'
 import { getRecentErrors, getRecentModelErrors, computeGlobalMetrics, getAllCalibrationPairs, getHistoricalAccuracy, getAllHistoricalErrors, getCityHistory } from './supabase'
 import { nowcastTemperature } from './nowcaster'
 import { loadBacktestBias } from './backtest-bias'
-import { aplicarModeloGanador } from './modelo-selector'
+import { aplicarModeloGanador, seleccionarMejorModelo, clearModelSelectionCache, getModelSelectionCache } from './modelo-selector'
 
 const SIMULACIONES = 20000
 
@@ -41,7 +41,8 @@ async function analyzeCity(
   backtestBiasCorrection: number | undefined,
   calibrationPairs: { slug: string; prediction: number; outcome: number }[],
   historicalAccuracy: { accuracy: number; muestras: number } | null,
-  globalAccuracyPct: number
+  globalAccuracyPct: number,
+  cityHistory: HistoricalRecord[]
 ): Promise<{ cityAnalysis: CityAnalysis | null; recommendations: BetRecommendation[] }> {
   // 1. Weather models (includes ECMWF ENS 51 members)
   const weatherModelsResult = await fetchWeatherModels(city.lat, city.lon, fechaISO)
@@ -86,7 +87,7 @@ async function analyzeCity(
   const baseTemp = forecast.temp_corregida
   forecast.temp_corregida_base = baseTemp
   try {
-    const cityHistory = await getCityHistory(city.slug)
+    // cityHistory ya viene precargado desde runDailyAnalysis (con modelo dinámico seleccionado)
     if (cityHistory.length > 0) {
       const { temp, modelo, bias, muestras } = aplicarModeloGanador(
         city.slug,
@@ -293,16 +294,29 @@ export async function runDailyAnalysis(
 
   // Pre-load historical accuracy per city (full history, no time limit)
   const historicalAccuracyMap: Record<string, { accuracy: number; muestras: number }> = {}
+  const cityHistoryMap: Record<string, HistoricalRecord[]> = {}
   await Promise.all(
     CIUDADES_ASIA.map(async city => {
       historicalAccuracyMap[city.slug] = await getHistoricalAccuracy(city.slug, 0)
+      cityHistoryMap[city.slug] = await getCityHistory(city.slug)
     })
   )
+
+  // ===== SELECCIÓN DINÁMICA DEL MODELO GANADOR POR CIUDAD =====
+  // Walk-forward sobre últimos 60 días: compara MAE KALMAN vs MC sin look-ahead
+  clearModelSelectionCache()
+  const modelSelectionLog: string[] = []
+  for (const city of CIUDADES_ASIA) {
+    const hist = cityHistoryMap[city.slug] ?? []
+    const selection = seleccionarMejorModelo(hist, city.slug)
+    modelSelectionLog.push(`  ${city.slug}: ${selection.modelo} (${selection.reason})`)
+  }
+  console.log(`[MODEL SELECT] Selección dinámica de modelo por ciudad:\n${modelSelectionLog.join('\n')}`)
 
   // Analyze all cities in parallel — use fechaObjetivo for Open-Meteo API calls
   const results = await Promise.all(
     CIUDADES_ASIA.map(city =>
-      analyzeCity(city, fechaObjetivo, fechaObjetivo, targetMonth, recentModelErrors, fetchPrices, backtestBias[city.slug], calPairs, historicalAccuracyMap[city.slug], globalAccuracyPct)
+      analyzeCity(city, fechaObjetivo, fechaObjetivo, targetMonth, recentModelErrors, fetchPrices, backtestBias[city.slug], calPairs, historicalAccuracyMap[city.slug], globalAccuracyPct, cityHistoryMap[city.slug] ?? [])
     )
   )
 
