@@ -65,8 +65,24 @@ function errorBadge(err: number | null) {
   )
 }
 
+interface HistoricalMae {
+  global: Record<string, { mae: number; dias: number }>
+  por_ciudad: {
+    slug: string; nombre: string
+    nuestro: { mae: number; dias: number }
+    ecmwf: { mae: number; dias: number }
+    gfs: { mae: number; dias: number }
+    icon: { mae: number; dias: number }
+    best_match: { mae: number; dias: number }
+    mejor: string
+  }[]
+  total_dias: number
+  total_registros: number
+}
+
 export default function VsRivales() {
   const [data, setData] = useState<RivalResponse | null>(null)
+  const [histMae, setHistMae] = useState<HistoricalMae | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [fecha, setFecha] = useState('')
@@ -97,6 +113,12 @@ export default function VsRivales() {
     const dateStr = yesterday.toISOString().slice(0, 10)
     setFecha(dateStr)
     fetchData(dateStr)
+
+    // Fetch historical MAE (static, doesn't depend on date)
+    fetch('/api/vs-rivales-mae')
+      .then(r => r.ok ? r.json() : null)
+      .then(setHistMae)
+      .catch(() => {})
   }, [fetchData])
 
   const handleFechaChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -173,7 +195,113 @@ export default function VsRivales() {
 
       {data && (
         <>
-          {/* MAE Summary */}
+          {/* ===== PRECISION HISTORICA GLOBAL ===== */}
+          {histMae && (
+            <div className="rounded-lg border border-cyan-700/30 bg-cyan-950/10 p-3">
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="text-xs font-bold text-cyan-300 uppercase tracking-wide">Precision Historica Global</h3>
+                <span className="text-[10px] text-gray-400">Basado en {histMae.total_dias} dias con datos reales ({histMae.total_registros} registros)</span>
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 mb-3">
+                {Object.entries(histMae.global)
+                  .map(([key, val]) => ({ key, ...val }))
+                  .sort((a, b) => a.mae - b.mae)
+                  .map(({ key, mae: m, dias: d }) => {
+                    const label = key === 'nuestro' ? 'NOSOTROS' : key === 'best_match' ? 'Best Match' : key.toUpperCase()
+                    const isOurs = key === 'nuestro'
+                    const isBest = m === Math.min(...Object.values(histMae.global).map(v => v.mae)) && m > 0
+                    return (
+                      <div key={key} className={`rounded-lg p-2 text-center border ${
+                        isOurs ? 'bg-cyan-900/20 border-cyan-700/50'
+                        : isBest ? 'bg-emerald-900/20 border-emerald-700/50'
+                        : 'bg-gray-900/30 border-gray-700/50'
+                      }`}>
+                        <div className="text-[10px] text-gray-400 uppercase">{label}</div>
+                        <div className={`text-lg font-bold ${isBest ? 'text-emerald-400' : isOurs ? 'text-cyan-400' : 'text-gray-300'}`}>
+                          {m.toFixed(2)}°C
+                        </div>
+                        <div className="text-[9px] text-gray-500">{d} registros</div>
+                        {isBest && <div className="text-[9px] text-emerald-400">Mejor</div>}
+                      </div>
+                    )
+                  })}
+              </div>
+
+              {/* Per-city historical MAE table */}
+              {histMae.por_ciudad.length > 0 && (
+                <div className="overflow-x-auto rounded border border-gray-700/40">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="bg-gray-800/60">
+                        <th className="text-left px-2 py-1.5 text-gray-300 font-medium">Ciudad</th>
+                        <th className="text-center px-2 py-1.5 text-cyan-400 font-medium">NOSOTROS</th>
+                        <th className="text-center px-2 py-1.5 text-gray-300 font-medium">ECMWF</th>
+                        <th className="text-center px-2 py-1.5 text-gray-300 font-medium">GFS</th>
+                        <th className="text-center px-2 py-1.5 text-gray-300 font-medium">ICON</th>
+                        <th className="text-center px-2 py-1.5 text-gray-300 font-medium">Best Match</th>
+                        <th className="text-center px-2 py-1.5 text-gray-300 font-medium">Mejor</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {histMae.por_ciudad.map(c => {
+                        const ours = c.nuestro
+                        const all = [
+                          { k: 'nuestro', m: c.nuestro.mae },
+                          { k: 'ecmwf', m: c.ecmwf.mae },
+                          { k: 'gfs', m: c.gfs.mae },
+                          { k: 'icon', m: c.icon.mae },
+                          { k: 'best_match', m: c.best_match.mae },
+                        ].filter(x => x.m > 0)
+                        all.sort((a, b) => a.m - b.m)
+                        const bestKey = all[0]?.k ?? ''
+                        const bestMae = all[0]?.m ?? 999
+                        return (
+                          <tr key={c.slug} className={`border-t border-gray-800 ${c.mejor === 'nuestro' ? 'bg-cyan-500/5' : ''}`}>
+                            <td className="px-2 py-1.5 text-white font-medium">
+                              {c.mejor === 'nuestro' && <span className="mr-1 text-cyan-400">✓</span>}
+                              {c.nombre}
+                            </td>
+                            <td className={`text-center px-2 py-1.5 ${ours.mae > 0 && ours.mae === bestMae ? 'text-emerald-400 font-bold' : 'text-cyan-300'}`}>
+                              {ours.mae > 0 ? `${ours.mae.toFixed(2)}°C` : '—'}
+                              <div className="text-[9px] text-gray-500">{ours.dias}d</div>
+                            </td>
+                            <td className={`text-center px-2 py-1.5 ${bestKey === 'ecmwf' ? 'text-emerald-400 font-bold' : 'text-gray-300'}`}>
+                              {c.ecmwf.mae > 0 ? `${c.ecmwf.mae.toFixed(2)}°C` : '—'}
+                              <div className="text-[9px] text-gray-500">{c.ecmwf.dias}d</div>
+                            </td>
+                            <td className={`text-center px-2 py-1.5 ${bestKey === 'gfs' ? 'text-emerald-400 font-bold' : 'text-gray-300'}`}>
+                              {c.gfs.mae > 0 ? `${c.gfs.mae.toFixed(2)}°C` : '—'}
+                              <div className="text-[9px] text-gray-500">{c.gfs.dias}d</div>
+                            </td>
+                            <td className={`text-center px-2 py-1.5 ${bestKey === 'icon' ? 'text-emerald-400 font-bold' : 'text-gray-300'}`}>
+                              {c.icon.mae > 0 ? `${c.icon.mae.toFixed(2)}°C` : '—'}
+                              <div className="text-[9px] text-gray-500">{c.icon.dias}d</div>
+                            </td>
+                            <td className={`text-center px-2 py-1.5 ${bestKey === 'best_match' ? 'text-emerald-400 font-bold' : 'text-gray-300'}`}>
+                              {c.best_match.mae > 0 ? `${c.best_match.mae.toFixed(2)}°C` : '—'}
+                              <div className="text-[9px] text-gray-500">{c.best_match.dias}d</div>
+                            </td>
+                            <td className="text-center px-2 py-1.5">
+                              <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${
+                                c.mejor === 'nuestro' ? 'bg-cyan-500/20 text-cyan-300' : 'bg-emerald-500/20 text-emerald-300'
+                              }`}>
+                                {c.mejor === 'nuestro' ? 'NOSOTROS' : c.mejor.toUpperCase()}
+                              </span>
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* MAE del dia seleccionado */}
+          <div className="text-[11px] text-gray-500 font-medium uppercase tracking-wide">
+            Precision del dia {fecha}
+          </div>
           <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
             {maeEntries.map((m) => (
               <div
@@ -191,15 +319,14 @@ export default function VsRivales() {
                   {m.val.toFixed(2)}°C
                 </div>
                 {m.val === maeEntries[0]?.val && m.val > 0 && (
-                  <div className="text-[9px] text-emerald-400">🏆 Mejor</div>
+                  <div className="text-[9px] text-emerald-400">Mejor</div>
                 )}
               </div>
             ))}
           </div>
 
-          <div className="flex items-center justify-between text-[11px] text-gray-500">
-            <span>{data.total_con_real} de {data.ciudades.length} ciudades con temp. real registrada</span>
-            <span>MAE del día seleccionado (promedio entre ciudades con real) · {data.dias_historicos} registros históricos totales</span>
+          <div className="text-[11px] text-gray-500">
+            {data.total_con_real} de {data.ciudades.length} ciudades con temp. real registrada
           </div>
 
           {/* Comparison Table */}
