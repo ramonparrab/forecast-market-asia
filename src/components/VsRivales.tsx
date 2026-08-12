@@ -199,7 +199,7 @@ export default function VsRivales() {
 
           <div className="flex items-center justify-between text-[11px] text-gray-500">
             <span>{data.total_con_real} de {data.ciudades.length} ciudades con temp. real registrada</span>
-            <span>MAE basado en {data.dias_historicos} registros históricos con temp. real</span>
+            <span>MAE del día seleccionado (promedio entre ciudades con real) · {data.dias_historicos} registros históricos totales</span>
           </div>
 
           {/* Comparison Table */}
