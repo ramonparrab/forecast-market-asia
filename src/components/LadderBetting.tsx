@@ -1,7 +1,24 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { CIUDADES_ASIA } from '@/lib/cities'
 
 const allSlugs = CIUDADES_ASIA.map(c => ({ slug: c.slug, nombre: c.nombre }))
+
+interface AlertaClima {
+  tipo: string
+  icono: string
+  titulo: string
+  severidad: 'CRITICA' | 'ALTA' | 'MODERADA'
+  descripcion: string
+}
+
+interface AlertaCiudad {
+  slug: string
+  nombre: string
+  fecha_objetivo: string
+  temp_corregida: number | null
+  alertas: AlertaClima[]
+  datos: { tmax: number | null; tmin: number | null; precip: number | null; prob: number | null; wind: number | null; code: number | null }
+}
 
 interface Escalon {
   temp: number
@@ -114,6 +131,34 @@ export default function LadderBetting() {
   const [error, setError] = useState<string | null>(null)
   const [ranking, setRanking] = useState<RankingFila[] | null>(null)
   const [loadingRanking, setLoadingRanking] = useState(false)
+  const [alertasClima, setAlertasClima] = useState<AlertaCiudad[]>([])
+
+  // Cargar alertas climáticas al montar
+  useEffect(() => {
+    fetch('/api/alerta-clima')
+      .then(r => r.ok ? r.json() : null)
+      .then(j => setAlertasClima(j?.ciudades ?? []))
+      .catch(() => {})
+  }, [])
+
+  // Alertas de la ciudad seleccionada (solo severidad CRITICA o ALTA)
+  const alertaCiudadSeleccionada = useMemo(() => {
+    const ciudad = alertasClima.find(c => c.slug === slug)
+    if (!ciudad) return null
+    const graves = ciudad.alertas.filter(a => a.severidad === 'CRITICA' || a.severidad === 'ALTA')
+    if (graves.length === 0) return null
+    return { ciudad, alertas: graves }
+  }, [slug, alertasClima])
+
+  // Mapa slug -> alertas graves (para el ranking)
+  const alertasPorSlug = useMemo(() => {
+    const map: Record<string, AlertaClima[]> = {}
+    for (const c of alertasClima) {
+      const graves = c.alertas.filter(a => a.severidad === 'CRITICA' || a.severidad === 'ALTA')
+      if (graves.length > 0) map[c.slug] = graves
+    }
+    return map
+  }, [alertasClima])
 
   const cargarRanking = async () => {
     setLoadingRanking(true)
@@ -265,8 +310,40 @@ export default function LadderBetting() {
         </div>
       )}
 
+      {/* ===== CONDICIÓN EXTREMA ===== */}
+      {alertaCiudadSeleccionada && !loading && (
+        <div className="rounded-xl bg-red-600/20 border-2 border-red-500/70 p-4 mb-4 animate-pulse">
+          <div className="flex items-center gap-2 mb-2">
+            <span className="text-2xl">🚨</span>
+            <div className="text-base sm:text-xl font-black text-red-400 tracking-wide">CONDICIÓN EXTREMA — {alertaCiudadSeleccionada.ciudad.nombre.toUpperCase()}</div>
+          </div>
+          <div className="text-xs sm:text-sm text-red-300 font-semibold mb-2">
+            Debido a condiciones climáticas extremas pronosticadas para el {alertaCiudadSeleccionada.ciudad.fecha_objetivo},
+            no es conveniente mostrar el LADDER BETTING para esta ciudad.
+          </div>
+          <div className="space-y-1.5">
+            {alertaCiudadSeleccionada.alertas.map((a, i) => (
+              <div key={i} className={`flex items-start gap-2 rounded-lg px-3 py-2 ${a.severidad === 'CRITICA' ? 'bg-red-500/20' : 'bg-red-400/10'}`}>
+                <span className="text-lg">{a.icono}</span>
+                <div>
+                  <p className="text-xs font-black text-red-100 uppercase">
+                    {a.titulo}
+                    {a.severidad === 'CRITICA' && <span className="ml-1.5 rounded bg-red-500 px-1.5 py-px text-[8px] text-white">CRÍTICO</span>}
+                  </p>
+                  <p className="text-[11px] text-red-200 leading-snug">{a.descripcion}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="mt-2 text-[10px] sm:text-xs text-red-400/70">
+            Los modelos climáticos tienen mayor incertidumbre bajo eventos extremos (frentes fríos, calor inusual, tormentas severas).
+            El pronóstico puede desviarse significativamente del real, haciendo que la escalera de apuestas sea unreliable.
+          </div>
+        </div>
+      )}
+
       {/* Régimen Banner */}
-      {data && !loading && regimenBanner()}
+      {data && !loading && !alertaCiudadSeleccionada && regimenBanner()}
 
       {/* Loading */}
       {loading && <div className="text-center py-8 text-gray-500 text-sm">Cargando datos en vivo...</div>}
@@ -276,8 +353,8 @@ export default function LadderBetting() {
         <div className="text-center py-4 text-red-400 text-xs sm:text-sm border border-red-500/20 rounded-lg bg-red-500/5 mb-4">{error}</div>
       )}
 
-      {/* Results */}
-      {data && !loading && (
+      {/* Results — OCULTO si hay condición extrema para esta ciudad */}
+      {data && !loading && !alertaCiudadSeleccionada && (
         <div className="space-y-4">
           {/* Pronóstico y métricas */}
           <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-2">
@@ -532,6 +609,7 @@ export default function LadderBetting() {
               </thead>
               <tbody>
                 {ranking.map((r, i) => {
+                  const alertasSlug = alertasPorSlug[r.slug]
                   if (r.error) {
                     return (
                       <tr key={r.slug} className="border-b border-gray-700/20">
@@ -543,11 +621,13 @@ export default function LadderBetting() {
                   }
                   const top = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : '·'
                   const critico = r.regimen === 'CRITICO'
+                  const condicionExtrema = !!alertasSlug
                   return (
-                    <tr key={r.slug} className={`border-b border-gray-700/20 ${critico ? 'bg-red-500/5' : i === 0 ? 'bg-purple-500/10' : ''}`}>
+                    <tr key={r.slug} className={`border-b border-gray-700/20 ${critico ? 'bg-red-500/5' : condicionExtrema ? 'bg-orange-500/5' : i === 0 ? 'bg-purple-500/10' : ''}`}>
                       <td className="py-1.5 pr-2">{top}</td>
                       <td className="py-1.5 pr-2">
-                        <span className={`font-bold ${critico ? 'text-red-400' : 'text-white'}`}>{r.ciudad}</span>
+                        <span className={`font-bold ${critico ? 'text-red-400' : condicionExtrema ? 'text-orange-400' : 'text-white'}`}>{r.ciudad}</span>
+                        {condicionExtrema && <span className="ml-1 text-[9px] text-orange-400" title={`Condición extrema: ${alertasSlug!.map(a => a.titulo).join(', ')}`}>🚨</span>}
                         {r.valor_hoy != null && <span className="ml-1.5 text-[9px] text-gray-500 font-mono">{r.valor_hoy.toFixed(1)}°</span>}
                       </td>
                       <td className="text-right py-1.5 pr-2 font-mono text-[9px]">
@@ -573,7 +653,7 @@ export default function LadderBetting() {
             </table>
           </div>
         )}
-        <div className="text-[9px] text-gray-600 mt-2">score = hit pronóstico × (1 + EV/$) · ordenado por EV del plan (maximizar ganancia) y P(ganar)</div>
+        <div className="text-[9px] text-gray-600 mt-2">score = hit pronóstico × (1 + EV/$) · ordenado por EV del plan (maximizar ganancia) y P(ganar){alertasClima.filter(c => c.alertas.some(a => a.severidad === 'CRITICA' || a.severidad === 'ALTA')).length > 0 && <span className="ml-2 text-orange-400">· 🚨 = condición climática extrema (ver RESUMEN)</span>}</div>
       </div>
     </div>
   )
