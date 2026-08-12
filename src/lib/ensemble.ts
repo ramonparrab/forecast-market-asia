@@ -37,25 +37,13 @@ export function computeEnsemble(input: EnsembleInput): ForecastResult {
   // Seoul special: ICON raw as base (ensemble is systematically ~3°C too low for Seoul;
   // ICON MAE 1.00° vs ensemble+KALMAN 1.51° over 429 days). KALMAN still applies on top.
   if (slug === 'seoul' && modelsRaw['icon_seamless'] != null && typeof modelsRaw['icon_seamless'] === 'number') {
-    const iconTemp = modelsRaw['icon_seamless']
-    const allTemps = Object.values(modelsRaw).filter((v): v is number => typeof v === 'number')
-    const vol = allTemps.length >= 2 ? Math.max(0.9, Math.min(std(allTemps) * 1.75, 5.2)) : 2.0
-    let weather: WeatherCondition | undefined
-    if (input.weatherCode !== undefined) {
-      const info = getWeatherInfo(input.weatherCode, input.precipitation ?? 0)
-      weather = { code: input.weatherCode, precipitation: input.precipitation ?? 0, ...info }
-    }
-    return {
-      temp_ponderada: Math.round(iconTemp * 100) / 100,
-      temp_corregida: Math.round(iconTemp * 100) / 100,
-      volatilidad: vol,
-      consenso: 'ICON BASE',
-      ensemble_raw: modelsRaw,
-      sesgo_aplicado: 0,
-      ensemble_members: ensembleMembers,
-      weather,
-      icon_base: true,
-    }
+    return buildSingleModelBase(input, modelsRaw['icon_seamless'], 'ICON BASE', true)
+  }
+
+  // Hong Kong special: Best Match raw as base (ensemble ~1.4°C too low for HK;
+  // Best Match MAE 1.12° vs ensemble+KALMAN 1.31° over 429 days; 78% int exacta vs 22%).
+  if (slug === 'hong-kong' && modelsRaw['best_match'] != null && typeof modelsRaw['best_match'] === 'number') {
+    return buildSingleModelBase(input, modelsRaw['best_match'], 'BEST MATCH BASE', false)
   }
 
   // Z-score anomaly filter: exclude models >3σ from ensemble mean
@@ -130,6 +118,38 @@ export function computeEnsemble(input: EnsembleInput): ForecastResult {
     sesgo_aplicado: Math.round(sesgo * 100) / 100,
     ensemble_members: ensembleMembers,
     weather,
+  }
+}
+
+/**
+ * Build a ForecastResult using a single model's raw temperature as base.
+ * Used for cities where the weighted ensemble is systematically biased.
+ * KALMAN/MC still applies on top via forecast-engine.ts.
+ */
+function buildSingleModelBase(
+  input: EnsembleInput,
+  modelTemp: number,
+  consensoLabel: string,
+  isIconBase: boolean
+): ForecastResult {
+  const { modelsRaw, ensembleMembers } = input
+  const allTemps = Object.values(modelsRaw).filter((v): v is number => typeof v === 'number')
+  const vol = allTemps.length >= 2 ? Math.max(0.9, Math.min(std(allTemps) * 1.75, 5.2)) : 2.0
+  let weather: WeatherCondition | undefined
+  if (input.weatherCode !== undefined) {
+    const info = getWeatherInfo(input.weatherCode, input.precipitation ?? 0)
+    weather = { code: input.weatherCode, precipitation: input.precipitation ?? 0, ...info }
+  }
+  return {
+    temp_ponderada: Math.round(modelTemp * 100) / 100,
+    temp_corregida: Math.round(modelTemp * 100) / 100,
+    volatilidad: vol,
+    consenso: consensoLabel,
+    ensemble_raw: modelsRaw,
+    sesgo_aplicado: 0,
+    ensemble_members: ensembleMembers,
+    weather,
+    icon_base: isIconBase || undefined,
   }
 }
 

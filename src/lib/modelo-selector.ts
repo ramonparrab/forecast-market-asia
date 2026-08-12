@@ -181,6 +181,7 @@ export function getModeloActivo(slug: string): ModeloActivo {
  */
 export function getModeloNombre(slug: string, modelo?: string): string {
   if (slug === 'seoul') return 'ICON+Kalman'
+  if (slug === 'hong-kong') return 'BestMatch+Kalman'
   const m = (modelo ?? getModeloActivo(slug)) as ModeloActivo
   if (m === 'KALMAN') return 'Kalman 1D'
   if (slug === 'chongqing') return 'Combinado'
