@@ -619,15 +619,27 @@ export default function LadderBetting() {
                       </tr>
                     )
                   }
+                  const condicionExtrema = !!alertasSlug
+                  if (condicionExtrema) {
+                    return (
+                      <tr key={r.slug} className="border-b border-gray-700/20 bg-orange-500/5">
+                        <td className="py-1.5 pr-2 text-gray-600">·</td>
+                        <td className="py-1.5 pr-2">
+                          <span className="font-bold text-orange-400 line-through">{r.ciudad}</span>
+                          <span className="ml-1 text-[9px] text-orange-400">🚨</span>
+                          {r.valor_hoy != null && <span className="ml-1.5 text-[9px] text-gray-600 font-mono line-through">{r.valor_hoy.toFixed(1)}°</span>}
+                        </td>
+                        <td colSpan={8} className="py-1.5 pr-2 text-orange-400/80 font-bold text-[10px]">DESCARTADA — Clima extremo: {alertasSlug!.map(a => a.titulo).join(', ')}</td>
+                      </tr>
+                    )
+                  }
                   const top = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : '·'
                   const critico = r.regimen === 'CRITICO'
-                  const condicionExtrema = !!alertasSlug
                   return (
-                    <tr key={r.slug} className={`border-b border-gray-700/20 ${critico ? 'bg-red-500/5' : condicionExtrema ? 'bg-orange-500/5' : i === 0 ? 'bg-purple-500/10' : ''}`}>
+                    <tr key={r.slug} className={`border-b border-gray-700/20 ${critico ? 'bg-red-500/5' : i === 0 ? 'bg-purple-500/10' : ''}`}>
                       <td className="py-1.5 pr-2">{top}</td>
                       <td className="py-1.5 pr-2">
-                        <span className={`font-bold ${critico ? 'text-red-400' : condicionExtrema ? 'text-orange-400' : 'text-white'}`}>{r.ciudad}</span>
-                        {condicionExtrema && <span className="ml-1 text-[9px] text-orange-400" title={`Condición extrema: ${alertasSlug!.map(a => a.titulo).join(', ')}`}>🚨</span>}
+                        <span className={`font-bold ${critico ? 'text-red-400' : 'text-white'}`}>{r.ciudad}</span>
                         {r.valor_hoy != null && <span className="ml-1.5 text-[9px] text-gray-500 font-mono">{r.valor_hoy.toFixed(1)}°</span>}
                       </td>
                       <td className="text-right py-1.5 pr-2 font-mono text-[9px]">
