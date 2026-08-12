@@ -3,7 +3,7 @@ import { CIUDADES_ASIA } from './cities'
 import { fetchWeatherModels } from './openmeteo'
 import { computeEnsemble } from './ensemble'
 import { monteCarloProbability, normalizeProbabilidades } from './montecarlo'
-import { fetchPolymarketPrices, parseContract } from './polymarket'
+import { fetchPolymarketPrices, parseContract, calculateEV, calculateLiquidity } from './polymarket'
 import { calculateAllocation } from './kelly'
 import { getRecentErrors, getRecentModelErrors, computeGlobalMetrics, getAllCalibrationPairs, getHistoricalAccuracy, getAllHistoricalErrors, getCityHistory } from './supabase'
 import { nowcastTemperature } from './nowcaster'
@@ -201,6 +201,14 @@ async function analyzeCity(
   // 7. Arbitrage
   const arb = detectArbitrage(contracts)
 
+  // 7b. Calculate EV and liquidity for each contract
+  for (const c of contracts) {
+    const probIA = c.prob_ia_norm ?? 0
+    const probMkt = c.prob_mkt / 100
+    c.ev = calculateEV(probIA, probMkt)
+    c.liquidity = calculateLiquidity(c.volume_24h, c.spread)
+  }
+
   // 8. Recommendations
   const recs: BetRecommendation[] = contracts.map(p => {
     const iaPct = Math.round((p.prob_ia_norm ?? 0) * 10000) / 100
@@ -244,6 +252,17 @@ async function analyzeCity(
       exito_pct_integer: exitoPct,
       explicacion,
       totalRecords: histSamples,
+      // Aggregate liquidity & volume from contracts
+      liquidity_avg: contracts.length > 0
+        ? (['ALTA','MEDIA','BAJA'] as const).reduce((best, level) => {
+            const count = contracts.filter(c => c.liquidity === level).length
+            return count / contracts.length > 0.5 ? level : best
+          }, 'BAJA' as const)
+        : undefined,
+      volume_total: contracts.reduce((s, c) => s + (c.volume_24h ?? 0), 0) || undefined,
+      avg_spread: contracts.length > 0
+        ? contracts.reduce((s, c) => s + (c.spread ?? 0.10), 0) / contracts.length
+        : undefined,
     },
     recommendations: recs,
   }

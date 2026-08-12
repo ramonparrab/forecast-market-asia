@@ -37,85 +37,81 @@ export async function getServerSideProps() {
     nowCaracas.setDate(nowCaracas.getDate() + 1)
     const fecha = nowCaracas.toISOString().slice(0, 10)
 
-    // ===== STEP 1: Asegurar pronóstico del día =====
-    const { data: runs } = await client.from('daily_runs' as any).select('*').eq('fecha_objetivo', fecha).order('fecha_ejecucion', { ascending: false } as any).limit(1)
+    // ===== STEP 1 + 2 + 4: Paralelizar llamadas independientes =====
+    const HINDCAST_DAYS = 30
 
+    const [runsResult, ayerResult, existingActualsResult, datesResult, supabaseFns] = await Promise.all([
+      // Query del día
+      client.from('daily_runs' as any).select('*').eq('fecha_objetivo', fecha).order('fecha_ejecucion', { ascending: false } as any).limit(1),
+      // Query del día anterior (fallback)
+      (() => {
+        const yc = new Date(Date.now() + (-4 * 60 * 60000))
+        return client.from('daily_runs' as any).select('*').eq('fecha_objetivo', yc.toISOString().slice(0, 10)).order('fecha_ejecucion', { ascending: false } as any).limit(1)
+      })(),
+      // Check si hay datos históricos con temp_real
+      client.from('forecast_history' as any).select('fecha_objetivo').not('temp_real', 'is', null).order('fecha_objetivo', { ascending: false } as any).limit(1),
+      // Fechas disponibles
+      client.from('daily_runs' as any).select('fecha_objetivo').order('fecha_objetivo', { ascending: false } as any).limit(90),
+      // Importar funciones de supabase en paralelo con queries
+      import('@/lib/supabase').then(m => m),
+    ])
+
+    const { getHistoricalAccuracy, getHistoricalAccuracyInteger, computeGlobalMetrics } = supabaseFns
+    const runs = runsResult.data as any[] | undefined
+    const ayerData = ayerResult.data as any[] | undefined
+    const existingActuals = existingActualsResult.data as any[] | undefined
+    const datesData = datesResult.data as any[] | undefined
+
+    // Parsear pronóstico del día o de ayer
     let analysis: DailyAnalysis | null = null
+    const parseRun = (row: any) => {
+      const parsedCities = typeof row.resultados === 'string' ? JSON.parse(row.resultados) : row.resultados
+      if (!parsedCities || !Array.isArray(parsedCities) || parsedCities.length === 0) return null
+      return {
+        fecha: row.fecha_ejecucion,
+        fecha_objetivo: row.fecha_objetivo,
+        message: `Pronóstico del ${new Date(row.fecha_ejecucion).toLocaleDateString('es-ES', { timeZone: 'America/Caracas' })}`,
+        cities: parsedCities,
+        recommendations: typeof row.recomendaciones === 'string' ? JSON.parse(row.recomendaciones) : row.recomendaciones,
+        total_allocated: row.total_asignado ?? 0,
+        global_metrics: null,
+        arbitrage_alerts: [],
+        historicalErrors: {},
+      }
+    }
 
     if ((runs as any[] | undefined)?.length) {
-      const row = (runs as any[])[0]
-      const parsedCities = typeof row.resultados === 'string' ? JSON.parse(row.resultados) : row.resultados
-      if (parsedCities && Array.isArray(parsedCities) && parsedCities.length > 0) {
-        analysis = {
-          fecha: row.fecha_ejecucion,
-          fecha_objetivo: row.fecha_objetivo,
-          message: `Pronóstico del ${new Date(row.fecha_ejecucion).toLocaleDateString('es-ES', { timeZone: 'America/Caracas' })}`,
-          cities: parsedCities,
-          recommendations: typeof row.recomendaciones === 'string' ? JSON.parse(row.recomendaciones) : row.recomendaciones,
-          total_allocated: row.total_asignado ?? 0,
-          global_metrics: null,
-          arbitrage_alerts: [],
-          historicalErrors: {},
-        }
-      }
+      analysis = parseRun((runs as any[])[0])
+    }
+    if (!analysis && (ayerData as any[] | undefined)?.length) {
+      analysis = parseRun((ayerData as any[])[0])
     }
 
-    if (!analysis) {
-      // Try loading yesterday's forecast from DB (more likely to exist)
-      const yesterdayCaracas = new Date(Date.now() + (-4 * 60 * 60000))
-      const fechaAyer = yesterdayCaracas.toISOString().slice(0, 10)
-      const { data: ayerData } = await client.from('daily_runs' as any).select('*').eq('fecha_objetivo', fechaAyer).order('fecha_ejecucion', { ascending: false } as any).limit(1)
-      if ((ayerData as any[] | undefined)?.length) {
-        const row = (ayerData as any[])[0]
-        const parsedCities = typeof row.resultados === 'string' ? JSON.parse(row.resultados) : row.resultados
-        if (parsedCities && Array.isArray(parsedCities) && parsedCities.length > 0) {
-          analysis = {
-            fecha: row.fecha_ejecucion,
-            fecha_objetivo: row.fecha_objetivo,
-            message: `Pronóstico del ${new Date(row.fecha_ejecucion).toLocaleDateString('es-ES', { timeZone: 'America/Caracas' })}`,
-            cities: parsedCities,
-            recommendations: typeof row.recomendaciones === 'string' ? JSON.parse(row.recomendaciones) : row.recomendaciones,
-            total_allocated: row.total_asignado ?? 0,
-            global_metrics: null,
-            arbitrage_alerts: [],
-            historicalErrors: {},
-          }
-        }
-      }
-    }
+    // Fechas disponibles
+    const raw = ((datesData as any[] | undefined)?.map((r: any) => r.fecha_objetivo) ?? [])
+    const availableDates = Array.from(new Set<string>(raw))
 
-    // ===== STEP 2: Hindcast 30 días (si no existe data histórica) =====
-    const HINDCAST_DAYS = 30
-    const { data: existingActuals } = await client
-      .from('forecast_history' as any)
-      .select('fecha_objetivo')
-      .not('temp_real', 'is', null)
-      .order('fecha_objetivo', { ascending: false } as any)
-      .limit(1)
-
+    // ===== STEP 2: Hindcast (solo si no hay datos históricos) =====
     const needsHindcast = !(existingActuals as any[] | undefined)?.length
     let hindcastDays = 0
 
     if (needsHindcast) {
       console.log('[HINDCAST] No hay datos históricos con temp_real. Ejecutando backtest 30 días...')
+      const { saveForecastRecords, getServiceClient } = supabaseFns
       const { runBacktest } = await import('@/lib/backtest-engine')
-      const { saveForecastRecords } = await import('@/lib/supabase')
 
-      // Calcular fechas del rango a backfill
       const hoy = new Date()
       const hace30 = new Date(hoy)
-      hace30.setDate(hace30.getDate() - HINDCAST_DAYS)
+      hace30.setDate(hoy.getDate() - HINDCAST_DAYS)
       const startStr = hace30.toISOString().slice(0, 10)
 
-      // Eliminar registros existentes en el rango para evitar duplicados
-      const { getServiceClient } = await import('@/lib/supabase')
       const serviceClient = getServiceClient()
       if (serviceClient) {
         await serviceClient.from('forecast_history' as any).delete().gte('fecha_objetivo', startStr).lt('fecha_objetivo', fecha)
       }
 
       const backtest = await runBacktest(HINDCAST_DAYS)
-      const hindcastRecords = backtest.resultados.map(r => ({
+      const hindcastRecords = backtest.resultados.map((r: any) => ({
         fecha_ejecucion: r.fecha + 'T22:00:00',
         fecha_objetivo: r.fecha,
         ciudad: r.ciudad,
@@ -128,7 +124,6 @@ export async function getServerSideProps() {
         consenso: r.consenso,
       }))
 
-      // Guardar en lotes de 50
       for (let i = 0; i < hindcastRecords.length; i += 50) {
         await saveForecastRecords(hindcastRecords.slice(i, i + 50))
       }
@@ -136,13 +131,24 @@ export async function getServerSideProps() {
       console.log(`[HINDCAST] Guardados ${hindcastRecords.length} registros (${HINDCAST_DAYS} días x ${backtest.total_ciudades} ciudades)`)
     }
 
-    // ===== STEP 3: Recalcular exito_pct (lectura fresca de BD, no del daily_runs cacheado) =====
-    const { getHistoricalAccuracy, getHistoricalAccuracyInteger, computeGlobalMetrics } = await import('@/lib/supabase')
-    const metrics = await computeGlobalMetrics()
+    // ===== STEP 3: Recalcular exito_pct en paralelo por ciudad =====
+    const [metrics] = await Promise.all([
+      computeGlobalMetrics(),
+    ])
     const globalAccuracyPct = metrics?.accuracy_pct ?? 50
+
     if (analysis?.cities) {
-      for (const city of analysis.cities) {
-        const hist = await getHistoricalAccuracy(city.slug)
+      const accuracyResults = await Promise.all(
+        analysis.cities.map(async (city) => {
+          const [hist, histInt] = await Promise.all([
+            getHistoricalAccuracy(city.slug),
+            getHistoricalAccuracyInteger(city.slug),
+          ])
+          return { city, hist, histInt }
+        })
+      )
+
+      for (const { city, hist, histInt } of accuracyResults) {
         let exitoPct: number
         if (hist.muestras >= 5) {
           const priorStrength = 10
@@ -158,8 +164,6 @@ export async function getServerSideProps() {
         }
         city.exito_pct = exitoPct
 
-        // Polymarket integer precision
-        const histInt = await getHistoricalAccuracyInteger(city.slug)
         if (histInt.muestras >= 5) {
           city.exito_pct_integer = Math.round(
             (histInt.accuracy * histInt.muestras + globalAccuracyPct * 10)
@@ -170,11 +174,6 @@ export async function getServerSideProps() {
         }
       }
     }
-
-    // ===== STEP 4: Obtener fechas disponibles =====
-    const { data: datesData } = await client.from('daily_runs' as any).select('fecha_objetivo').order('fecha_objetivo', { ascending: false } as any).limit(90)
-    const raw = ((datesData as any[] | undefined)?.map(r => r.fecha_objetivo) ?? [])
-    const availableDates = Array.from(new Set<string>(raw))
 
     return {
       props: {
@@ -238,7 +237,7 @@ function ImprovementLegend() {
     <details className="mb-6 rounded-xl bg-slate-800/50 border border-gray-700/30 overflow-hidden">
       <summary className="cursor-pointer px-4 py-3 text-sm font-medium text-blue-400 hover:text-blue-300 transition flex items-center gap-2">
         <span>⚡</span>
-        Modelo Global v6.0 — Todas las mejoras activas
+        Modelo Global v6.0 — 7 de 9 mejoras activas
         <span className="ml-auto text-xs text-gray-500">(click para expandir)</span>
       </summary>
       <div className="p-4 pt-2 space-y-4">
@@ -272,7 +271,7 @@ function ImprovementLegend() {
 
           {/* 2. Platt Scaling */}
           <div className="rounded-lg bg-slate-900/50 p-3 border border-purple-500/20 relative">
-            <div className="absolute top-2 right-2 rounded-full bg-purple-500/20 px-2 py-0.5 text-[9px] text-purple-400 font-bold">ACTIVO</div>
+            <div className="absolute top-2 right-2 rounded-full bg-gray-500/20 px-2 py-0.5 text-[9px] text-gray-400 font-bold">EN ESPERA</div>
             <p className="font-semibold text-purple-400 mb-1 text-xs">2. Platt Scaling (Calibración)</p>
             <p className="text-gray-400 text-[10px] leading-relaxed mb-2">
               <strong className="text-purple-300">Qué hace:</strong> Ajusta probabilidades crudas vía función sigmoide (logit). Corrige sesgos sistemáticos del ensemble.
@@ -281,13 +280,13 @@ function ImprovementLegend() {
               <strong className="text-purple-300">Cómo:</strong> Transforma probabilidad cruda → logit → aplica α·logit + β → sigmoid → probabilidad calibrada.
             </p>
             <p className="text-gray-400 text-[10px] leading-relaxed mb-2">
-              <strong className="text-purple-300">Impacto:</strong> Backtest con train/test split: Platt supera PAVA isotonic en datos meteorológicos (2.5% mejor Brier, 17.9% mejor ECE).
+              <strong className="text-gray-300">Estado:</strong> Requiere pares reales (prob_predicha, outcome) por contrato. Actualmente forecast_history solo guarda temp+error, no probabilidades. Necesita nuevas columnas en Supabase.
             </p>
             <p className="text-gray-400 text-[10px] leading-relaxed">
-              <strong className="text-purple-300">Validación:</strong> PAVA isotonic está implementado como alternativa para datasets no-normales. Platt gana porque errores meteorológicos ~ N(μ,σ²).
+              <strong className="text-purple-300">Backtest previo:</strong> Platt supera PAVA isotonic en datos meteorológicos (2.5% mejor Brier, 17.9% mejor ECE) cuando se dispone de pares reales.
             </p>
             <div className="text-[9px] text-gray-500 mt-2">
-              Archivos: <code className="text-purple-400">calibration.ts:238-250</code>, <code className="text-purple-400">forecast-engine.ts:172-173</code>
+              Archivos: <code className="text-purple-400">calibration.ts:238-250</code>, <code className="text-purple-400">forecast-engine.ts:194-199</code>
             </div>
           </div>
 
@@ -632,21 +631,22 @@ export default function Home({ initialAnalysis, initialMetrics, initialAvailable
     second: '2-digit',
   })
 
-  const views: { key: View; label: string; icon: string; desc: string }[] = [
-    { key: 'executive', label: 'Resumen Ejecutivo', icon: '🎯', desc: 'Recomendaciones del día' },
-    { key: 'signals', label: 'Señales', icon: '📡', desc: 'Datos para cobertura' },
-    { key: 'dashboard', label: 'Dashboard', icon: '🏠', desc: 'Vista general' },
-    { key: 'table', label: 'Tabla', icon: '📊', desc: 'Datos completos' },
-    { key: 'metrics', label: 'Precisión', icon: '📈', desc: 'Métricas históricas' },
-    { key: 'comparison', label: 'Comparación', icon: '📉', desc: 'Pronóstico vs Real' },
-    { key: 'backtest', label: 'Backtest', icon: '⏳', desc: '90 días históricos' },
-    { key: 'arbitrage', label: 'Arbitraje', icon: '🔍', desc: 'Alertas de ineficiencia' },
-    { key: 'architecture', label: 'Arquitectura', icon: '🏗️', desc: 'Pipeline del sistema' },
-    { key: 'coverage', label: 'COBERTURA SI/NO', icon: '🛡️', desc: 'YES+NO pairs' },
-    { key: 'mejora-continua', label: 'MEJORA CONTINUA', icon: '🔬', desc: 'Current vs Improvements comparison' },
-    { key: 'backtest-si', label: 'BACKTEST SI', icon: '🎲', desc: 'Simular apuestas SI en Polymarket' },
-    { key: 'performance', label: 'ANÁLISIS PERFORMANCE', icon: '📈', desc: 'Precisión por ciudad y global (10PM/11PM vs Real)' },
-    { key: 'ladder', label: 'LADDER BETTING', icon: '🪜', desc: 'Escalera por régimen con Kelly vs Polymarket' },
+  // Tabs agrupados lógicamente: Operación → Análisis → Avanzado
+  const views: { key: View; label: string; icon: string; desc: string; group?: string }[] = [
+    { key: 'executive', label: 'Resumen', icon: '🎯', desc: 'Recomendaciones del día', group: 'op' },
+    { key: 'dashboard', label: 'Dashboard', icon: '🏠', desc: 'Vista general por ciudad', group: 'op' },
+    { key: 'table', label: 'Tabla', icon: '📊', desc: 'Datos completos', group: 'op' },
+    { key: 'signals', label: 'Señales', icon: '📡', desc: 'Datos para cobertura', group: 'an' },
+    { key: 'metrics', label: 'Precisión', icon: '📈', desc: 'Métricas históricas', group: 'an' },
+    { key: 'comparison', label: 'Comparación', icon: '📉', desc: 'Pronóstico vs Real', group: 'an' },
+    { key: 'backtest', label: 'Backtest', icon: '⏳', desc: '90 días históricos', group: 'an' },
+    { key: 'arbitrage', label: 'Arbitraje', icon: '🔍', desc: 'Alertas de ineficiencia', group: 'an' },
+    { key: 'architecture', label: 'Arquitectura', icon: '🏗️', desc: 'Pipeline del sistema', group: 'av' },
+    { key: 'coverage', label: 'Cobertura SI/NO', icon: '🛡️', desc: 'YES+NO pairs', group: 'av' },
+    { key: 'mejora-continua', label: 'Mejora Continua', icon: '🔬', desc: 'Modelos actuales vs mejoras', group: 'av' },
+    { key: 'backtest-si', label: 'Backtest SI', icon: '🎲', desc: 'Simular apuestas SI', group: 'av' },
+    { key: 'performance', label: 'Performance', icon: '📈', desc: 'Precisión 10PM/11PM vs Real', group: 'av' },
+    { key: 'ladder', label: 'Ladder Betting', icon: '🪜', desc: 'Escalera Kelly vs Polymarket', group: 'av' },
   ]
 
   return (
@@ -708,23 +708,32 @@ export default function Home({ initialAnalysis, initialMetrics, initialAvailable
           )}
         </div>
 
-        {/* View switcher */}
-        <div className="flex flex-wrap gap-1 rounded-lg bg-slate-800 p-1">
-          {views.map(v => (
-            <button
-              key={v.key}
-              onClick={() => setActiveView(v.key)}
-              className={`rounded-md px-3 py-1.5 text-xs font-medium transition ${
-                activeView === v.key
-                  ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/20'
-                  : 'text-gray-400 hover:text-gray-200'
-              }`}
-              title={v.desc}
-            >
-              {v.icon} {v.label}
-            </button>
-          ))}
-        </div>
+        {/* View switcher — scroll horizontal en mobile, wrap en desktop */}
+        <nav className="-mx-4 px-4 sm:mx-0 sm:px-0">
+          <div className="relative">
+            <div className="flex gap-1 overflow-x-auto rounded-lg bg-slate-800 p-1 sm:flex-wrap snap-x snap-mandatory scroll-smooth [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+              {views.map(v => (
+                <button
+                  key={v.key}
+                  onClick={() => setActiveView(v.key)}
+                  className={`flex-shrink-0 rounded-md px-3 py-2 text-xs font-medium transition whitespace-nowrap snap-start min-h-[36px] ${
+                    activeView === v.key
+                      ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/20'
+                      : 'text-gray-400 hover:text-gray-200 active:bg-slate-700'
+                  }`}
+                  title={v.desc}
+                >
+                  {v.icon} {v.label}
+                </button>
+              ))}
+            </div>
+            {/* Mobile scroll indicators */}
+            <div className="sm:hidden flex justify-between px-1 mt-1">
+              <span className="text-[9px] text-gray-600">← desliza →</span>
+              <span className="text-[9px] text-gray-600">{views.findIndex(v => v.key === activeView) + 1}/{views.length}</span>
+            </div>
+          </div>
+        </nav>
       </div>
 
       {/* Target Date Banner */}
@@ -780,28 +789,15 @@ export default function Home({ initialAnalysis, initialMetrics, initialAvailable
       {/* Dashboard View */}
       {activeView === 'dashboard' && analysis && (
         <div className="space-y-6">
-          {/* Model legend */}
-          <div className="rounded-xl bg-slate-800/50 border border-gray-700/30 px-4 py-3 text-xs text-gray-400 flex flex-wrap items-center gap-x-5 gap-y-2">
-            <span className="text-gray-500 font-medium">🧠 Modelo base del pronóstico por ciudad:</span>
-            <span className="inline-flex items-center gap-1.5">
-              <span className="inline-block rounded-md bg-cyan-500/15 border border-cyan-400/30 px-1.5 py-0.5 text-[10px] font-bold text-cyan-300">Kalman 1D</span>
-              Corrección adaptativa 1D (gana en Seúl, Beijing, Shanghái, HK, Shenzhen, Singapur)
-            </span>
-            <span className="inline-flex items-center gap-1.5">
-              <span className="inline-block rounded-md bg-emerald-500/15 border border-emerald-400/30 px-1.5 py-0.5 text-[10px] font-bold text-emerald-300">St·Adapt / Combinado</span>
-              Mejora Continua (gana en Tokio, Wuhan, Chongqing, Chengdu)
-            </span>
-          </div>
-
           {/* City Success Summary */}
           <CitySuccessSummary cities={analysis.cities} />
 
           {/* 10PM Caracas Forecast Banner — reference value */}
           {analysis.cities.length > 0 && (
-            <div className="rounded-2xl bg-gradient-to-br from-slate-900 via-blue-900/20 to-slate-900 border border-blue-500/20 overflow-hidden">
-              <div className="p-4 sm:p-6 text-center">
+            <details open className="group rounded-2xl bg-gradient-to-br from-slate-900 via-blue-900/20 to-slate-900 border border-blue-500/20 overflow-hidden">
+              <summary className="cursor-pointer p-4 sm:p-6 text-center hover:bg-blue-500/5 transition list-none">
                 <p className="text-xs text-blue-300 font-semibold tracking-wider mb-2">🌙 VALOR DE REFERENCIA · PRONÓSTICO 10PM CARACAS</p>
-                <div className="flex items-baseline justify-center gap-4 mb-3 flex-wrap">
+                <div className="flex items-baseline justify-center gap-4 mb-1 flex-wrap">
                   <span className="text-6xl sm:text-7xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-emerald-300 via-blue-300 to-cyan-300">
                     {(analysis.cities.reduce((s, c) => s + c.forecast.temp_corregida, 0) / analysis.cities.length).toFixed(1)}°C
                   </span>
@@ -811,7 +807,8 @@ export default function Home({ initialAnalysis, initialMetrics, initialAvailable
                   <span>📡 {analysis.cities.filter(c => c.nowcast?.activo).length}/{analysis.cities.length} nowcast activo</span>
                   <span>🎯 Meta: ±1°C &gt;55%</span>
                 </div>
-              </div>
+                <p className="text-[10px] text-gray-600 mt-2 group-open:hidden">click para ver detalle por ciudad</p>
+              </summary>
               <div className="grid grid-cols-3 sm:grid-cols-5 lg:grid-cols-9 divide-x divide-blue-500/10 border-t border-blue-500/10">
                 {analysis.cities.sort((a, b) => b.exito_pct - a.exito_pct).map(city => (
                   <div key={city.slug} className="p-3 text-center hover:bg-blue-500/5 transition">
@@ -833,15 +830,40 @@ export default function Home({ initialAnalysis, initialMetrics, initialAvailable
                   ✅ {hindcastDays} días de hindcast cargados automáticamente para precisión y comparación
                 </div>
               )}
-            </div>
+            </details>
           )}
 
-          {/* City Cards Grid */}
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {analysis.cities.sort((a, b) => b.exito_pct - a.exito_pct).map(city => (
-              <CityCard key={city.slug} data={city} />
-            ))}
-          </div>
+          {/* City Cards Grid — colapsable */}
+          <details open>
+            <summary className="cursor-pointer text-sm font-medium text-white hover:text-blue-300 transition mb-3 flex items-center gap-2">
+              <span>🏙️</span>
+              <span>Detalle por Ciudad</span>
+              <span className="text-xs text-gray-500">({analysis.cities.length} ciudades)</span>
+              <span className="ml-auto text-xs text-gray-600">click para colapsar</span>
+            </summary>
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {analysis.cities.sort((a, b) => b.exito_pct - a.exito_pct).map(city => (
+                <CityCard key={city.slug} data={city} />
+              ))}
+            </div>
+          </details>
+
+          {/* Model legend — colapsable */}
+          <details className="rounded-xl bg-slate-800/50 border border-gray-700/30 overflow-hidden">
+            <summary className="cursor-pointer px-4 py-3 text-xs font-medium text-gray-400 hover:text-gray-200 transition list-none">
+              🧠 Modelo base del pronóstico por ciudad (click para expandir)
+            </summary>
+            <div className="px-4 pb-3 text-xs text-gray-400 flex flex-wrap items-center gap-x-5 gap-y-2">
+              <span className="inline-flex items-center gap-1.5">
+                <span className="inline-block rounded-md bg-cyan-500/15 border border-cyan-400/30 px-1.5 py-0.5 text-[10px] font-bold text-cyan-300">Kalman 1D</span>
+                Corrección adaptativa 1D (gana en Seúl, Beijing, Shanghái, HK, Shenzhen, Singapur)
+              </span>
+              <span className="inline-flex items-center gap-1.5">
+                <span className="inline-block rounded-md bg-emerald-500/15 border border-emerald-400/30 px-1.5 py-0.5 text-[10px] font-bold text-emerald-300">St·Adapt / Combinado</span>
+                Mejora Continua (gana en Tokio, Wuhan, Chongqing, Chengdu)
+              </span>
+            </div>
+          </details>
 
           {/* Allocation */}
           <AllocationPanel
