@@ -34,6 +34,30 @@ export function computeEnsemble(input: EnsembleInput): ForecastResult {
     }
   }
 
+  // Seoul special: ICON raw as base (ensemble is systematically ~3°C too low for Seoul;
+  // ICON MAE 1.00° vs ensemble+KALMAN 1.51° over 429 days). KALMAN still applies on top.
+  if (slug === 'seoul' && modelsRaw['icon_seamless'] != null && typeof modelsRaw['icon_seamless'] === 'number') {
+    const iconTemp = modelsRaw['icon_seamless']
+    const allTemps = Object.values(modelsRaw).filter((v): v is number => typeof v === 'number')
+    const vol = allTemps.length >= 2 ? Math.max(0.9, Math.min(std(allTemps) * 1.75, 5.2)) : 2.0
+    let weather: WeatherCondition | undefined
+    if (input.weatherCode !== undefined) {
+      const info = getWeatherInfo(input.weatherCode, input.precipitation ?? 0)
+      weather = { code: input.weatherCode, precipitation: input.precipitation ?? 0, ...info }
+    }
+    return {
+      temp_ponderada: Math.round(iconTemp * 100) / 100,
+      temp_corregida: Math.round(iconTemp * 100) / 100,
+      volatilidad: vol,
+      consenso: 'ICON BASE',
+      ensemble_raw: modelsRaw,
+      sesgo_aplicado: 0,
+      ensemble_members: ensembleMembers,
+      weather,
+      icon_base: true,
+    }
+  }
+
   // Z-score anomaly filter: exclude models >3σ from ensemble mean
   if (numModelos >= 3) {
     const temps = modelos.map(m => modelsRaw[m])

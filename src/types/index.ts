@@ -35,6 +35,8 @@ export interface ForecastResult {
   modelo_muestras?: number
   /** Base del ensemble (sin el ajuste del modelo ganador), se persiste en forecast_history */
   temp_corregida_base?: number
+  /** Seoul usa ICON crudo como base en vez del ensemble ponderado */
+  icon_base?: boolean
 }
 
 export interface PolymarketContract {

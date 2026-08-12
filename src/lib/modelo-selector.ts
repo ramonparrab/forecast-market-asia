@@ -180,6 +180,7 @@ export function getModeloActivo(slug: string): ModeloActivo {
  *   resto MC    -> pipeline adaptativo solo-estación
  */
 export function getModeloNombre(slug: string, modelo?: string): string {
+  if (slug === 'seoul') return 'ICON+Kalman'
   const m = (modelo ?? getModeloActivo(slug)) as ModeloActivo
   if (m === 'KALMAN') return 'Kalman 1D'
   if (slug === 'chongqing') return 'Combinado'
