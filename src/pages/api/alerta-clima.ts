@@ -50,69 +50,82 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     const resultado: AlertaCiudad[] = []
 
-    for (const slug of slugs) {
-      const info = fechasPorSlug[slug]
-      const fechaObj = info!.fecha
-      const city = CIUDADES_ASIA.find(c => c.slug === slug)
-      if (!city) continue
+    // Lanzar todas las ciudades en PARALELO (no secuencial) — de ~2s a ~300ms
+    const BATCH_SIZE = 5
+    for (let i = 0; i < slugs.length; i += BATCH_SIZE) {
+      const batch = slugs.slice(i, i + BATCH_SIZE)
+      const results = await Promise.allSettled(
+        batch.map(async (slug) => {
+          const info = fechasPorSlug[slug]
+          const fechaObj = info!.fecha
+          const city = CIUDADES_ASIA.find(c => c.slug === slug)
+          if (!city) return null
 
-      // Pedimos 3 días: prev2, prev1, fecha objetivo
-      const dt = new Date(fechaObj + 'T00:00:00Z')
-      const d0 = new Date(dt); d0.setUTCDate(dt.getUTCDate() - 2)
-      const start = d0.toISOString().slice(0, 10)
-      const end = fechaObj
+          // Pedimos 3 días: prev2, prev1, fecha objetivo
+          const dt = new Date(fechaObj + 'T00:00:00Z')
+          const d0 = new Date(dt); d0.setUTCDate(dt.getUTCDate() - 2)
+          const start = d0.toISOString().slice(0, 10)
+          const end = fechaObj
 
-      const url = `https://api.open-meteo.com/v1/forecast?latitude=${city.lat}&longitude=${city.lon}&daily=temperature_2m_max,temperature_2m_min,precipitation_sum,precipitation_probability_max,wind_speed_10m_max,weather_code&temperature_unit=celsius&start_date=${start}&end_date=${end}&models=${MODELS.join(',')}&timezone=auto`
+          const url = `https://api.open-meteo.com/v1/forecast?latitude=${city.lat}&longitude=${city.lon}&daily=temperature_2m_max,temperature_2m_min,precipitation_sum,precipitation_probability_max,wind_speed_10m_max,weather_code&temperature_unit=celsius&start_date=${start}&end_date=${end}&models=${MODELS.join(',')}&timezone=auto`
 
-      const resp = await fetch(url)
-      const j = await resp.json()
-      const d = j?.daily
-      if (!d) continue
+          const resp = await fetch(url)
+          const j = await resp.json()
+          const d = j?.daily
+          if (!d) return null
 
-      // Promedio multinmodelo por día: índice 2 = fecha objetivo, 1 = prev1, 0 = prev2
-      const diaModelos = (idx: number): DatosDia | null => {
-        const tmax = prom(MODELS.map(m => d[`temperature_2m_max_${m}`]?.[idx] ?? null))
-        const tmin = prom(MODELS.map(m => d[`temperature_2m_min_${m}`]?.[idx] ?? null))
-        const precip = prom(MODELS.map(m => d[`precipitation_sum_${m}`]?.[idx] ?? null))
-        const prob = prom(MODELS.map(m => d[`precipitation_probability_max_${m}`]?.[idx] ?? null))
-        const wind = prom(MODELS.map(m => d[`wind_speed_10m_max_${m}`]?.[idx] ?? null))
-        const codes = MODELS.map(m => d[`weather_code_${m}`]?.[idx] ?? null).filter((v): v is number => typeof v === 'number')
-        if (tmax == null) return null
-        return {
-          tmax,
-          tmin: tmin ?? tmax,
-          precip: precip ?? 0,
-          prob: prob ?? 0,
-          wind: wind ?? 0,
-          code: codes.length ? codes.sort((a, b) => a - b)[Math.floor(codes.length / 2)] : 0,
+          // Promedio multinmodelo por día: índice 2 = fecha objetivo, 1 = prev1, 0 = prev2
+          const diaModelos = (idx: number): DatosDia | null => {
+            const tmax = prom(MODELS.map(m => d[`temperature_2m_max_${m}`]?.[idx] ?? null))
+            const tmin = prom(MODELS.map(m => d[`temperature_2m_min_${m}`]?.[idx] ?? null))
+            const precip = prom(MODELS.map(m => d[`precipitation_sum_${m}`]?.[idx] ?? null))
+            const prob = prom(MODELS.map(m => d[`precipitation_probability_max_${m}`]?.[idx] ?? null))
+            const wind = prom(MODELS.map(m => d[`wind_speed_10m_max_${m}`]?.[idx] ?? null))
+            const codes = MODELS.map(m => d[`weather_code_${m}`]?.[idx] ?? null).filter((v): v is number => typeof v === 'number')
+            if (tmax == null) return null
+            return {
+              tmax,
+              tmin: tmin ?? tmax,
+              precip: precip ?? 0,
+              prob: prob ?? 0,
+              wind: wind ?? 0,
+              code: codes.length ? codes.sort((a, b) => a - b)[Math.floor(codes.length / 2)] : 0,
+            }
+          }
+
+          const hoy = diaModelos(2)
+          const prev1 = diaModelos(1)
+          const prev2 = diaModelos(0)
+          if (!hoy) return null
+
+          const alertas = detectarAlertas(hoy, prev1, prev2)
+
+          // Datos de consenso para el UI (best_match como referencia rápida)
+          const datos = {
+            tmax: Math.round(hoy.tmax * 10) / 10,
+            tmin: hoy.tmin != null ? Math.round(hoy.tmin * 10) / 10 : null,
+            precip: hoy.precip != null ? Math.round(hoy.precip * 10) / 10 : null,
+            prob: hoy.prob != null ? Math.round(hoy.prob) : null,
+            wind: hoy.wind != null ? Math.round(hoy.wind) : null,
+            code: hoy.code ?? null,
+          }
+
+          return {
+            slug,
+            nombre: slugNombres[slug] ?? city.nombre,
+            fecha_objetivo: fechaObj,
+            temp_corregida: info!.temp_corregida ?? null,
+            alertas,
+            datos,
+          }
+        })
+      )
+
+      for (const result of results) {
+        if (result.status === 'fulfilled' && result.value) {
+          resultado.push(result.value)
         }
       }
-
-      const hoy = diaModelos(2)
-      const prev1 = diaModelos(1)
-      const prev2 = diaModelos(0)
-      if (!hoy) continue
-
-      const alertas = detectarAlertas(hoy, prev1, prev2)
-
-      // Datos de consenso para el UI (best_match como referencia rápida)
-      const datos = {
-        tmax: Math.round(hoy.tmax * 10) / 10,
-        tmin: hoy.tmin != null ? Math.round(hoy.tmin * 10) / 10 : null,
-        precip: hoy.precip != null ? Math.round(hoy.precip * 10) / 10 : null,
-        prob: hoy.prob != null ? Math.round(hoy.prob) : null,
-        wind: hoy.wind != null ? Math.round(hoy.wind) : null,
-        code: hoy.code ?? null,
-      }
-
-      resultado.push({
-        slug,
-        nombre: slugNombres[slug] ?? city.nombre,
-        fecha_objetivo: fechaObj,
-        temp_corregida: info!.temp_corregida ?? null,
-        alertas,
-        datos,
-      })
     }
 
     res.status(200).json({ fecha_consulta: new Date().toISOString(), ciudades: resultado })

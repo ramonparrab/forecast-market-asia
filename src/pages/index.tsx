@@ -512,20 +512,44 @@ export default function Home({ initialAnalysis, initialMetrics, initialAvailable
 
   useEffect(() => {
     const init = async () => {
-      await fetchMetrics()
-      await fetchAvailableDates()
-      // Load tomorrow's cron result (cron runs at 10PM Caracas, fecha_objetivo = tomorrow in Caracas)
-      setSelectedDate(getDefaultTargetDate())
-      try {
-        const resp = await fetch(`/api/forecast-history?fecha=${getDefaultTargetDate()}`)
-        if (resp.ok) {
-          const data: DailyAnalysis = await resp.json()
-          setAnalysis(data)
-          setIsHistorical(true)
-          setLastUpdated(`Cargado: ${new Date(data.fecha).toLocaleDateString('en-CA', { timeZone: 'America/Caracas' })} (cron 10PM)`)
-          await fetchPreviousDay(data.fecha_objetivo)
+      const targetDate = getDefaultTargetDate()
+      setSelectedDate(targetDate)
+
+      // Lanzar las 3 llamadas independientes en PARALELO (no secuencial)
+      const [metricsResult, datesResult, forecastResult] = await Promise.all([
+        fetch('/api/metrics').then(r => r.ok ? r.json() : null).catch(() => null),
+        fetch('/api/forecast-history?action=dates').then(r => r.ok ? r.json() : null).catch(() => null),
+        fetch(`/api/forecast-history?fecha=${targetDate}`).then(r => r.ok ? r.json() : null).catch(() => null),
+      ])
+
+      // Procesar métricas
+      if (metricsResult && metricsResult.overall_mae !== undefined) {
+        setMetrics(metricsResult)
+      }
+
+      // Procesar fechas disponibles
+      const dates: string[] = datesResult?.dates ?? []
+      setAvailableDates(dates)
+
+      // Procesar pronóstico cargado
+      if (forecastResult && forecastResult.cities) {
+        setAnalysis(forecastResult)
+        setIsHistorical(true)
+        setLastUpdated(`Cargado: ${new Date(forecastResult.fecha).toLocaleDateString('en-CA', { timeZone: 'America/Caracas' })} (cron 10PM)`)
+
+        // Buscar día anterior SIN re-fetch de dates (ya lo tenemos)
+        const sortedDates = [...dates].sort().reverse()
+        const currentIdx = sortedDates.indexOf(forecastResult.fecha_objetivo)
+        if (currentIdx >= 0 && currentIdx < sortedDates.length - 1) {
+          const prevDate = sortedDates[currentIdx + 1]
+          const [prevData, prevMetrics] = await Promise.all([
+            fetch(`/api/forecast-history?fecha=${prevDate}`).then(r => r.ok ? r.json() : null).catch(() => null),
+            fetch(`/api/metrics?fecha=${prevDate}`).then(r => r.ok ? r.json() : null).catch(() => null),
+          ])
+          if (prevData && prevData.cities) setPreviousAnalysis(prevData)
+          if (prevMetrics && prevMetrics.overall_mae !== undefined) setPreviousMetrics(prevMetrics)
         }
-      } catch { /* no saved data — user clicks Run Analysis */ }
+      }
     }
     init()
   }, [])
@@ -550,33 +574,6 @@ export default function Home({ initialAnalysis, initialMetrics, initialAvailable
     } catch { /* silent */ }
   }
 
-  async function fetchPreviousDay(currentFecha: string) {
-    try {
-      // Get available dates and find the one before current
-      const resp = await fetch('/api/forecast-history?action=dates')
-      if (resp.ok) {
-        const data = await resp.json()
-        const dates: string[] = data.dates ?? []
-        const sortedDates = dates.sort().reverse()
-        const currentIdx = sortedDates.indexOf(currentFecha)
-        if (currentIdx >= 0 && currentIdx < sortedDates.length - 1) {
-          const prevDate = sortedDates[currentIdx + 1]
-          const prevResp = await fetch(`/api/forecast-history?fecha=${prevDate}`)
-          if (prevResp.ok) {
-            const prevData: DailyAnalysis = await prevResp.json()
-            setPreviousAnalysis(prevData)
-            // Try to get previous day metrics
-            const prevMetricsResp = await fetch(`/api/metrics?fecha=${prevDate}`)
-            if (prevMetricsResp.ok) {
-              const pm = await prevMetricsResp.json()
-              if (pm && pm.overall_mae !== undefined) setPreviousMetrics(pm)
-            }
-          }
-        }
-      }
-    } catch { /* silent */ }
-  }
-
   const runAnalysis = useCallback(async (fecha?: string) => {
     setLoading(true)
     setError(null)
@@ -589,9 +586,23 @@ export default function Home({ initialAnalysis, initialMetrics, initialAvailable
       setIsHistorical(false)
       setSelectedDate(data.fecha_objetivo)
       setLastUpdated(new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit', second: '2-digit' }))
-      await fetchMetrics()
-      await fetchAvailableDates()
-      await fetchPreviousDay(data.fecha_objetivo)
+      await Promise.all([fetchMetrics(), fetchAvailableDates()])
+      // Cargar día anterior si hay fechas disponibles
+      const datesResp = await fetch('/api/forecast-history?action=dates').catch(() => null)
+      if (datesResp?.ok) {
+        const datesData = await datesResp.json()
+        const sortedDates = (datesData.dates ?? []).sort().reverse()
+        const idx = sortedDates.indexOf(data.fecha_objetivo)
+        if (idx >= 0 && idx < sortedDates.length - 1) {
+          const prevDate = sortedDates[idx + 1]
+          const [prevData, prevMetrics] = await Promise.all([
+            fetch(`/api/forecast-history?fecha=${prevDate}`).then(r => r.ok ? r.json() : null).catch(() => null),
+            fetch(`/api/metrics?fecha=${prevDate}`).then(r => r.ok ? r.json() : null).catch(() => null),
+          ])
+          if (prevData && prevData.cities) setPreviousAnalysis(prevData)
+          if (prevMetrics && prevMetrics.overall_mae !== undefined) setPreviousMetrics(prevMetrics)
+        }
+      }
     } catch (e) {
       setError((e as Error).message)
     } finally {

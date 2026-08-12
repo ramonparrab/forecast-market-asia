@@ -41,7 +41,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       }
     }
 
-    return res.status(200).json(result)
+    return res.status(200).setHeader('Cache-Control', 's-maxage=120, stale-while-revalidate=30').json(result)
   } catch (error) {
     console.error('Metrics API error:', error)
     return res.status(500).json({ error: (error as Error).message })
