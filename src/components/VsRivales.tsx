@@ -216,7 +216,14 @@ export default function VsRivales() {
                 </tr>
               </thead>
               <tbody>
-                {data.ciudades.map((city) => {
+                {[...data.ciudades]
+                  .sort((a, b) => {
+                    // Sort by our error ascending (best first). Nulls go last.
+                    const ea = a.error_nuestro ?? 999
+                    const eb = b.error_nuestro ?? 999
+                    return ea - eb
+                  })
+                  .map((city) => {
                   const best = getBestSource(city)
                   const hasReal = city.real !== null
                   return (
