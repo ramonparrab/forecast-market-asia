@@ -1,6 +1,6 @@
-export type Regimen = 'ESTABLE' | 'TRANSICION' | 'CRITICO'
+type Regimen = 'ESTABLE' | 'TRANSICION' | 'CRITICO'
 
-export interface RegimenDetalle {
+interface RegimenDetalle {
   regimen: Regimen
   delta1: number | null
   tendencia: number | null

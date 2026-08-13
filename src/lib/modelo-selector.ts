@@ -156,11 +156,7 @@ function cacheResult(slug: string, result: { modelo: ModeloActivo; mae_kalman: n
   _selectionCache[slug] = result
 }
 
-/**
- * MODELO_POR_CIUDAD — solo como referencia/read-only.
- * La selección real ahora es dinámica via seleccionarMejorModelo().
- */
-export const MODELO_POR_CIUDAD: Record<string, ModeloActivo> = DEFAULT_MAP
+
 
 /**
  * getModeloActivo — usa el cache de selección dinámica si existe,
@@ -188,7 +184,7 @@ export function getModeloNombre(slug: string, modelo?: string): string {
   return 'St·Adapt'
 }
 
-export function round2(v: number): number {
+function round2(v: number): number {
   return Math.round(v * 100) / 100
 }
 
@@ -247,7 +243,3 @@ export function aplicarModeloGanador(
   return { temp: round2(temp), modelo, bias: round2(temp - tempBase), muestras }
 }
 
-export const MODELO_COLORS: Record<ModeloActivo, { badge: string; short: string }> = {
-  'MEJORA CONTINUA': { badge: 'bg-emerald-500/15 border border-emerald-400/30 text-emerald-300', short: 'MC' },
-  KALMAN: { badge: 'bg-cyan-500/15 border border-cyan-400/30 text-cyan-300', short: 'KAL' },
-}

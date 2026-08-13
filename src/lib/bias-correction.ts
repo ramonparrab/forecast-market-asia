@@ -20,7 +20,7 @@ const EMA_ALPHA = 0.3
 // Minimum samples before we trust dynamic bias over static (lower = faster adaptation)
 const MIN_SAMPLES_DYNAMIC = 3
 
-export function getStaticBias(slug: string, mes: number): number {
+function getStaticBias(slug: string, mes: number): number {
   const estacion = getEstacion(mes)
   return SESGOS_INICIALES[slug]?.[estacion] ?? 0
 }

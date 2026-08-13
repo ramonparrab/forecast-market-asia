@@ -73,13 +73,3 @@ export function calculateAllocation(
 
   return candidates.sort((a, b) => b.monto - a.monto)
 }
-
-/**
- * Dummy implementation of calculateAllocationDiario for compatibility.
- */
-export function calcularAllocationDiario(
-  recomendaciones: BetRecommendation[],
-  presupuestoMax: number = BANKROLL_DIARIO
-): BetRecommendation[] {
-  return calculateAllocation(recomendaciones, presupuestoMax)
-}
