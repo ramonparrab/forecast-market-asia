@@ -15,7 +15,7 @@ function studentTRandom(df: number = 4): number {
   for (let i = 0; i < df; i++) {
     let u = 0
     while (u === 0) u = Math.random()
-    chiSq += Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2.0 * Math.PI * Math.random()) ** 2
+    chiSq += (Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2.0 * Math.PI * Math.random())) ** 2
   }
 
   return z / Math.sqrt(chiSq / df)
