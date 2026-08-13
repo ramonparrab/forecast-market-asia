@@ -195,12 +195,14 @@ export async function buildPlanData(slug: string, monto: number, ctx?: PlanCtx):
       const key = slug + '|' + fo
       const entry = basePorHora[key] || { base10: null, base11: null, ts10: null, ts11: null }
       basePorHora[key] = entry
-      const cron10 = new Date(fo + 'T02:00:00.000Z').getTime()
-      const cron11 = new Date(fo + 'T03:00:00.000Z').getTime()
-      if (runTs >= cron10 && (entry.ts10 == null || runTs < entry.ts10!)) {
+      // Los timestamps de referencia son de la FECHA DE EJECUCIÓN (cuando corrió el cron),
+      // no de la fecha objetivo. El cron corre a las 02:00Z (10PM Caracas) y 03:00Z (11PM Caracas).
+      const runDate = new Date(run.fecha_ejecucion)
+      const runHourUTC = runDate.getUTCHours()
+      if (runHourUTC === 2 && (entry.ts10 == null || runTs < entry.ts10!)) {
         entry.base10 = Number(tc); entry.ts10 = runTs
       }
-      if (runTs >= cron11 && (entry.ts11 == null || runTs < entry.ts11!)) {
+      if (runHourUTC === 3 && (entry.ts11 == null || runTs < entry.ts11!)) {
         entry.base11 = Number(tc); entry.ts11 = runTs
       }
     }
