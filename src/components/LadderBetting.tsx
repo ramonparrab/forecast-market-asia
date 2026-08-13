@@ -145,17 +145,17 @@ export default function LadderBetting() {
   const alertaCiudadSeleccionada = useMemo(() => {
     const ciudad = alertasClima.find(c => c.slug === slug)
     if (!ciudad) return null
-    const graves = ciudad.alertas.filter(a => a.severidad === 'CRITICA' || a.severidad === 'ALTA')
-    if (graves.length === 0) return null
-    return { ciudad, alertas: graves }
+    const descartables = ciudad.alertas.filter(a => a.severidad === 'CRITICA' || a.severidad === 'ALTA' || a.severidad === 'MODERADA')
+    if (descartables.length === 0) return null
+    return { ciudad, alertas: descartables }
   }, [slug, alertasClima])
 
   // Mapa slug -> alertas graves (para el ranking)
   const alertasPorSlug = useMemo(() => {
     const map: Record<string, AlertaClima[]> = {}
     for (const c of alertasClima) {
-      const graves = c.alertas.filter(a => a.severidad === 'CRITICA' || a.severidad === 'ALTA')
-      if (graves.length > 0) map[c.slug] = graves
+      const descartables = c.alertas.filter(a => a.severidad === 'CRITICA' || a.severidad === 'ALTA' || a.severidad === 'MODERADA')
+      if (descartables.length > 0) map[c.slug] = descartables
     }
     return map
   }, [alertasClima])
@@ -629,7 +629,7 @@ export default function LadderBetting() {
                           <span className="ml-1 text-[9px] text-orange-400">🚨</span>
                           {r.valor_hoy != null && <span className="ml-1.5 text-[9px] text-gray-600 font-mono line-through">{r.valor_hoy.toFixed(1)}°</span>}
                         </td>
-                        <td colSpan={8} className="py-1.5 pr-2 text-orange-400/80 font-bold text-[10px]">DESCARTADA — Clima extremo: {alertasSlug!.map(a => a.titulo).join(', ')}</td>
+                        <td colSpan={8} className="py-1.5 pr-2 text-orange-400/80 font-bold text-[10px]">DESCARTADA — {alertasSlug![0].severidad}: {alertasSlug!.map(a => a.titulo).join(', ')}</td>
                       </tr>
                     )
                   }
@@ -665,7 +665,7 @@ export default function LadderBetting() {
             </table>
           </div>
         )}
-        <div className="text-[9px] text-gray-600 mt-2">score = hit pronóstico × (1 + EV/$) · ordenado por EV del plan (maximizar ganancia) y P(ganar){alertasClima.filter(c => c.alertas.some(a => a.severidad === 'CRITICA' || a.severidad === 'ALTA')).length > 0 && <span className="ml-2 text-orange-400">· 🚨 = condición climática extrema (ver RESUMEN)</span>}</div>
+        <div className="text-[9px] text-gray-600 mt-2">score = hit pronóstico × (1 + EV/$) · ordenado por EV del plan (maximizar ganancia) y P(ganar){alertasClima.filter(c => c.alertas.some(a => a.severidad === 'CRITICA' || a.severidad === 'ALTA' || a.severidad === 'MODERADA')).length > 0 && <span className="ml-2 text-orange-400">· 🚨 = clima extremo (cualquier severidad) → descartada</span>}</div>
       </div>
     </div>
   )
