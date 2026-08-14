@@ -69,8 +69,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   try {
     const client = createClient(supabaseUrl, supabaseKey)
 
-    // 1. Get our forecasts from forecast_history for this date
-    //    We want the best run (prefer 11PM which includes nowcast, fallback to 10PM)
+    // 1a. Get temp_real from forecast_history for this date (deduped, latest run per city)
     const { data: historyRows, error: dbError } = await client
       .from('forecast_history' as any)
       .select('slug, ciudad, temp_corregida, temp_real, error, fecha_ejecucion')
@@ -82,14 +81,50 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return res.status(500).json({ error: dbError.message })
     }
 
-    // Pick the best forecast per city: prefer later run (11PM with nowcast)
-    const bestByCity: Record<string, { temp_corregida: number; temp_real: number | null; error: number | null }> = {}
+    // Extract real temps (dedup: keep first row per city = latest run)
+    const realByCity: Record<string, { temp_real: number | null }> = {}
+    for (const row of (historyRows as any[]) ?? []) {
+      if (!realByCity[row.slug]) {
+        realByCity[row.slug] = {
+          temp_real: row.temp_real !== null ? parseFloat(row.temp_real) : null,
+        }
+      }
+    }
+
+    // 1b. Get NUESTRO LIVE (con modelo ganador) desde daily_runs.resultados
+    //     Esto es consistente con el panel de MAE histórico y el dashboard principal
+    const { data: dailyRuns, error: drError } = await client
+      .from('daily_runs' as any)
+      .select('id, fecha_ejecucion, resultados')
+      .eq('fecha_objetivo', fecha)
+      .order('fecha_ejecucion', { ascending: false } as any)
+      .limit(1)
+
+    const nuestroLiveByCity: Record<string, number> = {}
+    if (!drError && dailyRuns && dailyRuns.length > 0) {
+      const run = dailyRuns[0]
+      let resultados: any[]
+      try {
+        resultados = typeof run.resultados === 'string' ? JSON.parse(run.resultados) : (run.resultados ?? [])
+      } catch { /* ignore parse error */ }
+      if (Array.isArray(resultados)) {
+        for (const city of resultados) {
+          const live = city.forecast?.temp_corregida
+          if (live !== null && typeof live === 'number' && city.slug) {
+            nuestroLiveByCity[city.slug] = live
+          }
+        }
+      }
+    }
+
+    // Merge: usar LIVE si existe, sino usar base de forecast_history
+    const bestByCity: Record<string, { temp_corregida: number; temp_real: number | null }> = {}
     for (const row of (historyRows as any[]) ?? []) {
       if (!bestByCity[row.slug]) {
+        const live = nuestroLiveByCity[row.slug]
         bestByCity[row.slug] = {
-          temp_corregida: parseFloat(row.temp_corregida),
+          temp_corregida: live ?? parseFloat(row.temp_corregida),
           temp_real: row.temp_real !== null ? parseFloat(row.temp_real) : null,
-          error: row.error !== null ? parseFloat(row.error) : null,
         }
       }
     }
