@@ -2,24 +2,39 @@ import { ModelTemps } from '@/types'
 import { MODELOS_CLIMATICOS } from './cities'
 
 const OPENMETEO_BASE = 'https://api.open-meteo.com/v1/forecast'
+const OPENMETEO_ARCHIVE = 'https://archive-api.open-meteo.com/v1/archive'
 
 /**
- * Fetch the ACTUAL maximum temperature for a past date.
+ * Fetch the ACTUAL maximum temperature for a date.
+ * For past dates, uses the Archive API (reliable historical data).
+ * For today or future dates, uses the Forecast API.
  */
 export async function fetchActualMaxTemp(
   lat: number,
   lon: number,
   fechaISO: string
 ): Promise<number | null> {
+  const dateStr = fechaISO.slice(0, 10)
+  const todayUTC = new Date().toISOString().slice(0, 10)
+  const isPast = dateStr < todayUTC
+  const baseUrl = isPast ? OPENMETEO_ARCHIVE : OPENMETEO_BASE
+  const label = isPast ? 'Archive' : 'Forecast'
+
   try {
-    const url = `${OPENMETEO_BASE}?latitude=${lat}&longitude=${lon}&daily=temperature_2m_max&temperature_unit=celsius&start_date=${fechaISO}&end_date=${fechaISO}`
-    const resp = await fetch(url, { signal: AbortSignal.timeout(10000) })
+    const url = `${baseUrl}?latitude=${lat}&longitude=${lon}&daily=temperature_2m_max&temperature_unit=celsius&start_date=${dateStr}&end_date=${dateStr}`
+    console.log(`[Open-Meteo ${label}] ${dateStr} lat=${lat} lon=${lon}`)
+    const resp = await fetch(url, { signal: AbortSignal.timeout(15000) })
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
     const data = await resp.json()
     const maxTemp = data?.daily?.temperature_2m_max?.[0]
+    if (maxTemp !== null && maxTemp !== undefined) {
+      console.log(`[Open-Meteo ${label}] ${dateStr} → ${maxTemp}°C`)
+    } else {
+      console.warn(`[Open-Meteo ${label}] ${dateStr} → no data`)
+    }
     return maxTemp ?? null
   } catch (e) {
-    console.warn(`Error fetching actual temp for ${fechaISO}:`, (e as Error).message)
+    console.warn(`[Open-Meteo ${label}] Error for ${dateStr}:`, (e as Error).message)
     return null
   }
 }

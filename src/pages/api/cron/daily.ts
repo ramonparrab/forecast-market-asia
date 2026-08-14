@@ -7,6 +7,9 @@ import { CIUDADES_ASIA } from '@/lib/cities'
 import { computeBacktestBiasFromResults } from '@/lib/backtest-bias'
 import { getModelSelectionCache } from '@/lib/modelo-selector'
 
+// Vercel: extender timeout a 300s (5 min) — el backfill secuencial + forecast necesitan tiempo
+export const config = { maxDuration: 300 }
+
 /**
  * Vercel Cron Job - runs at 2:00 AM UTC (10:00 PM Caracas UTC-4)
  * vercel.json: { "crons": [{ "path": "/api/cron/daily", "schedule": "0 2 * * *" }] }
@@ -35,28 +38,49 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       : `${caracasHour}:00`
     console.log(`[CRON] === CORRIDA ${runLabel} CARACAS === Fecha: ${nowCaracas.toISOString().slice(0, 10)} ${nowCaracas.toISOString().slice(11, 16)} Caracas`)
 
-    // ===== STEP 1: Backfill actual temps for pending records =====
+    // ===== STEP 1: Backfill actual temps for pending records (PARALELO) =====
     console.log('[CRON] Backfilling actual temperatures...')
     const pendingRecords = await getRecordsWithoutActuals(50)
+    console.log(`[CRON] Found ${pendingRecords.length} pending records without actuals`)
     let backfilled = 0
     const backfillErrors: string[] = []
 
-    for (const record of pendingRecords) {
-      // Try Weather.com first (exact Polymarket/WU resolution), fallback to Open-Meteo
-      let tempReal = await fetchStationMaxTemp(record.slug, record.fecha_objetivo)
-      if (tempReal === null && record.lat && record.lon) {
-        tempReal = await fetchActualMaxTemp(record.lat, record.lon, record.fecha_objetivo)
+    // Process all cities in parallel (max 4 concurrent) instead of sequentially
+    const CONCURRENCY = 4
+    for (let i = 0; i < pendingRecords.length; i += CONCURRENCY) {
+      const batch = pendingRecords.slice(i, i + CONCURRENCY)
+      const results = await Promise.allSettled(
+        batch.map(async (record) => {
+          // Try Polymarket settlement → TWC/HKO → Open-Meteo
+          let tempReal = await fetchStationMaxTemp(record.slug, record.fecha_objetivo)
+          if (tempReal === null && record.lat && record.lon) {
+            tempReal = await fetchActualMaxTemp(record.lat, record.lon, record.fecha_objetivo)
+          }
+          if (tempReal === null) {
+            return { record, tempReal: null as number | null, ok: false }
+          }
+          const ok = await updateActualTemperature(record.id, tempReal)
+          return { record, tempReal, ok }
+        })
+      )
+      for (const r of results) {
+        if (r.status === 'fulfilled') {
+          if (r.value.ok && r.value.tempReal !== null) {
+            backfilled++
+            console.log(`[CRON] Backfilled ${r.value.record.slug} ${r.value.record.fecha_objetivo} → ${r.value.tempReal}°C`)
+          } else {
+            backfillErrors.push(`${r.value.record.slug} ${r.value.record.fecha_objetivo}: sin datos de estación`)
+          }
+        } else {
+          backfillErrors.push(`Error: ${(r.reason as Error)?.message ?? 'unknown'}`)
+        }
       }
-      if (tempReal === null) {
-        backfillErrors.push(`${record.slug} ${record.fecha_objetivo}: sin datos de estación`)
-        continue
-      }
-      const ok = await updateActualTemperature(record.id, tempReal)
-      if (ok) backfilled++
-      else backfillErrors.push(`${record.slug} ${record.fecha_objetivo}: error al guardar`)
     }
 
     console.log(`[CRON] Backfill: ${backfilled} actualizados, ${backfillErrors.length} errores`)
+    if (backfillErrors.length > 0) {
+      console.log(`[CRON] Backfill errors: ${backfillErrors.join('; ')}`)
+    }
 
     // ===== STEP 2: Update backtest bias from forecast_history =====
     console.log('[CRON] Updating backtest bias from historical records...')
