@@ -73,53 +73,28 @@ function ganaDe(a10: boolean, a11: boolean): KalmanDay['cur_gana'] {
 }
 
 /**
- * Extrae valores MC y Kalman de un daily_run.
- * Prioridad: 1) temp_corregida_alt guardado  2) compute on-the-fly con errores walk-forward.
- * Para datos antiguos sin modelo_activo, calcula AMBOS modelos desde temp_corregida.
+ * Extrae de un daily_run parseado los valores cur (MC) y kal (Kalman)
+ * usando los snapshots GUARDADOS (temp_corregida = ganador, temp_corregida_alt = perdedor).
+ * Esto hace que los valores sean ESTABLES — no se recalculan.
  */
-function extractModelValues(
-  cityData: any,
-  walkForwardErrors: number[] | null
-  tempBase: number | null
-): {
-  cur: number | null
-  kal: number | null
+function extractModelValues(cityData: any): {
+  cur: number | null      // MC prediction
+  kal: number | null      // Kalman prediction
   modelo_ganador: string | null
 } {
   if (!cityData?.forecast) return { cur: null, kal: null, modelo_ganador: null }
   const f = cityData.forecast
   const ganador = f.modelo_activo ?? null
   const ganadorTemp = f.temp_corregida ?? null
-  const perdedorGuardado = f.temp_corregida_alt ?? null
+  const perdedorTemp = f.temp_corregida_alt ?? null
 
-  // Caso 1: temp_corregida_alt existe (datos nuevos post-migration) → usar directamente
-  if (perdedorGuardado != null) {
-    if (ganador === 'MEJORA CONTINUA') return { cur: ganadorTemp, kal: perdedorGuardado, modelo_ganador: ganador }
-    if (ganador === 'KALMAN') return { cur: perdedorGuardado, kal: ganadorTemp, modelo_ganador: ganador }
-    return { cur: ganadorTemp, kal: perdedorGuardado, modelo_ganador: null }
+  if (ganador === 'MEJORA CONTINUA') {
+    return { cur: ganadorTemp, kal: perdedorTemp, modelo_ganador: ganador }
+  } else if (ganador === 'KALMAN') {
+    return { cur: perdedorTemp, kal: ganadorTemp, modelo_ganador: ganador }
   }
-
-  // Caso 2 & 3: sin temp_corregida_alt → calcular on-the-fly
-  const base = tempBase ?? ganadorTemp
-  if (base == null || !walkForwardErrors || walkForwardErrors.length < 5) {
-    // Sin datos suficientes para computar
-    if (ganador === 'MEJORA CONTINUA') return { cur: ganadorTemp, kal: null, modelo_ganador: ganador }
-    if (ganador === 'KALMAN') return { cur: null, kal: ganadorTemp, modelo_ganador: ganador }
-    return { cur: ganadorTemp, kal: ganadorTemp, modelo_ganador: null }
-  }
-
-  // Calcular ambas predicciones desde base usando errores walk-forward
-  const R = estimateKalmanR(walkForwardErrors)
-  const kalmanBias = kalmanNextBias(walkForwardErrors, KALMAN_Q, R)
-  // Bias de estación simple para MC
-  const stationBias = walkForwardErrors.reduce((s, e) => s + e, 0) / walkForwardErrors.length
-  const mcPred = round2(base + stationBias)
-  const kalPred = round2(base + kalmanBias)
-
-  if (ganador === 'MEJORA CONTINUA') return { cur: ganadorTemp, kal: kalPred, modelo_ganador: ganador }
-  if (ganador === 'KALMAN') return { cur: mcPred, kal: ganadorTemp, modelo_ganador: ganador }
-  // Sin modelo_activo (antiguos): la temp_corregida ES la base, computar ambos
-  return { cur: mcPred, kal: kalPred, modelo_ganador: null }
+  // Sin modelo_activo (datos antiguos): usar temp_corregida como referencia
+  return { cur: ganadorTemp, kal: ganadorTemp, modelo_ganador: null }
 }
 
 interface RunSnapshot {
@@ -129,6 +104,7 @@ interface RunSnapshot {
   kal: number | null
   modelo_ganador: string | null
   dist: number
+  temp_corregida_base: number | null
 }
 
 export async function computeBacktestKalman(daysLimit: number, slugFilter: string = ''): Promise<Record<string, KalmanCityResult>> {
@@ -178,7 +154,7 @@ export async function computeBacktestKalman(daysLimit: number, slugFilter: strin
       pendingSet.add(r.slug + '|' + r.fecha_objetivo)
     }
 
-    // ============ 3) walk-forward errors desde forecast_history (NECESARIO antes de daily_runs) ============
+    // ============ 3) Kalman metadata desde forecast_history ============
     const { data: allFhForKalman } = await client
       .from('forecast_history' as any)
       .select('id, slug, fecha_objetivo, error, temp_real')
@@ -187,7 +163,6 @@ export async function computeBacktestKalman(daysLimit: number, slugFilter: strin
       .limit(5000)
 
     const slugErrors: Record<string, number[]> = {}
-    const walkForwardErrors: Record<string, number[]> = {}
     const slugKalMeta: Record<string, { q: number; r: number; ultimo_bias: number }> = {}
 
     if (allFhForKalman) {
@@ -199,12 +174,6 @@ export async function computeBacktestKalman(daysLimit: number, slugFilter: strin
       for (const slug of allSlugs) {
         const items = (bySlug[slug] || []).sort((a, b) => a.fecha.localeCompare(b.fecha))
         slugErrors[slug] = items.map(i => i.error)
-        // Pre-computar walk-forward: para cada fecha, errores de fechas anteriores
-        for (let i = 0; i < items.length; i++) {
-          const prev = items.slice(0, i).map(x => x.error)
-          walkForwardErrors[slug + '|' + items[i].fecha] = prev
-        }
-        // Kalman meta
         const errors = slugErrors[slug]
         if (errors.length >= 5) {
           const R = estimateKalmanR(errors)
@@ -216,7 +185,7 @@ export async function computeBacktestKalman(daysLimit: number, slugFilter: strin
       }
     }
 
-    // ============ 4) daily_runs: EXTRAER SNAPSHOTS GUARDADOS ============
+    // ============ 4) daily_runs: EXTRAER SNAPSHOTS GUARDADOS ===========
     const { data: runs } = await client
       .from('daily_runs' as any)
       .select('id, fecha_ejecucion, fecha_objetivo, resultados')
@@ -247,10 +216,7 @@ export async function computeBacktestKalman(daysLimit: number, slugFilter: strin
         const cityData = parsed.find((c: any) => c.slug === slug)
         if (!cityData) continue
 
-        // Obtener temp_corregida_base y walk-forward errors para compute on-the-fly
-        const tBase = cityData.forecast?.temp_corregida_base ?? null
-        const wfKey = slug + '|' + fo
-        const { cur, kal, modelo_ganador } = extractModelValues(cityData, walkForwardErrors[wfKey] || null, tBase)
+        const { cur, kal, modelo_ganador } = extractModelValues(cityData)
         if (cur == null && kal == null) continue
 
         const entry: RunSnapshot = {
@@ -260,6 +226,7 @@ export async function computeBacktestKalman(daysLimit: number, slugFilter: strin
           kal,
           modelo_ganador,
           dist: 0,
+          temp_corregida_base: cityData.forecast?.temp_corregida_base ?? null,
         }
 
         // Determinar si es corrida 10PM o 11PM por timestamp
@@ -287,7 +254,7 @@ export async function computeBacktestKalman(daysLimit: number, slugFilter: strin
 
     if (Object.keys(run10pm).length === 0 && Object.keys(run11pm).length === 0) return {}
 
-    // ============ 5) Fechas válidas ============
+    // ============ 5) Fechas válidas ===========
     const validTargets: Record<string, string[]> = {}
     const addFecha = (slug: string, fecha: string) => {
       if (!validTargets[slug]) validTargets[slug] = []
@@ -306,7 +273,7 @@ export async function computeBacktestKalman(daysLimit: number, slugFilter: strin
       addFecha(slug, fecha)
     }
 
-    // ============ 6) Metadata del modelo actual (última corrida) ============
+    // ============ 6) Metadata del modelo actual (última corrida) ===========
     const slugModelo: Record<string, string> = {}
     const slugPipeline: Record<string, PipelineStep[]> = {}
 
@@ -327,7 +294,7 @@ export async function computeBacktestKalman(daysLimit: number, slugFilter: strin
       }
     }
 
-    // ============ 7) Resultados finales — VALORES ESTABLES desde snapshots ============
+    // ============ 7) Resultados finales ===========
     const ciudades: Record<string, KalmanCityResult> = {}
 
     Object.keys(validTargets).forEach(slug => {
@@ -468,62 +435,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   try {
     const daysLimit = parseInt(req.query.dias as string || '60') || 60
     const slugFilter = (req.query.ciudad as string || '').trim()
-    const debug = req.query.debug === '1'
-
-    if (debug) {
-      // DEBUG MODE: return raw diagnostic info
-      const client = createClient(supabaseUrl, supabaseKey)
-      const fecha = (req.query.fecha as string) || '2026-08-10'
-      const slug = slugFilter || 'seoul'
-
-      const { data: runs } = await client
-        .from('daily_runs' as any)
-        .select('id, fecha_ejecucion, fecha_objetivo, resultados')
-        .eq('fecha_objetivo', fecha)
-        .order('fecha_ejecucion', { ascending: false } as any)
-        .limit(2)
-
-      const debugInfo: any = { fecha, slug, runs_found: (runs as any[])?.length || 0, runs: [] }
-
-      for (const run of (runs as any[]) ?? []) {
-        let parsed: any[]
-        try { parsed = JSON.parse(run.resultados) } catch { continue }
-        const cityData = parsed.find((c: any) => c.slug === slug)
-        if (!cityData) continue
-        const f = cityData.forecast || {}
-        debugInfo.runs.push({
-          fecha_ejecucion: run.fecha_ejecucion,
-          modelo_activo: f.modelo_activo,
-          temp_corregida: f.temp_corregida,
-          temp_corregida_alt: f.temp_corregida_alt,
-          temp_corregida_base: f.temp_corregida_base,
-          modelo_alt: f.modelo_alt,
-          forecast_keys: Object.keys(f).sort(),
-        })
-      }
-
-      // Check walkForwardErrors for this slug+fecha
-      const { data: fhRecords } = await client
-        .from('forecast_history' as any)
-        .select('id, slug, fecha_objetivo, error, temp_real')
-        .eq('slug', slug as any)
-        .not('error', 'is', null as any)
-        .order('fecha_objetivo', { ascending: true } as any)
-        .limit(500)
-      const items = ((fhRecords as any[]) ?? []).sort((a: any, b: any) => a.fecha_objetivo.localeCompare(b.fecha_objetivo))
-      const before = items.filter((r: any) => r.fecha_objetivo < fecha)
-      debugInfo.walkforward = {
-        total_fh_records: items.length,
-        unique_fechas: [...new Set(items.map((r: any) => r.fecha_objetivo))].length,
-        before_fecha_count: before.length,
-        before_fecha_errors: before.map((r: any) => r.error),
-        before_fecha_mean: before.length > 0 ? (before.reduce((s: number, r: any) => s + r.error, 0) / before.length).toFixed(6) : null,
-        key_used: `${slug}|${fecha}`,
-      }
-
-      return res.status(200).json(debugInfo)
-    }
-
     const ciudades = await computeBacktestKalman(daysLimit, slugFilter)
     return res.status(200).json({ ciudades })
   } catch (error) {
