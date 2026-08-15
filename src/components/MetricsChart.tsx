@@ -56,7 +56,7 @@ export default function MetricsChart() {
   // Chart data: pivot daily errors into rows per date
   const chartData = useMemo(() => {
     if (!data) return []
-    const byDate = new Map<string, Record<string, number>>()
+    const byDate = new Map<string, Record<string, any>>()
     for (const d of data.daily) {
       if (!byDate.has(d.fecha)) byDate.set(d.fecha, { fecha: d.fecha })
       byDate.get(d.fecha)![d.slug] = +d.error.toFixed(2)
@@ -180,8 +180,7 @@ export default function MetricsChart() {
                     name={name}
                     stroke={color}
                     strokeWidth={selectedCity ? 2.5 : 1.5}
-                    dot={chartData.length <= 40}
-                    dotSize={3}
+                    dot={chartData.length <= 40 ? { r: 3 } : false}
                     activeDot={{ r: 4 }}
                     connectNulls
                   />
