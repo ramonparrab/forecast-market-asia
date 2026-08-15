@@ -436,7 +436,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const daysLimit = parseInt(req.query.dias as string || '60') || 60
     const slugFilter = (req.query.ciudad as string || '').trim()
     const ciudades = await computeBacktestKalman(daysLimit, slugFilter)
-    return res.status(200).json({ ciudades })
+    return res.status(200).json({ ciudades, _ver: 'v3-revert-simple-' + Date.now() })
   } catch (error) {
     console.error('[backtest-kalman]', error)
     return res.status(500).json({ error: (error as Error).message })
