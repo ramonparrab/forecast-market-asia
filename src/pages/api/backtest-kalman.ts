@@ -178,7 +178,45 @@ export async function computeBacktestKalman(daysLimit: number, slugFilter: strin
       pendingSet.add(r.slug + '|' + r.fecha_objetivo)
     }
 
-    // ============ 3) daily_runs: EXTRAER SNAPSHOTS GUARDADOS ============
+    // ============ 3) walk-forward errors desde forecast_history (NECESARIO antes de daily_runs) ============
+    const { data: allFhForKalman } = await client
+      .from('forecast_history' as any)
+      .select('id, slug, fecha_objetivo, error, temp_real')
+      .not('error', 'is', null as any)
+      .order('fecha_objetivo', { ascending: true } as any)
+      .limit(5000)
+
+    const slugErrors: Record<string, number[]> = {}
+    const walkForwardErrors: Record<string, number[]> = {}
+    const slugKalMeta: Record<string, { q: number; r: number; ultimo_bias: number }> = {}
+
+    if (allFhForKalman) {
+      const bySlug: Record<string, { fecha: string; error: number }[]> = {}
+      for (const r of allFhForKalman as any[]) {
+        if (!bySlug[r.slug]) bySlug[r.slug] = []
+        bySlug[r.slug].push({ fecha: r.fecha_objetivo, error: r.error })
+      }
+      for (const slug of allSlugs) {
+        const items = (bySlug[slug] || []).sort((a, b) => a.fecha.localeCompare(b.fecha))
+        slugErrors[slug] = items.map(i => i.error)
+        // Pre-computar walk-forward: para cada fecha, errores de fechas anteriores
+        for (let i = 0; i < items.length; i++) {
+          const prev = items.slice(0, i).map(x => x.error)
+          walkForwardErrors[slug + '|' + items[i].fecha] = prev
+        }
+        // Kalman meta
+        const errors = slugErrors[slug]
+        if (errors.length >= 5) {
+          const R = estimateKalmanR(errors)
+          const ultimoBias = kalmanNextBias(errors, KALMAN_Q, R)
+          slugKalMeta[slug] = { q: KALMAN_Q, r: round2(R), ultimo_bias: round2(ultimoBias) }
+        } else {
+          slugKalMeta[slug] = { q: KALMAN_Q, r: 1.65, ultimo_bias: 0 }
+        }
+      }
+    }
+
+    // ============ 4) daily_runs: EXTRAER SNAPSHOTS GUARDADOS ============
     const { data: runs } = await client
       .from('daily_runs' as any)
       .select('id, fecha_ejecucion, fecha_objetivo, resultados')
@@ -249,7 +287,7 @@ export async function computeBacktestKalman(daysLimit: number, slugFilter: strin
 
     if (Object.keys(run10pm).length === 0 && Object.keys(run11pm).length === 0) return {}
 
-    // ============ 4) Fechas válidas ============
+    // ============ 5) Fechas válidas ============
     const validTargets: Record<string, string[]> = {}
     const addFecha = (slug: string, fecha: string) => {
       if (!validTargets[slug]) validTargets[slug] = []
@@ -268,10 +306,9 @@ export async function computeBacktestKalman(daysLimit: number, slugFilter: strin
       addFecha(slug, fecha)
     }
 
-    // ============ 5) Metadata del modelo actual (última corrida) ============
+    // ============ 6) Metadata del modelo actual (última corrida) ============
     const slugModelo: Record<string, string> = {}
     const slugPipeline: Record<string, PipelineStep[]> = {}
-    const slugKalMeta: Record<string, { q: number; r: number; ultimo_bias: number }> = {}
 
     // Obtener modelo y pipeline de la última corrida
     const lastRuns = (runs as any[])?.filter((r: any) => r.fecha_objetivo)
@@ -290,45 +327,7 @@ export async function computeBacktestKalman(daysLimit: number, slugFilter: strin
       }
     }
 
-    // Kalman meta: calcular del historical (solo para info actual)
-    const { data: allFhForKalman } = await client
-      .from('forecast_history' as any)
-      .select('id, slug, fecha_objetivo, error, temp_real')
-      .not('error', 'is', null as any)
-      .order('fecha_objetivo', { ascending: true } as any)
-      .limit(5000)
-
-    // Errores históricos por ciudad y walk-forward errors por (slug, fecha)
-    const slugErrors: Record<string, number[]> = {}
-    // walkForwardErrors[slug|fecha] = errores ANTERIORES a esa fecha (para compute on-the-fly)
-    const walkForwardErrors: Record<string, number[]> = {}
-    if (allFhForKalman) {
-      const bySlug: Record<string, { fecha: string; error: number }[]> = {}
-      for (const r of allFhForKalman as any[]) {
-        if (!bySlug[r.slug]) bySlug[r.slug] = []
-        bySlug[r.slug].push({ fecha: r.fecha_objetivo, error: r.error })
-      }
-      for (const slug of allSlugs) {
-        const items = (bySlug[slug] || []).sort((a, b) => a.fecha.localeCompare(b.fecha))
-        slugErrors[slug] = items.map(i => i.error)
-        // Pre-computar walk-forward: para cada fecha, errores de fechas anteriores
-        for (let i = 0; i < items.length; i++) {
-          const prev = items.slice(0, i).map(x => x.error)
-          walkForwardErrors[slug + '|' + items[i].fecha] = prev
-        }
-        // Kalman meta
-        const errors = slugErrors[slug]
-        if (errors.length >= 5) {
-          const R = estimateKalmanR(errors)
-          const ultimoBias = kalmanNextBias(errors, KALMAN_Q, R)
-          slugKalMeta[slug] = { q: KALMAN_Q, r: round2(R), ultimo_bias: round2(ultimoBias) }
-        } else {
-          slugKalMeta[slug] = { q: KALMAN_Q, r: 1.65, ultimo_bias: 0 }
-        }
-      }
-    }
-
-    // ============ 6) Resultados finales — VALORES ESTABLES desde snapshots ============
+    // ============ 7) Resultados finales — VALORES ESTABLES desde snapshots ============
     const ciudades: Record<string, KalmanCityResult> = {}
 
     Object.keys(validTargets).forEach(slug => {
