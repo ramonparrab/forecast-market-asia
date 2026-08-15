@@ -155,14 +155,17 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           dist: 0,
         }
 
-        // Inferir por timestamp (run_type solo existe en forecast_history, no en daily_runs)
-        if (runTs >= cronTs10 && runTs < cronTs11 + 30 * 60 * 1000) {
+        // Determinar 10PM/11PM por timestamp
+        // 10PM Caracas = 02:00Z, 11PM Caracas = 03:00Z
+        // Punto medio 02:30Z como divisor
+        const midpoint = cronTs10 + 30 * 60 * 1000
+        if (runTs >= cronTs10 - 60 * 60 * 1000 && runTs < midpoint) {
           const dist = Math.abs(runTs - cronTs10)
           const prev = run10pm[key]
           if (!prev || dist < prev.dist) {
             run10pm[key] = { ...entry, dist }
           }
-        } else if (runTs >= cronTs11 - 30 * 60 * 1000) {
+        } else if (runTs >= midpoint && runTs < cronTs11 + 90 * 60 * 1000) {
           const dist = Math.abs(runTs - cronTs11)
           const prev = run11pm[key]
           if (!prev || dist < prev.dist) {

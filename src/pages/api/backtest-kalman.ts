@@ -196,16 +196,20 @@ export async function computeBacktestKalman(daysLimit: number, slugFilter: strin
           dist: 0,
         }
 
-        // Determinar si es corrida 10PM o 11PM
+        // Determinar si es corrida 10PM o 11PM por timestamp
         // 10PM Caracas = 02:00Z, 11PM Caracas = 03:00Z
-        // Inferir por timestamp (run_type solo existe en forecast_history, no en daily_runs)
-        if (runTs >= cronTs10 && runTs < cronTs11 + 30 * 60 * 1000) {
+        // Punto medio 02:30Z como divisor: < 02:30Z → 10PM, >= 02:30Z → 11PM
+        // Ventana aceptable: 01:00Z a 04:30Z (fuera de eso = ejecucion manual, descartar)
+        const midpoint = cronTs10 + 30 * 60 * 1000 // 02:30Z
+        if (runTs >= cronTs10 - 60 * 60 * 1000 && runTs < midpoint) {
+          // Ventana 10PM: 01:00Z a 02:29Z
           const dist = Math.abs(runTs - cronTs10)
           const prev = run10pm[key]
           if (!prev || dist < prev.dist) {
             run10pm[key] = { ...entry, dist }
           }
-        } else if (runTs >= cronTs11 - 30 * 60 * 1000) {
+        } else if (runTs >= midpoint && runTs < cronTs11 + 90 * 60 * 1000) {
+          // Ventana 11PM: 02:30Z a 04:30Z
           const dist = Math.abs(runTs - cronTs11)
           const prev = run11pm[key]
           if (!prev || dist < prev.dist) {
