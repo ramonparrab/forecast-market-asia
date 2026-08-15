@@ -1,6 +1,6 @@
 import { NextApiRequest, NextApiResponse } from 'next'
 import { createClient } from '@supabase/supabase-js'
-import { computeAllMejoras, PipelineStep } from '@/lib/mejora-continua-engine'
+import { PipelineStep } from '@/lib/mejora-continua-engine'
 import { kalmanNextBias, estimateKalmanR, KALMAN_Q } from '@/lib/kalman-engine'
 import { CIUDADES_ASIA } from '@/lib/cities'
 
@@ -14,21 +14,17 @@ export interface KalmanDay {
   hora_11pm: string | null
   modelo_ganador_10pm: string | null
   modelo_ganador_11pm: string | null
-  // Modelo actual (mejora continua)
   cur_10pm: number | null
   cur_11pm: number | null
   cur_err_10pm: number | null
   cur_err_11pm: number | null
   cur_gana: '10PM' | '11PM' | '10PM/11PM' | null
-  // Modelo Kalman 1D
   kal_10pm: number | null
   kal_11pm: number | null
   kal_err_10pm: number | null
   kal_err_11pm: number | null
   kal_gana: '10PM' | '11PM' | '10PM/11PM' | null
-  // Qué modelo quedó más cerca del real (referencia: 11PM, si no 10PM)
   mejor: 'actual' | 'kalman' | 'empate' | null
-  /** true si los valores vienen de snapshots guardados (estables) */
   estable: boolean
 }
 
@@ -71,42 +67,27 @@ function ganaDe(a10: boolean, a11: boolean): KalmanDay['cur_gana'] {
   if (!a10 && a11) return '11PM'
   return null
 }
-
 /**
- * Extrae de un daily_run parseado los valores cur (MC) y kal (Kalman)
- * usando los snapshots GUARDADOS (temp_corregida = ganador, temp_corregida_alt = perdedor).
- * Esto hace que los valores sean ESTABLES — no se recalculan.
+ * Computa la prediccion del modelo perdedor desde la base del ensemble.
+ * station_bias = media simple de errores historicos
+ * kalman_bias = filtro de Kalman 1D sobre mismos errores
  */
-function extractModelValues(cityData: any): {
-  cur: number | null      // MC prediction
-  kal: number | null      // Kalman prediction
-  modelo_ganador: string | null
-} {
-  if (!cityData?.forecast) return { cur: null, kal: null, modelo_ganador: null }
-  const f = cityData.forecast
-  const ganador = f.modelo_activo ?? null
-  const ganadorTemp = f.temp_corregida ?? null
-  const perdedorTemp = f.temp_corregida_alt ?? null
+function computeAltPrediction(
+  base: number,
+  walkForwardErrors: number[]
+  isKalman: boolean
+): number | null {
+  if (!walkForwardErrors || walkForwardErrors.length < 3) return null
 
-  if (ganador === 'MEJORA CONTINUA') {
-    return { cur: ganadorTemp, kal: perdedorTemp, modelo_ganador: ganador }
-  } else if (ganador === 'KALMAN') {
-    return { cur: perdedorTemp, kal: ganadorTemp, modelo_ganador: ganador }
+  if (isKalman) {
+    const R = estimateKalmanR(walkForwardErrors)
+    const bias = kalmanNextBias(walkForwardErrors, KALMAN_Q, R)
+    return round2(base + bias)
+  } else {
+    const bias = walkForwardErrors.reduce((s, e) => s + e, 0) / walkForwardErrors.length
+    return round2(base + bias)
   }
-  // Sin modelo_activo (datos antiguos): usar temp_corregida como referencia
-  return { cur: ganadorTemp, kal: ganadorTemp, modelo_ganador: null }
 }
-
-interface RunSnapshot {
-  id: number
-  fecha_ejecucion: string
-  cur: number | null
-  kal: number | null
-  modelo_ganador: string | null
-  dist: number
-  temp_corregida_base: number | null
-}
-
 export async function computeBacktestKalman(daysLimit: number, slugFilter: string = ''): Promise<Record<string, KalmanCityResult>> {
   try {
     const client = createClient(supabaseUrl, supabaseKey)
@@ -119,202 +100,158 @@ export async function computeBacktestKalman(daysLimit: number, slugFilter: strin
     const slugNames: Record<string, string> = {}
     CIUDADES_ASIA.forEach((c: any) => { slugNames[c.slug] = c.nombre })
 
-    // ============ 1) forecast_history: solo para temp_real ============
-    let fhQuery = client
+    // ============ 1) forecast_history completa ============
+    // Necesitamos: temp_pronosticada (base ensemble), temp_corregida (ganador),
+    // temp_real, error, run_type
+    const fhWhere = slugFilter
+      ? (q: any) => q.eq('slug', slugFilter).gte('fecha_objetivo', startDate.toISOString())
+      : (q: any) => q.gte('fecha_objetivo', startDate.toISOString())
+
+    const { data: fhAll } = await client
       .from('forecast_history' as any)
-      .select('id, slug, fecha_objetivo, temp_real')
-      .not('temp_real', 'is', null as any)
-
-    if (slugFilter) {
-      fhQuery = fhQuery.eq('slug', slugFilter)
-    }
-
-    const { data: fhRecords } = await fhQuery
-    // Lookup: (slug|fecha) -> { real, id } para ficar el último
-    const realMap: Record<string, { real: number; id: number }> = {}
-    for (const r of (fhRecords as any[]) ?? []) {
-      const key = r.slug + '|' + r.fecha_objetivo
-      const prev = realMap[key]
-      if (!prev || r.id > prev.id) {
-        realMap[key] = { real: r.temp_real, id: r.id }
-      }
-    }
-
-    // ============ 2) forecast_history pendientes (para mostrar días futuros) ============
-    let fhPendQuery = client
-      .from('forecast_history' as any)
-      .select('id, slug, fecha_objetivo')
-      .is('temp_real', null as any)
-    if (slugFilter) {
-      fhPendQuery = fhPendQuery.eq('slug', slugFilter)
-    }
-    const { data: fhPending } = await fhPendQuery
-    const pendingSet = new Set<string>()
-    for (const r of (fhPending as any[]) ?? []) {
-      pendingSet.add(r.slug + '|' + r.fecha_objetivo)
-    }
-
-    // ============ 3) Kalman metadata desde forecast_history ============
-    const { data: allFhForKalman } = await client
-      .from('forecast_history' as any)
-      .select('id, slug, fecha_objetivo, error, temp_real')
-      .not('error', 'is', null as any)
+      .select('id, slug, fecha_objetivo, temp_real, temp_pronosticada, temp_corregida, error, run_type')
+      .gte('fecha_objetivo', startDate.toISOString())
       .order('fecha_objetivo', { ascending: true } as any)
-      .limit(5000)
+      .limit(10000)
 
-    const slugErrors: Record<string, number[]> = {}
+    // ============ 2) forecast_snapshot: modelo_ganador por (slug, fecha, run_type) ============
+    const { data: snapshots } = await client
+      .from('forecast_snapshot' as any)
+      .select('slug, fecha_objetivo, modelo_ganador, run_type_ganadora')
+      .gte('fecha_objetivo', startDate.toISOString())
+    const snapModelo: Record<string, Record<string, string>> = {}
+    for (const s of (snapshots as any[]) ?? []) {
+      const k = s.slug + '|' + s.fecha_objetivo + '|' + s.run_type_ganadora
+      snapModelo[k] = s.modelo_ganador
+    }
+
+    // ============ 3) Build walk-forward errors y Kalman metadata ============
+    const baseBySlugFecha: Record<string, number> = {}  // slug|fecha -> temp_pronosticada
+    const walkForward: Record<string, number[]> = {}       // slug|fecha -> errors anteriores
     const slugKalMeta: Record<string, { q: number; r: number; ultimo_bias: number }> = {}
+    const errorsBySlug: Record<string, { fecha: string; error: number; base: number }[]> = {}
 
-    if (allFhForKalman) {
-      const bySlug: Record<string, { fecha: string; error: number }[]> = {}
-      for (const r of allFhForKalman as any[]) {
-        if (!bySlug[r.slug]) bySlug[r.slug] = []
-        bySlug[r.slug].push({ fecha: r.fecha_objetivo, error: r.error })
+    for (const r of (fhAll as any[]) ?? []) {
+      const base = r.temp_pronosticada
+      if (base == null) continue
+      const slug = r.slug as string
+      const fecha = r.fecha_objetivo as string
+      if (!baseBySlugFecha[slug]) baseBySlugFecha[slug] = {}
+      baseBySlugFecha[slug][fecha] = base
+      if (!errorsBySlug[slug]) errorsBySlug[slug] = []
+      errorsBySlug[slug].push({ fecha, error: r.error, base })
+    }
+    for (const slug of allSlugs) {
+      const items = (errorsBySlug[slug] || []).sort((a, b) => a.fecha.localeCompare(b.fecha))
+      const errors = items.map(i => i.error)
+      // Walk-forward errors
+      for (let i = 0; i < items.length; i++) {
+        walkForward[slug + '|' + items[i].fecha] = items.slice(0, i).map(x => x.error)
       }
-      for (const slug of allSlugs) {
-        const items = (bySlug[slug] || []).sort((a, b) => a.fecha.localeCompare(b.fecha))
-        slugErrors[slug] = items.map(i => i.error)
-        const errors = slugErrors[slug]
-        if (errors.length >= 5) {
-          const R = estimateKalmanR(errors)
-          const ultimoBias = kalmanNextBias(errors, KALMAN_Q, R)
-          slugKalMeta[slug] = { q: KALMAN_Q, r: round2(R), ultimo_bias: round2(ultimoBias) }
-        } else {
-          slugKalMeta[slug] = { q: KALMAN_Q, r: 1.65, ultimo_bias: 0 }
-        }
+      // Kalman meta
+      if (errors.length >= 5) {
+        const R = estimateKalmanR(errors)
+        const ultimoBias = kalmanNextBias(errors, KALMAN_Q, R)
+        slugKalMeta[slug] = { q: KALMAN_Q, r: round2(R), ultimo_bias: round2(ultimoBias) }
+      } else {
+        slugKalMeta[slug] = { q: KALMAN_Q, r: 1.65, ultimo_bias: 0 }
       }
     }
 
-    // ============ 4) daily_runs: EXTRAER SNAPSHOTS GUARDADOS ===========
-    const { data: runs } = await client
-      .from('daily_runs' as any)
-      .select('id, fecha_ejecucion, fecha_objetivo, resultados')
-      .gte('fecha_ejecucion', startDate.toISOString())
-      .order('fecha_ejecucion', { ascending: true } as any)
+    // ============ 4) Para cada (slug, fecha_objetivo) con temp_real, computar ambos modelos ============
+    // Usar temp_pronosticada como base (ensemble crudo, sin sesgo) y
+    // walk-forward errors para calcular las correcciones de MC y Kalman.
+    const resultadoPorFecha: Record<string, {
+      fecha: string, real: number,
+      modelo_10pm: string | null, modelo_11pm: string | null,
+      ganadorTemp_10pm: number | null, ganadorTemp_11pm: number | null,
+      cur_10pm: number | null, cur_11pm: number | null,
+      kal_10pm: number | null, kal_11pm: number | null,
+    }> = {}
 
-    // Para cada (slug|fecha), guardar la corrida 10PM y 11PM por separado
-    const run10pm: Record<string, RunSnapshot> = {}
-    const run11pm: Record<string, RunSnapshot> = {}
-    // También un mapa de TODAS las corridas para obtener fechas válidas
-    const allRunKeys = new Set<string>()
+    for (const r of (fhAll as any[]) ?? []) {
+      if (r.temp_real == null) continue
+      const slug = r.slug as string
+      const fecha = r.fecha_objetivo as string
+      const key = slug + '|' + fecha
+      const prev = resultadoPorFecha[key]
+      if (!prev || r.id > prev.id) {
+        const modeloGanador = snapModelo[key + '|' + (r.run_type || '11PM')] ?? null
+        const base = baseBySlugFecha[slug]?.[fecha]
+        if (base == null) continue
+        const wfKey = slug + '|' + fecha
+        const wfErrors = walkForward[wfKey] || []
 
-    for (const run of (runs as any[]) ?? []) {
-      const fo = run.fecha_objetivo as string
-      if (!fo) continue
-      let parsed: any[]
-      try { parsed = JSON.parse(run.resultados) } catch { continue }
-      if (!Array.isArray(parsed)) continue
+        const modeloEsKalman = modeloGanador === 'KALMAN'
+        const modeloGanador10 = snapModelo[key + '|10PM'] ?? modeloGanador
+        const modeloGanador11 = snapModelo[key + '|11PM'] ?? modeloGanador
 
-      const cronTs10 = new Date(fo + 'T02:00:00.000Z').getTime()
-      const cronTs11 = new Date(fo + 'T03:00:00.000Z').getTime()
-      const runTs = new Date(run.fecha_ejecucion).getTime()
+        // Ganador temp: el temp_corregida del registro (ya corregido por el modelo ganador)
+        const ganadorTemp = r.temp_corregida
+        // Perdedor temp: computado desde la base ensemble + bias del otro modelo
+        const perdedorTemp = computeAltPrediction(base, wfErrors, !modeloEsKalman)
 
-      for (const slug of allSlugs) {
-        const key = slug + '|' + fo
-        allRunKeys.add(key)
-
-        const cityData = parsed.find((c: any) => c.slug === slug)
-        if (!cityData) continue
-
-        const { cur, kal, modelo_ganador } = extractModelValues(cityData)
-        if (cur == null && kal == null) continue
-
-        const entry: RunSnapshot = {
-          id: run.id,
-          fecha_ejecucion: run.fecha_ejecucion,
-          cur,
-          kal,
-          modelo_ganador,
-          dist: 0,
-          temp_corregida_base: cityData.forecast?.temp_corregida_base ?? null,
-        }
-
-        // Determinar si es corrida 10PM o 11PM por timestamp
-        // 10PM Caracas = 02:00Z, 11PM Caracas = 03:00Z
-        // Punto medio 02:30Z como divisor: < 02:30Z → 10PM, >= 02:30Z → 11PM
-        // Ventana aceptable: 01:00Z a 04:30Z (fuera de eso = ejecucion manual, descartar)
-        const midpoint = cronTs10 + 30 * 60 * 1000 // 02:30Z
-        if (runTs >= cronTs10 - 60 * 60 * 1000 && runTs < midpoint) {
-          // Ventana 10PM: 01:00Z a 02:29Z
-          const dist = Math.abs(runTs - cronTs10)
-          const prev = run10pm[key]
-          if (!prev || dist < prev.dist) {
-            run10pm[key] = { ...entry, dist }
-          }
-        } else if (runTs >= midpoint && runTs < cronTs11 + 90 * 60 * 1000) {
-          // Ventana 11PM: 02:30Z a 04:30Z
-          const dist = Math.abs(runTs - cronTs11)
-          const prev = run11pm[key]
-          if (!prev || dist < prev.dist) {
-            run11pm[key] = { ...entry, dist }
+        if (prev.modelo_ganador_10pm === modeloGanador10 || !prev.modelo_ganador_10pm) {
+          resultadoPorFecha[key] = {
+            fecha, real: r.temp_real,
+            modelo_10pm: modeloGanador10,
+            modelo_11pm: modeloGanador11,
+            ganadorTemp_10pm: ganadorTemp,
+            ganadorTemp_11pm: ganadorTemp,
+            cur_10pm: modeloEsKalman ? perdedorTemp : ganadorTemp,
+            cur_11pm: modeloEsKalman ? perdedorTemp : ganadorTemp,
+            kal_10pm: modeloEsKalman ? ganadorTemp : perdedorTemp,
+            kal_11pm: modeloEsKalman ? ganadorTemp : perdedorTemp,
           }
         }
       }
     }
 
-    if (Object.keys(run10pm).length === 0 && Object.keys(run11pm).length === 0) return {}
-
-    // ============ 5) Fechas válidas ===========
-    const validTargets: Record<string, string[]> = {}
-    const addFecha = (slug: string, fecha: string) => {
-      if (!validTargets[slug]) validTargets[slug] = []
-      if (validTargets[slug].indexOf(fecha) === -1) validTargets[slug].push(fecha)
+    // ============ 5) Metadata del modelo actual (de forecast_snapshot) ============
+    const slugModelo: Record<string, string> = {}
+    for (const [k, modelos] of Object.entries(snapModelo)) {
+      // Preferir 11PM si existe, sino la primera disponible
+      slugModelo[k] = modelos['11PM'] || modelos['10PM'] || ''
     }
-    for (const key of allRunKeys) {
-      const [slug, fecha] = key.split('|')
+    // Pendientes
+    const pendingSet = new Set<string>()
+    for (const r of (fhAll as any[]) ?? []) {
+      if (r.temp_real == null) pendingSet.add(r.slug + '|' + r.fecha_objetivo)
+    }
+    const validFechas: Record<string, string[]> = {}
+    for (const [k] of Object.keys(resultadoPorFecha)) {
+      const [slug, fecha] = k.split('|')
       const daysAgo = Math.floor((endDate.getTime() - new Date(fecha + 'T12:00:00').getTime()) / (1000 * 60 * 60 * 24))
       if (daysAgo >= -1 && daysAgo <= daysLimit) {
-        addFecha(slug, fecha)
+        if (!validFechas[slug]) validFechas[slug] = []
+        validFechas[slug].push(fecha)
       }
     }
-    // Agregar pendientes
     for (const key of pendingSet) {
       const [slug, fecha] = key.split('|')
-      addFecha(slug, fecha)
+      if (!validFechas[slug]) validFechas[slug] = []
+      validFechas[slug].push(fecha)
     }
 
-    // ============ 6) Metadata del modelo actual (última corrida) ===========
-    const slugModelo: Record<string, string> = {}
-    const slugPipeline: Record<string, PipelineStep[]> = {}
-
-    // Obtener modelo y pipeline de la última corrida
-    const lastRuns = (runs as any[])?.filter((r: any) => r.fecha_objetivo)
-    if (lastRuns?.length) {
-      // Tomar la última corrida global
-      const latestRun = lastRuns[lastRuns.length - 1]
-      let latestParsed: any[]
-      try { latestParsed = JSON.parse(latestRun.resultados) } catch { /* ignore */ }
-      if (Array.isArray(latestParsed)) {
-        for (const slug of allSlugs) {
-          const cityData = latestParsed.find((c: any) => c.slug === slug)
-          if (cityData?.forecast?.modelo_activo) {
-            slugModelo[slug] = cityData.forecast.modelo_activo
-          }
-        }
-      }
-    }
-
-    // ============ 7) Resultados finales ===========
+    // ============ 6) Construir resultados finales ============
     const ciudades: Record<string, KalmanCityResult> = {}
 
-    Object.keys(validTargets).forEach(slug => {
-      const fechas = validTargets[slug]
+    for (const [slug, fechas] of Object.entries(validFechas)) {
       const resultDays: KalmanDay[] = []
-
-      for (let fi = 0; fi < fechas.length; fi++) {
-        const fecha = fechas[fi]
+      for (const fecha of fechas) {
         const key = slug + '|' + fecha
-        const r10 = run10pm[key]
-        const r11 = run11pm[key]
-        const tempReal = realMap[key]?.real ?? null
+        const d = resultadoPorFecha[key]
+        if (!d) continue
 
-        // Necesitamos al menos una corrida
-        if (!r10 && !r11) continue
-
-        const cur10 = r10?.cur ?? null
-        const cur11 = r11?.cur ?? null
-        const kal10 = r10?.kal ?? null
-        const kal11 = r11?.kal ?? null
+        const tempReal = d.real
+        const modelo10 = d.modelo_10pm
+        const modelo11 = d.modelo_11pm
+        const ganadorTemp10 = d.ganadorTemp_10pm
+        const ganadorTemp11 = d.ganadorTemp_11pm
+        const cur10 = d.cur_10pm
+        const cur11 = d.cur_11pm
+        const kal10 = d.kal_10pm
+        const kal11 = d.kal_11pm
 
         let curErr10: number | null = null
         let curErr11: number | null = null
@@ -323,21 +260,22 @@ export async function computeBacktestKalman(daysLimit: number, slugFilter: strin
         let curGana: KalmanDay['cur_gana'] = null
         let kalGana: KalmanDay['kal_gana'] = null
         let mejor: KalmanDay['mejor'] = null
-
-        // Verificar si tenemos valores estables (ambos modelos guardados)
-        const estable = (r10?.cur != null && r10?.kal != null) || (r11?.cur != null && r11?.kal != null)
+        const estable = (cur10 != null && kal10 != null) || (cur11 != null && kal11 != null)
 
         if (tempReal !== null) {
           if (cur10 !== null) curErr10 = round2(Math.abs(cur10 - tempReal))
           if (cur11 !== null) curErr11 = round2(Math.abs(cur11 - tempReal))
           if (kal10 !== null) kalErr10 = round2(Math.abs(kal10 - tempReal))
           if (kal11 !== null) kalErr11 = round2(Math.abs(kal11 - tempReal))
-
           const rReal = roundInt(tempReal)
-          curGana = ganaDe(cur10 !== null && roundInt(cur10) === rReal, cur11 !== null && roundInt(cur11) === rReal)
-          kalGana = ganaDe(kal10 !== null && roundInt(kal10) === rReal, kal11 !== null && roundInt(kal11) === rReal)
-
-          // Referencia para "mejor modelo": 11PM si existe, si no 10PM
+          curGana = ganaDe(
+            cur10 !== null && roundInt(cur10) === rReal,
+            cur11 !== null && roundInt(cur11) === rReal
+          )
+          kalGana = ganaDe(
+            kal10 !== null && roundInt(kal10) === rReal,
+            kal11 !== null && roundInt(kal11) === rReal
+          )
           const curRef = curErr11 !== null ? curErr11 : curErr10
           const kalRef = kalErr11 !== null ? kalErr11 : kalErr10
           if (curRef !== null && kalRef !== null) {
@@ -346,30 +284,24 @@ export async function computeBacktestKalman(daysLimit: number, slugFilter: strin
             else mejor = 'empate'
           }
         }
-
         resultDays.push({
           fecha_objetivo: fecha,
           temp_real: tempReal,
-          hora_10pm: r10?.fecha_ejecucion ?? null,
-          hora_11pm: r11?.fecha_ejecucion ?? null,
-          modelo_ganador_10pm: r10?.modelo_ganador ?? null,
-          modelo_ganador_11pm: r11?.modelo_ganador ?? null,
-          cur_10pm: cur10,
-          cur_11pm: cur11,
-          cur_err_10pm: curErr10,
-          cur_err_11pm: curErr11,
+          hora_10pm: modelo10 ? modelo10 : null,
+          hora_11pm: modelo11 ? modelo11 : null,
+          modelo_ganador_10pm: modelo10,
+          modelo_ganador_11pm: modelo11,
+          cur_10pm: cur10, cur_11pm: cur11,
+          cur_err_10pm: curErr10, cur_err_11pm: curErr11,
           cur_gana: curGana,
-          kal_10pm: kal10,
-          kal_11pm: kal11,
-          kal_err_10pm: kalErr10,
-          kal_err_11pm: kalErr11,
+          kal_10pm: kal10, kal_11pm: kal11,
+          kal_err_10pm: kalErr10, kal_err_11pm: kalErr11,
           kal_gana: kalGana,
-          mejor,
-          estable,
+          mejor, estable,
         })
       }
 
-      if (resultDays.length === 0) return
+      if (resultDays.length === 0) continue
       resultDays.sort((a, b) => a.fecha_objetivo.localeCompare(b.fecha_objetivo))
 
       let curMae = 0, kalMae = 0, cntErr = 0
@@ -378,25 +310,25 @@ export async function computeBacktestKalman(daysLimit: number, slugFilter: strin
       let kal10c = 0, kal11c = 0, kalAmbos = 0
       let pendientes = 0
 
-      for (const d of resultDays) {
-        if (d.temp_real === null) { pendientes++; continue }
-        const curRef = d.cur_err_11pm !== null ? d.cur_err_11pm : d.cur_err_10pm
-        const kalRef = d.kal_err_11pm !== null ? d.kal_err_11pm : d.kal_err_10pm
+      for (const day of resultDays) {
+        if (day.temp_real === null) { pendientes++; continue }
+        const curRef = day.cur_err_11pm !== null ? day.cur_err_11pm : day.cur_err_10pm
+        const kalRef = day.kal_err_11pm !== null ? day.kal_err_11pm : day.kal_err_10pm
         if (curRef !== null && kalRef !== null) {
           curMae += curRef
           kalMae += kalRef
           cntErr++
         }
-        if (d.cur_gana) {
+        if (day.cur_gana) {
           curHits++
-          if (d.cur_gana === '10PM/11PM') curAmbos++
-          else if (d.cur_gana === '10PM') cur10c++
+          if (day.cur_gana === '10PM/11PM') curAmbos++
+          else if (day.cur_gana === '10PM') cur10c++
           else cur11c++
         }
-        if (d.kal_gana) {
+        if (day.kal_gana) {
           kalHits++
-          if (d.kal_gana === '10PM/11PM') kalAmbos++
-          else if (d.kal_gana === '10PM') kal10c++
+          if (day.kal_gana === '10PM/11PM') kalAmbos++
+          else if (day.kal_gana === '10PM') kal10c++
           else kal11c++
         }
       }
@@ -404,24 +336,19 @@ export async function computeBacktestKalman(daysLimit: number, slugFilter: strin
       ciudades[slug] = {
         slug,
         nombre: slugNames[slug] || slug,
-        modelo_actual: slugModelo[slug] || 'combinado_estandar',
-        pipeline_actual: slugPipeline[slug] || [],
+        modelo_actual: slugModelo[slug] || '',
+        pipeline_actual: [],
         kalman: slugKalMeta[slug] || { q: KALMAN_Q, r: 1.65, ultimo_bias: 0 },
         days: resultDays,
         cur_mae: cntErr > 0 ? round2(curMae / cntErr) : null,
         kal_mae: cntErr > 0 ? round2(kalMae / cntErr) : null,
-        cur_hits: curHits,
-        kal_hits: kalHits,
-        cur_gana_10pm: cur10c,
-        cur_gana_11pm: cur11c,
-        cur_ambos: curAmbos,
-        kal_gana_10pm: kal10c,
-        kal_gana_11pm: kal11c,
-        kal_ambos: kalAmbos,
+        cur_hits: curHits, kal_hits: kalHits,
+        cur_gana_10pm: cur10c, cur_gana_11pm: cur11c, cur_ambos: curAmbos,
+        kal_gana_10pm: kal10c, kal_gana_11pm: kal11c, kal_ambos: kalAmbos,
         total_dias: resultDays.filter(d => d.temp_real !== null).length,
         pendientes,
       }
-    })
+    }
 
     return ciudades
   } catch (error) {
@@ -436,7 +363,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const daysLimit = parseInt(req.query.dias as string || '60') || 60
     const slugFilter = (req.query.ciudad as string || '').trim()
     const ciudades = await computeBacktestKalman(daysLimit, slugFilter)
-    return res.status(200).json({ ciudades, _ver: 'v3-revert-simple-' + Date.now() })
+    return res.status(200).json({ ciudades })
   } catch (error) {
     console.error('[backtest-kalman]', error)
     return res.status(500).json({ error: (error as Error).message })
