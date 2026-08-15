@@ -156,7 +156,7 @@ export async function computeBacktestKalman(daysLimit: number, slugFilter: strin
     // ============ 3) daily_runs: EXTRAER SNAPSHOTS GUARDADOS ============
     const { data: runs } = await client
       .from('daily_runs' as any)
-      .select('id, fecha_ejecucion, fecha_objetivo, resultados, run_type')
+      .select('id, fecha_ejecucion, fecha_objetivo, resultados')
       .gte('fecha_ejecucion', startDate.toISOString())
       .order('fecha_ejecucion', { ascending: true } as any)
 
@@ -198,15 +198,14 @@ export async function computeBacktestKalman(daysLimit: number, slugFilter: strin
 
         // Determinar si es corrida 10PM o 11PM
         // 10PM Caracas = 02:00Z, 11PM Caracas = 03:00Z
-        // Usar run_type si está disponible, sino inferir por timestamp
-        const rt = run.run_type
-        if (rt === '10PM' || (!rt && runTs >= cronTs10 && runTs < cronTs11 + 30 * 60 * 1000)) {
+        // Inferir por timestamp (run_type solo existe en forecast_history, no en daily_runs)
+        if (runTs >= cronTs10 && runTs < cronTs11 + 30 * 60 * 1000) {
           const dist = Math.abs(runTs - cronTs10)
           const prev = run10pm[key]
           if (!prev || dist < prev.dist) {
             run10pm[key] = { ...entry, dist }
           }
-        } else if (rt === '11PM' || (!rt && runTs >= cronTs11 - 30 * 60 * 1000)) {
+        } else if (runTs >= cronTs11 - 30 * 60 * 1000) {
           const dist = Math.abs(runTs - cronTs11)
           const prev = run11pm[key]
           if (!prev || dist < prev.dist) {
