@@ -92,7 +92,7 @@ export async function getServerSideProps() {
         analysis = parseRun(allRuns[0])
       } else {
         // Hay 10PM y 11PM — usar snapshots para decidir
-        const snapWins: Record<string, string> = {}
+        const snapWins: Record<string, number> = {}
         for (const s of (snapshots ?? [])) {
           snapWins[s.run_type_ganadora] = (snapWins[s.run_type_ganadora] ?? 0) + 1
         }

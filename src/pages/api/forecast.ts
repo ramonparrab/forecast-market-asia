@@ -39,9 +39,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       }
     } catch { /* no saved cron data — use freshly computed values */ }
 
-    // Determinar run_type para corridas manuales
-    const caracasOffset = -4 * 60 * 60000
-    const nowCaracas = new Date(Date.now() + caracasOffset)
+    // Determinar run_type para corridas manuales (reusar nowCaracas ya calculado arriba)
     const caracasHour = nowCaracas.getUTCHours()
     const runLabel = caracasHour >= 22 || caracasHour < 1
       ? (caracasHour >= 23 || caracasHour < 1 ? '11PM' : '10PM')
