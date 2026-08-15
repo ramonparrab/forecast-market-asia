@@ -1,329 +1,277 @@
-import { useState, useEffect } from 'react'
-import { GlobalMetrics } from '@/types'
-import { CIUDADES_ASIA } from '@/lib/cities'
+import { useState, useEffect, useMemo } from 'react'
 import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
-  ResponsiveContainer, Legend
+  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
+  ResponsiveContainer, ReferenceLine, ReferenceArea, Legend
 } from 'recharts'
+import { CIUDADES_ASIA } from '@/lib/cities'
 
-interface MetricsChartProps {
-  metrics: GlobalMetrics | null
+const CITY_COLORS: Record<string, string> = {
+  seoul: '#3b82f6',
+  beijing: '#ef4444',
+  shanghai: '#f59e0b',
+  'hong-kong': '#10b981',
+  tokyo: '#8b5cf6',
+  shenzhen: '#ec4899',
+  wuhan: '#06b6d4',
+  chongqing: '#f97316',
+  chengdu: '#84cc16',
+  singapore: '#e879f9',
 }
 
-function CityMetricRow({ ciudad, mae, rmse, bias, muestras, fuente }: {
-  ciudad: string; mae: string; rmse: string; bias: string; muestras: number; fuente: string
-}) {
-  return (
-    <tr className="border-t border-gray-700/30 hover:bg-slate-800/50">
-      <td className="p-2 text-gray-300 font-medium">{ciudad}</td>
-      <td className="p-2 text-blue-400 font-mono">{mae}</td>
-      <td className="p-2 text-amber-400 font-mono">{rmse}</td>
-      <td className={`p-2 font-mono ${Math.abs(parseFloat(bias)) < 0.5 ? 'text-emerald-400' : 'text-red-400'}`}>{bias}</td>
-      <td className="p-2 text-gray-500 text-xs">{muestras}</td>
-      <td className="p-2 text-[10px] text-gray-500">{fuente}</td>
-    </tr>
-  )
+const PERIODS = [
+  { key: '30', label: '30 días' },
+  { key: '60', label: '60 días' },
+  { key: '90', label: '90 días' },
+  { key: 'all', label: 'Todo' },
+]
+
+type PrecisionData = {
+  daily: { fecha: string; slug: string; ciudad: string; error: number }[]
+  perCity: {
+    slug: string; ciudad: string; mae: number; rmse: number; bias: number
+    accuracy_pct: number; muestras: number
+    best_day: { fecha: string; error: number }; worst_day: { fecha: string; error: number }
+  }[]
+  global: { mae: number; rmse: number; bias: number; accuracy_pct: number; total: number; dias: number }
+  period: number | 'all'
 }
 
-export default function MetricsChart({ metrics }: MetricsChartProps) {
-  const [btData, setBtData] = useState<any>(null)
-  const [btLoading, setBtLoading] = useState(false)
-  const [btError, setBtError] = useState<string | null>(null)
-  const [biasCorrections, setBiasCorrections] = useState<Record<string, number>>({})
-  const [bcLoading, setBcLoading] = useState(false)
+export default function MetricsChart() {
+  const [period, setPeriod] = useState('30')
+  const [data, setData] = useState<PrecisionData | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [selectedCity, setSelectedCity] = useState<string | null>(null)
 
-  const live = metrics?.total_muestras ? metrics : null
-
-  // Load backtest data on mount
   useEffect(() => {
-    fetchBacktestData()
-    fetchBiasCorrections()
-  }, [])
+    setLoading(true)
+    setError(null)
+    fetch(`/api/precision?days=${period}`)
+      .then(r => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`)))
+      .then(setData)
+      .catch(e => setError(e.message))
+      .finally(() => setLoading(false))
+  }, [period])
 
-  async function fetchBacktestData() {
-    try {
-      const resp = await fetch('/api/backtest', { signal: AbortSignal.timeout(10000) })
-      if (resp.ok) {
-        const json = await resp.json()
-        if (json?.data) setBtData(json.data)
-      }
-    } catch { /* silent */ }
-  }
-
-  async function fetchBiasCorrections() {
-    setBcLoading(true)
-    try {
-      const resp = await fetch('/api/backtest-bias', { signal: AbortSignal.timeout(8000) })
-      if (resp.ok) {
-        const json = await resp.json()
-        if (json?.active_corrections) setBiasCorrections(json.active_corrections)
-      }
-    } catch { /* silent */ }
-    setBcLoading(false)
-  }
-
-  async function run30dBacktest() {
-    setBtLoading(true)
-    setBtError(null)
-    try {
-      const resp = await fetch('/api/backtest?days=30', { method: 'POST', signal: AbortSignal.timeout(60000) })
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
-      const json = await resp.json()
-      if (json?.data) setBtData(json.data)
-      await fetchBiasCorrections()
-    } catch (e: any) {
-      setBtError(e.message || 'Error')
-    } finally {
-      setBtLoading(false)
+  // Chart data: pivot daily errors into rows per date
+  const chartData = useMemo(() => {
+    if (!data) return []
+    const byDate = new Map<string, Record<string, number>>()
+    for (const d of data.daily) {
+      if (!byDate.has(d.fecha)) byDate.set(d.fecha, { fecha: d.fecha })
+      byDate.get(d.fecha)![d.slug] = +d.error.toFixed(2)
     }
+    return Array.from(byDate.values()).sort((a, b) => a.fecha.localeCompare(b.fecha))
+  }, [data])
+
+  // Slugs in data
+  const slugs = useMemo(() => {
+    if (!data) return []
+    return Array.from(new Set(data.daily.map(d => d.slug)))
+  }, [data])
+
+  if (loading) {
+    return (
+      <div className="card text-center py-16">
+        <div className="mb-3 text-3xl animate-pulse">📈</div>
+        <p className="text-gray-400 text-sm">Cargando precisión...</p>
+      </div>
+    )
   }
 
-  const bt = btData?.overall_mae != null ? btData : null
-  const hasBt = bt && bt.total_muestras > 0
-  const hasLive = !!live
+  if (error || !data || data.perCity.length === 0) {
+    return (
+      <div className="card text-center py-12">
+        <p className="text-red-400 text-sm">⚠️ {error || 'No hay datos con temperatura real verificada'}</p>
+      </div>
+    )
+  }
 
-  // Build ALL city names from both sources
-  const cityNames = new Set<string>()
-  if (hasLive) for (const c of live.por_ciudad) cityNames.add(c.ciudad)
-  if (hasBt) for (const c of bt.por_ciudad) cityNames.add(c.ciudad)
-
-  const sortedCities = Array.from(cityNames).sort()
-
-  // City name → slug mapping
-  const nameToSlug: Record<string, string> = {}
-  for (const c of CIUDADES_ASIA) { nameToSlug[c.nombre] = c.slug }
-
-  // Per-city table data
-  const cityRows = sortedCities.map(name => {
-    const l = hasLive ? live.por_ciudad.find(c => c.ciudad === name) : null
-    const b = hasBt ? bt.por_ciudad.find((c: any) => c.ciudad === name) : null
-    const slug = nameToSlug[name] || name.toLowerCase().replace(/\s+/g, '-')
-    const correction = biasCorrections[slug]
-    return {
-      ciudad: name,
-      live_mae: l?.mae, live_rmse: l?.rmse, live_bias: l?.bias, live_n: l?.muestras ?? 0,
-      bt_mae: b?.mae, bt_rmse: b?.rmse, bt_bias: b?.bias, bt_n: b?.muestras ?? 0,
-      correction,
-    }
-  })
-
-  const showTable = cityRows.length > 0
-
-  // Bar chart data (prefer live, fallback to backtest)
-  const barData = cityRows.map(r => ({
-    ciudad: r.ciudad,
-    MAE: r.live_mae ?? r.bt_mae ?? 0,
-    fuente: r.live_mae != null ? 'Live' : 'Backtest',
-  }))
-
-  // Bias corrections chart
-  const biasBarData = cityRows
-    .filter(r => r.correction != null)
-    .map(r => ({ ciudad: r.ciudad, correccion: r.correction }))
+  const g = data.global
 
   return (
-    <div className="space-y-6">
-      {/* Action: Run Backtest */}
+    <div className="space-y-5">
+      {/* Header + Period selector */}
       <div className="card">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <div>
-            <h2 className="text-lg font-semibold text-white">📈 Precisión por Ciudad</h2>
+            <h2 className="text-lg font-semibold text-white">📈 Desviación del Pronóstico vs Real</h2>
             <p className="text-xs text-gray-500 mt-0.5">
-              {hasLive
-                ? `${live.total_muestras} registros en vivo · ${hasBt ? `${bt.total_muestras} de backtest` : 'backtest disponible bajo demanda'}`
-                : hasBt
-                  ? `${bt.total_muestras} registros de backtest (${bt.total_dias} días)`
-                  : 'Ejecuta backtest para generar métricas históricas'}
+              {g.dias} días · {g.total} registros · MAE global {g.mae}°C · {g.accuracy_pct}% dentro de ±1°C
             </p>
           </div>
-          <button
-            onClick={run30dBacktest}
-            disabled={btLoading}
-            className="btn-primary flex items-center gap-2 text-sm px-4 py-2"
-          >
-            {btLoading ? (
-              <>
-                <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-white/30 border-t-white"></span>
-                Ejecutando...
-              </>
-            ) : (
-              <>
-                <span>⏳</span>
-                Backtest 30d
-              </>
-            )}
-          </button>
-        </div>
-        {btError && (
-          <div className="mt-3 rounded-lg bg-red-500/10 p-3 text-sm text-red-400">⚠️ {btError}</div>
-        )}
-        {btLoading && (
-          <div className="mt-3 h-1 rounded-full bg-slate-700 overflow-hidden">
-            <div className="h-full rounded-full bg-blue-500 animate-pulse w-3/4" />
+          <div className="flex gap-1">
+            {PERIODS.map(p => (
+              <button
+                key={p.key}
+                onClick={() => { setPeriod(p.key); setSelectedCity(null) }}
+                className={`rounded-md px-3 py-1.5 text-xs font-medium transition ${
+                  period === p.key
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-slate-800 text-gray-400 hover:text-gray-200'
+                }`}
+              >
+                {p.label}
+              </button>
+            ))}
           </div>
-        )}
+        </div>
       </div>
 
-      {/* Bias corrections */}
-      {biasBarData.length > 0 && (
-        <div className="card">
-          <h3 className="mb-3 text-sm font-medium text-gray-400">
-            🔧 Correcciones activas por ciudad {bcLoading && <span className="text-blue-400 animate-pulse">cargando...</span>}
+      {/* Global summary cards */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <MiniCard label="MAE" value={`${g.mae}°C`} sub="Error absoluto medio" color="text-blue-400" />
+        <MiniCard label="Sesgo" value={`${g.bias > 0 ? '+' : ''}${g.bias}°C`} sub={g.bias > 0.2 ? 'Sobreestima' : g.bias < -0.2 ? 'Subestima' : 'Neutral'} color={Math.abs(g.bias) < 0.3 ? 'text-emerald-400' : 'text-amber-400'} />
+        <MiniCard label="±1°C" value={`${g.accuracy_pct}%`} sub="Aciertos" color="text-emerald-400" />
+        <MiniCard label="RMSE" value={`${g.rmse}°C`} sub="Error cuadrático" color="text-amber-400" />
+      </div>
+
+      {/* Chart: all cities */}
+      <div className="card">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-sm font-medium text-gray-400">
+            Desviación diaria por ciudad
+            <span className="text-gray-600 ml-2">(pronóstico − real)</span>
           </h3>
-          <p className="text-xs text-gray-500 mb-3">
-            Ajuste aplicado automáticamente al pronóstico de cada ciudad basado en el error histórico (backtest). Corrección positiva = el modelo subestima, se suma temperatura.
-          </p>
-          <div className="h-48">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={biasBarData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-                <XAxis dataKey="ciudad" stroke="#64748b" tick={{ fontSize: 10 }} />
-                <YAxis stroke="#64748b" tick={{ fontSize: 10 }} />
-                <Tooltip
-                  contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '8px' }}
-                  labelStyle={{ color: '#f1f5f9' }}
-                  formatter={(value: number) => [`${value > 0 ? '+' : ''}${value.toFixed(2)}°C`, 'Corrección']}
-                />
-                <Bar dataKey="correccion" fill="#f59e0b" radius={[4, 4, 0, 0]} name="Corrección °C" />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
+          {selectedCity && (
+            <button onClick={() => setSelectedCity(null)} className="text-xs text-blue-400 hover:text-blue-300">↻ Ver todas</button>
+          )}
         </div>
-      )}
-
-      {/* Live vs Backtest summary (when both available) */}
-      {hasLive && hasBt && (
-        <div className="card">
-          <h3 className="mb-3 text-sm font-medium text-gray-400">Comparativa global: Live vs Backtest</h3>
-          <div className="grid gap-3 sm:grid-cols-4">
-            <SummaryCard label="MAE Live" value={`${live.overall_mae.toFixed(2)}°`} sub={`Backtest: ${bt.overall_mae.toFixed(2)}°`} color="text-emerald-400" />
-            <SummaryCard label="RMSE Live" value={`${live.overall_rmse.toFixed(2)}°`} sub={`Backtest: ${bt.overall_rmse.toFixed(2)}°`} color="text-amber-400" />
-            <SummaryCard label="Bias Live" value={`${live.overall_bias > 0 ? '+' : ''}${live.overall_bias.toFixed(2)}°`} sub={`Backtest: ${bt.overall_bias > 0 ? '+' : ''}${bt.overall_bias.toFixed(2)}°`} color={Math.abs(live.overall_bias) < 0.5 ? 'text-emerald-400' : 'text-red-400'} />
-            <SummaryCard label="±1°C Live" value={`${live.accuracy_pct.toFixed(1)}%`} sub={`Backtest: ${bt.overall_accuracy_1c.toFixed(1)}%`} color="text-emerald-400" />
-          </div>
+        <div className="h-80">
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart data={chartData} margin={{ top: 5, right: 10, left: -10, bottom: 5 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
+              <XAxis
+                dataKey="fecha"
+                stroke="#475569"
+                tick={{ fontSize: 9 }}
+                tickFormatter={v => v.slice(5)}
+              />
+              <YAxis
+                stroke="#475569"
+                tick={{ fontSize: 10 }}
+                tickFormatter={v => `${v > 0 ? '+' : ''}${v}°`}
+                domain={['auto', 'auto']}
+              />
+              <Tooltip
+                contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #334155', borderRadius: '8px', fontSize: 11 }}
+                labelStyle={{ color: '#94a3b8' }}
+                formatter={(value: number, name: string) => [`${value > 0 ? '+' : ''}${value}°C`, name]}
+              />
+              {/* ±1°C target band */}
+              <ReferenceArea y1={-1} y2={1} fill="#10b981" fillOpacity={0.06} />
+              <ReferenceLine y={0} stroke="#475569" strokeDasharray="4 4" />
+              <ReferenceLine y={1} stroke="#10b981" strokeDasharray="2 4" strokeOpacity={0.4} />
+              <ReferenceLine y={-1} stroke="#10b981" strokeDasharray="2 4" strokeOpacity={0.4} />
+              <Legend
+                wrapperStyle={{ fontSize: 10 }}
+                iconType="line"
+                iconSize={12}
+              />
+              {(selectedCity ? [selectedCity] : slugs).map(slug => {
+                const city = CIUDADES_ASIA.find(c => c.slug === slug)
+                const name = city?.nombre ?? slug
+                const color = CITY_COLORS[slug] ?? '#6b7280'
+                return (
+                  <Line
+                    key={slug}
+                    type="monotone"
+                    dataKey={slug}
+                    name={name}
+                    stroke={color}
+                    strokeWidth={selectedCity ? 2.5 : 1.5}
+                    dot={chartData.length <= 40}
+                    dotSize={3}
+                    activeDot={{ r: 4 }}
+                    connectNulls
+                  />
+                )
+              })}
+            </LineChart>
+          </ResponsiveContainer>
         </div>
-      )}
+        <p className="mt-2 text-[10px] text-gray-600 text-center">
+          Línea en 0 = perfecto · Zona verde = dentro de ±1°C · Click en leyenda para aislar ciudad
+        </p>
+      </div>
 
-      {/* Only backtest summary */}
-      {!hasLive && hasBt && (
-        <div className="card">
-          <h3 className="mb-3 text-sm font-medium text-gray-400">Métricas de Backtest ({bt.total_dias} días)</h3>
-          <div className="grid gap-3 sm:grid-cols-4">
-            <SummaryCard label="MAE" value={`${bt.overall_mae.toFixed(2)}°`} sub={`${bt.total_muestras} muestras`} color="text-blue-400" />
-            <SummaryCard label="RMSE" value={`${bt.overall_rmse.toFixed(2)}°`} sub="" color="text-amber-400" />
-            <SummaryCard label="Bias" value={`${bt.overall_bias > 0 ? '+' : ''}${bt.overall_bias.toFixed(2)}°`} sub={bt.overall_bias > 0 ? 'Sobre-est.' : 'Sub-est.'} color={Math.abs(bt.overall_bias) < 0.5 ? 'text-emerald-400' : 'text-red-400'} />
-            <SummaryCard label="±1°C" value={`${bt.overall_accuracy_1c.toFixed(1)}%`} sub="Precisión del modelo" color="text-emerald-400" />
-          </div>
-        </div>
-      )}
-
-      {/* Only live summary */}
-      {hasLive && !hasBt && (
-        <div className="card">
-          <h3 className="mb-3 text-sm font-medium text-gray-400">Métricas en Tiempo Real ({live.total_muestras} muestras)</h3>
-          <div className="grid gap-3 sm:grid-cols-4">
-            <SummaryCard label="MAE" value={`${live.overall_mae.toFixed(2)}°`} sub="Error absoluto medio" color="text-emerald-400" />
-            <SummaryCard label="RMSE" value={`${live.overall_rmse.toFixed(2)}°`} sub="Raíz error cuadrático" color="text-amber-400" />
-            <SummaryCard label="Bias" value={`${live.overall_bias > 0 ? '+' : ''}${live.overall_bias.toFixed(2)}°`} sub={live.overall_bias > 0 ? 'Sobre-est.' : 'Sub-est.'} color={Math.abs(live.overall_bias) < 0.5 ? 'text-emerald-400' : 'text-red-400'} />
-            <SummaryCard label="±1°C" value={`${live.accuracy_pct.toFixed(1)}%`} sub={`${live.total_muestras} muestras`} color="text-emerald-400" />
-          </div>
-        </div>
-      )}
-
-      {/* No data banner */}
-      {!hasLive && !hasBt && (
-        <div className="card">
-          <p className="text-gray-500 text-sm text-center py-4">
-            No hay datos aún. Presiona <strong className="text-blue-400">"Backtest 30d"</strong> para generar métricas históricas simuladas,
-            o ejecuta el análisis diario desde el dashboard para acumular datos reales.
-          </p>
-        </div>
-      )}
-
-      {/* Bar chart: MAE per city */}
-      {showTable && (
-        <div className="card">
-          <h3 className="mb-3 text-sm font-medium text-gray-400">MAE por ciudad</h3>
-          <div className="h-64">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={barData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-                <XAxis dataKey="ciudad" stroke="#64748b" tick={{ fontSize: 10 }} />
-                <YAxis stroke="#64748b" tick={{ fontSize: 10 }} domain={[0, 'auto']} />
-                <Tooltip
-                  contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '8px' }}
-                  labelStyle={{ color: '#f1f5f9' }}
-                  formatter={(value: number) => [`${value.toFixed(2)}°C`, 'MAE']}
-                />
-                <Bar dataKey="MAE" fill="#3b82f6" radius={[4, 4, 0, 0]} name="MAE °C" />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-      )}
-
-      {/* Per-city detailed table */}
-      {showTable && (
-        <div className="card">
-          <h3 className="mb-3 text-sm font-medium text-gray-400">Detalle por ciudad</h3>
-          <div className="overflow-x-auto">
-            <table className="w-full text-xs text-gray-400">
-              <thead>
-                <tr className="text-left text-gray-500 border-b border-gray-700/30">
-                  <th className="p-2 font-medium">Ciudad</th>
-                  <th className="p-2 font-medium">MAE</th>
-                  <th className="p-2 font-medium">RMSE</th>
-                  <th className="p-2 font-medium">Bias</th>
-                  <th className="p-2 font-medium">Muestras</th>
-                  <th className="p-2 font-medium">Fuente</th>
-                  {biasBarData.length > 0 && <th className="p-2 font-medium text-amber-400">Corrección</th>}
+      {/* Table: sorted by precision */}
+      <div className="card">
+        <h3 className="mb-3 text-sm font-medium text-gray-400">
+          Ranking de precisión por ciudad
+          <span className="text-gray-600 ml-2">(más precisa → menos precisa)</span>
+        </h3>
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="text-left text-gray-500 border-b border-gray-700/50">
+                <th className="pb-2 pr-2 font-medium">#</th>
+                <th className="pb-2 pr-2 font-medium">Ciudad</th>
+                <th className="pb-2 pr-2 font-medium text-right">MAE</th>
+                <th className="pb-2 pr-2 font-medium text-right">Sesgo</th>
+                <th className="pb-2 pr-2 font-medium text-right">±1°C</th>
+                <th className="pb-2 pr-2 font-medium text-right">RMSE</th>
+                <th className="pb-2 pr-2 font-medium text-right">Días</th>
+                <th className="pb-2 font-medium text-right">Mejor día</th>
+                <th className="pb-2 font-medium text-right">Peor día</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.perCity.map((c, i) => (
+                <tr
+                  key={c.slug}
+                  className="border-t border-gray-700/20 hover:bg-slate-800/40 cursor-pointer transition"
+                  onClick={() => setSelectedCity(selectedCity === c.slug ? null : c.slug)}
+                >
+                  <td className="py-2.5 pr-2 text-gray-600 font-mono">{i + 1}</td>
+                  <td className="py-2.5 pr-2">
+                    <div className="flex items-center gap-2">
+                      <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ backgroundColor: CITY_COLORS[c.slug] ?? '#6b7280' }} />
+                      <span className={`font-medium ${selectedCity === c.slug ? 'text-white' : 'text-gray-300'}`}>{c.ciudad}</span>
+                    </div>
+                  </td>
+                  <td className={`py-2.5 pr-2 text-right font-mono font-bold ${c.mae <= 1 ? 'text-emerald-400' : c.mae <= 1.5 ? 'text-amber-400' : 'text-red-400'}`}>
+                    {c.mae}°
+                  </td>
+                  <td className={`py-2.5 pr-2 text-right font-mono ${Math.abs(c.bias) < 0.3 ? 'text-emerald-400' : 'text-red-400'}`}>
+                    {c.bias > 0 ? '+' : ''}{c.bias}°
+                  </td>
+                  <td className="py-2.5 pr-2 text-right font-mono text-emerald-400 font-bold">
+                    {c.accuracy_pct}%
+                  </td>
+                  <td className="py-2.5 pr-2 text-right font-mono text-gray-400">
+                    {c.rmse}°
+                  </td>
+                  <td className="py-2.5 pr-2 text-right text-gray-500">
+                    {c.muestras}
+                  </td>
+                  <td className="py-2.5 text-right">
+                    <span className="text-emerald-400 font-mono">{c.best_day.error > 0 ? '+' : ''}{c.best_day.error}°</span>
+                    <span className="text-gray-600 ml-1">{c.best_day.fecha.slice(5)}</span>
+                  </td>
+                  <td className="py-2.5 text-right">
+                    <span className="text-red-400 font-mono">{c.worst_day.error > 0 ? '+' : ''}{c.worst_day.error}°</span>
+                    <span className="text-gray-600 ml-1">{c.worst_day.fecha.slice(5)}</span>
+                  </td>
                 </tr>
-              </thead>
-              <tbody>
-                {cityRows.map(r => {
-                  const mae = r.live_mae ?? r.bt_mae
-                  const rmse = r.live_rmse ?? r.bt_rmse
-                  const bias = r.live_bias ?? r.bt_bias
-                  const n = r.live_n || r.bt_n
-                  const fuente = r.live_mae != null ? '🟢 Live' : '🔵 BT'
-                  return (
-                    <CityMetricRow
-                      key={r.ciudad}
-                      ciudad={r.ciudad}
-                      mae={mae != null ? mae.toFixed(2) + '°' : '—'}
-                      rmse={rmse != null ? rmse.toFixed(2) + '°' : '—'}
-                      bias={bias != null ? `${bias > 0 ? '+' : ''}${bias.toFixed(2)}°` : '—'}
-                      muestras={n}
-                      fuente={fuente}
-                    />
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
-          {hasBt && !hasLive && (
-            <p className="mt-3 text-[10px] text-gray-600">
-              🔵 BT = Backtest. Datos generados mediante simulaci├│n hist├│rica de 30 d├¡as con 6 modelos meteorol├│gicos.
-              Correcciones activas se aplican autom├íticamente al pr├│ximo pron├│stico.
-            </p>
-          )}
-          {hasLive && (
-            <p className="mt-3 text-[10px] text-gray-600">
-              🟢 Live = Temperatura real registrada despu├®s del pron├│stico. Fuente: Open-Meteo Archive API.
-            </p>
-          )}
+              ))}
+            </tbody>
+          </table>
         </div>
-      )}
+        <p className="mt-3 text-[10px] text-gray-600">
+          Click en una ciudad para aislarla en el gráfico · MAE = error absoluto medio · Sesgo = dirección promedio del error
+        </p>
+      </div>
     </div>
   )
 }
 
-function SummaryCard({ label, value, sub, color }: { label: string; value: string; sub: string; color: string }) {
+function MiniCard({ label, value, sub, color }: { label: string; value: string; sub: string; color: string }) {
   return (
-    <div className="rounded-lg bg-slate-900/50 p-3 text-center">
-      <div className="text-xs text-gray-500">{label}</div>
-      <div className={`text-xl font-bold ${color}`}>{value}</div>
-      {sub && <div className="text-[10px] text-gray-500 mt-0.5">{sub}</div>}
+    <div className="rounded-lg bg-slate-900/50 border border-gray-800 p-3 text-center">
+      <div className="text-[10px] text-gray-500 uppercase tracking-wide">{label}</div>
+      <div className={`text-xl font-bold mt-0.5 ${color}`}>{value}</div>
+      <div className="text-[9px] text-gray-600 mt-0.5">{sub}</div>
     </div>
   )
 }

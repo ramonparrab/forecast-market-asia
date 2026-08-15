@@ -917,8 +917,8 @@ export default function Home({ initialAnalysis, initialMetrics, initialAvailable
       {/* Signals View */}
       {activeView === 'signals' && <SignalsPanel />}
 
-      {/* Metrics View - Per city with backtesting data */}
-      {activeView === 'metrics' && <MetricsChart metrics={metrics} />}
+      {/* Metrics View */}
+      {activeView === 'metrics' && <MetricsChart />}
 
       {/* Comparison View - Forecast vs Actual per city */}
       {activeView === 'comparison' && (
