@@ -1,6 +1,7 @@
 import { NextApiRequest, NextApiResponse } from 'next'
 import { buildSignalsPackage, CitySignal } from '@/lib/signals-engine'
-import { runDailyAnalysis } from '@/lib/forecast-engine'
+import { createClient } from '@supabase/supabase-js'
+import { getAllHistoricalErrors, computeGlobalMetrics } from '@/lib/supabase'
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'GET') {
@@ -10,56 +11,116 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const format = (req.query.format as string) || 'json'
 
   try {
-    // Run fresh analysis directly (avoids self-request issues on serverless)
-    const caracasOffset = -4 * 60
-    const nowCaracas = new Date(new Date().getTime() + caracasOffset * 60000)
+    const supabaseUrl = String(process.env.NEXT_PUBLIC_SUPABASE_URL || '').replace(/\/rest\/v1\/?$/, '')
+    const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
+    if (!supabaseUrl || !supabaseKey) {
+      return res.status(503).json({ status: 'error', message: 'Supabase not configured' })
+    }
+
+    const client = createClient(supabaseUrl, supabaseKey)
+
+    // Fecha objetivo: mañana en hora Caracas (igual que RESUMEN)
+    const caracasOffset = -4 * 60 * 60000
+    const nowCaracas = new Date(Date.now() + caracasOffset)
     nowCaracas.setDate(nowCaracas.getDate() + 1)
-    const fechaObjetivo = nowCaracas.toISOString().slice(0, 10)
-    const analysis = await runDailyAnalysis(fechaObjetivo)
+    const fecha = nowCaracas.toISOString().slice(0, 10)
 
-    // Use historical errors already collected by runDailyAnalysis
-    const historicalErrors: Record<string, number[]> = analysis.historicalErrors
+    // Paralelizar: daily_runs + snapshots + errores históricos + métricas globales
+    const [runsResult, ayerResult, snapshotsResult, historicalErrors, globalMetrics] = await Promise.all([
+      // Query del día — obtener 10PM y 11PM por separado
+      client.from('daily_runs' as any).select('*').eq('fecha_objetivo', fecha).order('fecha_ejecucion', { ascending: false } as any).limit(2),
+      // Fallback: día anterior
+      (() => {
+        const yc = new Date(Date.now() + caracasOffset)
+        return client.from('daily_runs' as any).select('*').eq('fecha_objetivo', yc.toISOString().slice(0, 10)).order('fecha_ejecucion', { ascending: false } as any).limit(1)
+      })(),
+      // Snapshots para elegir 10PM vs 11PM
+      client.from('forecast_snapshot' as any).select('slug, run_type_ganadora').eq('fecha_objetivo', fecha).is('temp_real', null),
+      // Errores históricos para bandas P5-P95
+      getAllHistoricalErrors(),
+      // Métricas globales
+      computeGlobalMetrics(),
+    ])
 
-    // Map cities to input format
-    const cities = analysis.cities.map(c => ({
+    const runs = (runsResult.data as any[] | undefined) ?? []
+    const ayerData = (ayerResult.data as any[] | undefined) ?? []
+    const snapshots = (snapshotsResult.data as any[] | undefined) ?? []
+
+    // Elegir la corrida ganadora (misma lógica que RESUMEN en index.tsx)
+    let chosenRun: any = null
+    if (runs.length === 1) {
+      chosenRun = runs[0]
+    } else if (runs.length >= 2) {
+      const snapWins: Record<string, number> = {}
+      for (const s of snapshots) {
+        snapWins[s.run_type_ganadora] = (snapWins[s.run_type_ganadora] ?? 0) + 1
+      }
+      const wins10 = snapWins['10PM'] ?? 0
+      const wins11 = snapWins['11PM'] ?? 0
+      const preferred = wins10 > wins11 ? '10PM' : '11PM'
+      chosenRun = runs.find((r: any) => r.run_type === preferred) ?? runs[0]
+    }
+    if (!chosenRun && ayerData.length) {
+      chosenRun = ayerData[0]
+    }
+    if (!chosenRun) {
+      return res.status(404).json({ status: 'error', message: 'No hay corrida disponible para hoy ni ayer' })
+    }
+
+    // Parsear resultados y recomendaciones del daily_run elegido
+    const parsedCities = typeof chosenRun.resultados === 'string'
+      ? JSON.parse(chosenRun.resultados)
+      : chosenRun.resultados
+    const parsedRecs = typeof chosenRun.recomendaciones === 'string'
+      ? JSON.parse(chosenRun.recomendaciones)
+      : chosenRun.recomendaciones
+
+    if (!parsedCities || !Array.isArray(parsedCities) || parsedCities.length === 0) {
+      return res.status(404).json({ status: 'error', message: 'La corrida elegida no tiene ciudades' })
+    }
+
+    // Mapear al formato que espera buildSignalsPackage (CitySignalInput)
+    const cities = parsedCities.map((c: any) => ({
       ciudad: c.ciudad,
       slug: c.slug,
-      exito_pct: c.exito_pct,
-      exito_pct_integer: c.exito_pct_integer,
+      exito_pct: c.exito_pct ?? 0,
+      exito_pct_integer: c.exito_pct_integer ?? 0,
       forecast: c.forecast,
-      volatilidad: c.forecast.volatilidad ?? 0,
-      spread: Math.max(...Object.values(c.forecast.ensemble_raw)) - Math.min(...Object.values(c.forecast.ensemble_raw)),
-      consenso: c.forecast.consenso,
+      volatilidad: c.forecast?.volatilidad ?? 0,
+      spread: c.forecast?.ensemble_raw
+        ? Math.max(...Object.values(c.forecast.ensemble_raw as Record<string, number>)) - Math.min(...Object.values(c.forecast.ensemble_raw as Record<string, number>))
+        : 0,
+      consenso: c.forecast?.consenso ?? 'ACEPTABLE',
       nowcast: c.nowcast,
-      weather: c.forecast.weather,
+      weather: c.forecast?.weather,
       totalRecords: c.totalRecords,
     }))
 
-    const globalMetrics = {
-      accuracy_pct: analysis.global_metrics?.accuracy_pct ?? 0,
-      overall_mae: analysis.global_metrics?.overall_mae ?? 0,
-      total_muestras: analysis.global_metrics?.total_muestras ?? 0,
-    }
-
-    const recommendations = analysis.recommendations.map(r => ({
+    const recommendations = (parsedRecs ?? []).map((r: any) => ({
       slug: r.slug,
       edge: r.edge,
       ia_pct: r.ia_pct,
       mkt_pct: r.mkt_pct,
     }))
 
-    // Determine if this data is from CRON (10PM) or fresh analysis
-    const isCron = analysis.message?.includes('Cron') ?? false
+    const metrics = {
+      accuracy_pct: globalMetrics?.accuracy_pct ?? 0,
+      overall_mae: globalMetrics?.overall_mae ?? 0,
+      total_muestras: globalMetrics?.total_muestras ?? 0,
+    }
+
+    // Determinar si es cron
+    const isCron = !!(chosenRun.run_type)
 
     const signalsPackage = buildSignalsPackage(
-      cities, globalMetrics, recommendations,
-      historicalErrors, analysis.fecha_objetivo, isCron
+      cities, metrics, recommendations,
+      historicalErrors, chosenRun.fecha_objetivo, isCron
     )
 
     if (format === 'csv') {
       const csv = buildCSV(signalsPackage.signals)
       res.setHeader('Content-Type', 'text/csv')
-      res.setHeader('Content-Disposition', `attachment; filename="signals-${analysis.fecha_objetivo}.csv"`)
+      res.setHeader('Content-Disposition', `attachment; filename="signals-${chosenRun.fecha_objetivo}.csv"`)
       return res.status(200).send(csv)
     }
 
