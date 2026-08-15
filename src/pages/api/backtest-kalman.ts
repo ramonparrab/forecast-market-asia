@@ -468,6 +468,62 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   try {
     const daysLimit = parseInt(req.query.dias as string || '60') || 60
     const slugFilter = (req.query.ciudad as string || '').trim()
+    const debug = req.query.debug === '1'
+
+    if (debug) {
+      // DEBUG MODE: return raw diagnostic info
+      const client = createClient(supabaseUrl, supabaseKey)
+      const fecha = (req.query.fecha as string) || '2026-08-10'
+      const slug = slugFilter || 'seoul'
+
+      const { data: runs } = await client
+        .from('daily_runs' as any)
+        .select('id, fecha_ejecucion, fecha_objetivo, resultados')
+        .eq('fecha_objetivo', fecha)
+        .order('fecha_ejecucion', { ascending: false } as any)
+        .limit(2)
+
+      const debugInfo: any = { fecha, slug, runs_found: (runs as any[])?.length || 0, runs: [] }
+
+      for (const run of (runs as any[]) ?? []) {
+        let parsed: any[]
+        try { parsed = JSON.parse(run.resultados) } catch { continue }
+        const cityData = parsed.find((c: any) => c.slug === slug)
+        if (!cityData) continue
+        const f = cityData.forecast || {}
+        debugInfo.runs.push({
+          fecha_ejecucion: run.fecha_ejecucion,
+          modelo_activo: f.modelo_activo,
+          temp_corregida: f.temp_corregida,
+          temp_corregida_alt: f.temp_corregida_alt,
+          temp_corregida_base: f.temp_corregida_base,
+          modelo_alt: f.modelo_alt,
+          forecast_keys: Object.keys(f).sort(),
+        })
+      }
+
+      // Check walkForwardErrors for this slug+fecha
+      const { data: fhRecords } = await client
+        .from('forecast_history' as any)
+        .select('id, slug, fecha_objetivo, error, temp_real')
+        .eq('slug', slug as any)
+        .not('error', 'is', null as any)
+        .order('fecha_objetivo', { ascending: true } as any)
+        .limit(500)
+      const items = ((fhRecords as any[]) ?? []).sort((a: any, b: any) => a.fecha_objetivo.localeCompare(b.fecha_objetivo))
+      const before = items.filter((r: any) => r.fecha_objetivo < fecha)
+      debugInfo.walkforward = {
+        total_fh_records: items.length,
+        unique_fechas: [...new Set(items.map((r: any) => r.fecha_objetivo))].length,
+        before_fecha_count: before.length,
+        before_fecha_errors: before.map((r: any) => r.error),
+        before_fecha_mean: before.length > 0 ? (before.reduce((s: number, r: any) => s + r.error, 0) / before.length).toFixed(6) : null,
+        key_used: `${slug}|${fecha}`,
+      }
+
+      return res.status(200).json(debugInfo)
+    }
+
     const ciudades = await computeBacktestKalman(daysLimit, slugFilter)
     return res.status(200).json({ ciudades })
   } catch (error) {
