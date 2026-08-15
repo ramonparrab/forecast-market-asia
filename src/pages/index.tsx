@@ -941,12 +941,7 @@ export default function Home({ initialAnalysis, initialMetrics, initialAvailable
       {activeView === 'backtest' && <BacktestChart />}
 
       {/* Arbitrage View */}
-      {activeView === 'arbitrage' && (
-        <ArbitragePanel
-          alerts={analysis?.arbitrage_alerts ?? []}
-          citiesCount={analysis?.cities.length ?? 0}
-        />
-      )}
+      {activeView === 'arbitrage' && <ArbitragePanel />}
 
       {/* Cobertura SI/NO View */}
       {activeView === 'coverage' && <CoberturaSiNo />}
