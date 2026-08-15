@@ -5,7 +5,6 @@ import AllocationPanel from '@/components/AllocationPanel'
 import MetricsChart from '@/components/MetricsChart'
 import ForecastVsActualChart from '@/components/ForecastVsActualChart'
 import ArbitragePanel from '@/components/ArbitragePanel'
-import ForecastTable from '@/components/ForecastTable'
 import BacktestChart from '@/components/BacktestChart'
 import ExecutiveSummaryPanel from '@/components/ExecutiveSummary'
 import ComparisonPanel from '@/components/ComparisonPanel'
@@ -210,7 +209,7 @@ export async function getServerSideProps() {
   }
 }
 
-type View = 'executive' | 'dashboard' | 'table' | 'metrics' | 'comparison' | 'backtest' | 'arbitrage' | 'architecture' | 'signals' | 'coverage' | 'mejora-continua' | 'backtest-si' | 'performance' | 'ladder' | 'rivales'
+type View = 'executive' | 'dashboard' | 'metrics' | 'comparison' | 'backtest' | 'arbitrage' | 'architecture' | 'signals' | 'coverage' | 'mejora-continua' | 'backtest-si' | 'performance' | 'ladder' | 'rivales'
 
 /** Returns a friendly confidence label + color class */
 function getConfidence(city: CityAnalysis): { label: string; color: string; bg: string } {
@@ -667,7 +666,6 @@ export default function Home({ initialAnalysis, initialMetrics, initialAvailable
   const views: { key: View; label: string; icon: string; desc: string; group?: string }[] = [
     { key: 'executive', label: 'Resumen', icon: '🎯', desc: 'Recomendaciones del día', group: 'op' },
     { key: 'dashboard', label: 'Dashboard', icon: '🏠', desc: 'Vista general por ciudad', group: 'op' },
-    { key: 'table', label: 'Tabla', icon: '📊', desc: 'Datos completos', group: 'op' },
     { key: 'signals', label: 'Señales', icon: '📡', desc: 'Datos para cobertura', group: 'an' },
     { key: 'metrics', label: 'Precisión', icon: '📈', desc: 'Métricas históricas', group: 'an' },
     { key: 'comparison', label: 'Comparación', icon: '📉', desc: 'Pronóstico vs Real', group: 'an' },
@@ -905,9 +903,6 @@ export default function Home({ initialAnalysis, initialMetrics, initialAvailable
           />
         </div>
       )}
-
-      {/* Table View */}
-      {activeView === 'table' && analysis && <ForecastTable data={analysis} />}
 
       {/* Executive Summary View */}
       {activeView === 'executive' && (
