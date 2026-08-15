@@ -126,7 +126,7 @@ export default function MetricsChart() {
         <MiniCard label="RMSE" value={`${g.rmse}°C`} sub="Error cuadrático" color="text-amber-400" />
       </div>
 
-      {/* Chart: all cities */}
+      {/* Chart: city selector + all cities */}
       <div className="card">
         <div className="flex items-center justify-between mb-3">
           <h3 className="text-sm font-medium text-gray-400">
@@ -136,6 +136,29 @@ export default function MetricsChart() {
           {selectedCity && (
             <button onClick={() => setSelectedCity(null)} className="text-xs text-blue-400 hover:text-blue-300">↻ Ver todas</button>
           )}
+        </div>
+        {/* City chips */}
+        <div className="flex flex-wrap gap-1.5 mb-4">
+          {slugs.map(slug => {
+            const city = CIUDADES_ASIA.find(c => c.slug === slug)
+            const name = city?.nombre ?? slug
+            const color = CITY_COLORS[slug] ?? '#6b7280'
+            const isActive = selectedCity === slug
+            return (
+              <button
+                key={slug}
+                onClick={() => setSelectedCity(isActive ? null : slug)}
+                className={`rounded-full px-2.5 py-1 text-[10px] font-medium border transition-all ${
+                  isActive
+                    ? 'text-white border-transparent'
+                    : 'text-gray-400 border-gray-700 bg-slate-800/60 hover:text-gray-200 hover:border-gray-500'
+                }`}
+                style={isActive ? { backgroundColor: color, borderColor: color } : undefined}
+              >
+                {name}
+              </button>
+            )
+          })}
         </div>
         <div className="h-80">
           <ResponsiveContainer width="100%" height="100%">
