@@ -134,6 +134,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // Guardar con run_type para que 10PM y 11PM coexistan
     await saveForecastRecords(records, runLabel)
 
+    // ===== STEP 3b: Respaldo 10PM desde corrida 11PM =====
+    // Si el cron de 10PM (2:00Z) no ejecutó, el de 11PM guarda también como 10PM.
+    // El upsert (slug, fecha_objetivo, run_type) evita duplicados si 10PM ya existe.
+    if (runLabel === '11PM') {
+      console.log('[CRON] Guardando respaldo 10PM por si faltó la corrida de 2:00Z...')
+      await saveForecastRecords(records, '10PM')
+    }
+
     await saveDailyRun({
       fecha_ejecucion: result.fecha,
       fecha_objetivo: fechaObjetivo,
