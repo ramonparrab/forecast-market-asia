@@ -1,6 +1,5 @@
 import { NextApiRequest, NextApiResponse } from 'next'
 import { createClient } from '@supabase/supabase-js'
-import { computeAllMejoras } from '@/lib/mejora-continua-engine'
 import { CIUDADES_ASIA } from '@/lib/cities'
 
 const supabaseUrl = String(process.env.NEXT_PUBLIC_SUPABASE_URL || '').replace(/\/rest\/v1\/?$/, '')
@@ -20,8 +19,7 @@ export interface BacktestContract {
 
 export interface BacktestDayRow {
   fecha: string
-  temp_original: number
-  temp_mejora: number
+  temp_pronosticada: number
   umbral: number
   modo_umbral: string
   contratos_usados: BacktestContract[]
@@ -47,7 +45,6 @@ export interface BacktestSummary {
 const ciudadMap = new Map(CIUDADES_ASIA.map(c => [c.slug, c.nombre]))
 
 function findContract(contratos: any[], valor: number): any | null {
-  // Try exacto first, then superior
   let c = contratos.find((x: any) => x.tipo === 'exacto' && typeof x.valor === 'number' && x.valor === valor)
   if (c) return c
   c = contratos.find((x: any) => x.tipo === 'superior' && typeof x.valor === 'number' && x.valor === valor)
@@ -72,32 +69,34 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     const client = createClient(supabaseUrl, supabaseKey)
 
-    const { data: allHistory, error: histErr } = await client
-      .from('forecast_history' as any)
-      .select('id, fecha_objetivo, slug, temp_corregida, temp_real, error')
+    // Leer temp_real verificados de forecast_snapshot (misma fuente que RESUMEN)
+    const { data: snapshots, error: snapErr } = await client
+      .from('forecast_snapshot' as any)
+      .select('fecha_objetivo, slug, temp_corregida, temp_real, run_type_ganadora')
       .eq('slug', slug)
       .not('temp_real', 'is', null)
       .order('fecha_objetivo', { ascending: true } as any)
 
-    if (histErr) return res.status(500).json({ error: histErr.message })
-    if (!allHistory || allHistory.length === 0) return res.json({ slug, results: [], summary: null })
+    if (snapErr) return res.status(500).json({ error: snapErr.message })
+    if (!snapshots || (snapshots as any[]).length === 0) return res.json({ slug, results: [], summary: null })
 
+    // Deduplicar por fecha (quedar con el winner)
     const seen = new Map<string, any>()
-    for (const r of allHistory as any[]) {
-      if (!seen.has(r.fecha_objetivo) || r.id > seen.get(r.fecha_objetivo).id) {
+    for (const r of snapshots as any[]) {
+      if (!seen.has(r.fecha_objetivo)) {
         seen.set(r.fecha_objetivo, r)
       }
     }
     const allRecords = Array.from(seen.values())
       .sort((a, b) => a.fecha_objetivo.localeCompare(b.fecha_objetivo))
 
-    const nombre = ciudadMap.get(slug) || slug
-    const mejoraResult = computeAllMejoras(allRecords as any, nombre)
-    const dailyResults = mejoraResult.dailyResults
+    // Limitar por días
+    const limited = daysLimit >= 999 ? allRecords : allRecords.slice(-daysLimit)
+    const dates = limited.map(r => r.fecha_objetivo)
 
-    const limited = dailyResults.slice(-daysLimit)
-    const dates = limited.map(d => d.fecha)
+    if (dates.length === 0) return res.json({ slug, results: [], summary: null })
 
+    // Obtener contratos de daily_runs
     const { data: runs } = await client
       .from('daily_runs' as any)
       .select('*')
@@ -111,21 +110,33 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       runsByDate[key].push(run)
     }
 
+    // Para cada fecha, elegir el run winner (igual que RESUMEN)
+    const { data: allSnapshots } = await client
+      .from('forecast_snapshot' as any)
+      .select('fecha_objetivo, slug, run_type_ganadora')
+      .in('fecha_objetivo', dates)
+      .eq('slug', slug)
+
+    const winnerByDate: Record<string, string> = {}
+    for (const s of (allSnapshots ?? []) as any[]) {
+      winnerByDate[s.fecha_objetivo] = s.run_type_ganadora ?? '11PM'
+    }
+
     const results: BacktestDayRow[] = []
 
-    for (const day of limited) {
-      const date = day.fecha
+    for (const record of limited) {
+      const date = record.fecha_objetivo
+      const tempPronosticada = record.temp_corregida
+      const tempReal = record.temp_real
+
+      if (tempPronosticada === null || tempPronosticada === undefined) continue
+
+      // Elegir el run winner
       const cityRuns = runsByDate[date] || []
       if (cityRuns.length === 0) continue
 
-      const targetMs = new Date(date + 'T02:00:00Z').getTime()
-      let bestRun = cityRuns[0]
-      let bestDiff = Infinity
-      for (const run of cityRuns) {
-        const d = new Date(run.fecha_ejecucion).getTime()
-        const diff = Math.abs(d - targetMs)
-        if (diff < bestDiff) { bestDiff = diff; bestRun = run }
-      }
+      const preferred = winnerByDate[date] ?? '11PM'
+      let bestRun = cityRuns.find((r: any) => r.run_type === preferred) ?? cityRuns[cityRuns.length - 1]
 
       let resultados: any[]
       try {
@@ -138,10 +149,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       if (!cityData?.contratos?.length) continue
 
       const contratos: any[] = cityData.contratos
-
-      const tempMejora = day.combinado.temp
-      const tempOriginal = day.temp_corregida
-      const umbralBase = roundTemp(tempMejora)
+      const umbralBase = roundTemp(tempPronosticada)
       const umbral = thresholdMode === 'forecast+1' ? umbralBase + 1 : umbralBase
 
       if (estrategia === 'consecutiva') {
@@ -154,24 +162,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             const prob = c.prob_mkt
             const mult = prob > 0 ? 100 / prob : 0
             usados.push({
-              tipo: c.tipo,
-              valor: c.valor,
-              prob_mkt: prob,
+              tipo: c.tipo, valor: c.valor, prob_mkt: prob,
               multiplicador: Math.round(mult * 100) / 100,
               multiplicador_neto: Math.round((mult - 1) * 100) / 100,
             })
           } else {
-            usados.push({
-              tipo: null,
-              valor: v,
-              prob_mkt: null,
-              multiplicador: null,
-              multiplicador_neto: null,
-            })
+            usados.push({ tipo: null, valor: v, prob_mkt: null, multiplicador: null, multiplicador_neto: null })
           }
         }
 
-        const tempReal = day.temp_real
         const tempRealRounded = tempReal !== null ? roundTemp(tempReal) : null
 
         const resultadosContratos = usados.map(c => {
@@ -182,30 +181,21 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         })
 
         const costoTotalPct = usados.reduce((s, c) => s + (c.prob_mkt || 0), 0)
-
-        const algunGana = resultadosContratos.some(c => c.resultado === 'gana')
+        const algunGana = resultadosContratos.some((c: any) => c.resultado === 'gana')
         const resultado: 'gana' | 'pierde' | 'pendiente' = tempRealRounded === null ? 'pendiente' : algunGana ? 'gana' : 'pierde'
-
         const multEfectivo = algunGana && costoTotalPct > 0 ? 100 / costoTotalPct : 0
 
         results.push({
-          fecha: date,
-          temp_original: tempOriginal,
-          temp_mejora: tempMejora,
-          umbral,
-          modo_umbral: thresholdMode,
+          fecha: date, temp_pronosticada: tempPronosticada, umbral, modo_umbral: thresholdMode,
           contratos_usados: resultadosContratos,
           costo_total_pct: costoTotalPct.toFixed(1) + '%',
           multiplicador: Math.round(multEfectivo * 100) / 100,
           multiplicador_neto: Math.round((multEfectivo - 1) * 100) / 100,
-          temp_real: tempReal,
-          resultado,
+          temp_real: tempReal, resultado,
         })
       } else {
-        const tempReal = day.temp_real
         const tempRealRounded = tempReal !== null ? roundTemp(tempReal) : null
 
-        // Buscar contrato real de Polymarket (el que se habría comprado)
         const relevantes = contratos.filter((c: any) => {
           if (c.tipo === 'inferior' || c.tipo === 'rango') return false
           const val = typeof c.valor === 'number' ? c.valor : (Array.isArray(c.valor) ? c.valor[0] : null)
@@ -217,13 +207,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         })
 
         const usado = relevantes.length > 0
-          ? (relevantes.find(
-              (c: any) => c.tipo === 'superior' && typeof c.valor === 'number' && c.valor === umbral
-            ) || relevantes[0])
+          ? (relevantes.find((c: any) => c.tipo === 'superior' && typeof c.valor === 'number' && c.valor === umbral) || relevantes[0])
           : null
 
-        // GANA/PIERDE: si hay contrato exacto al nivel del umbral, evalúa contra él;
-        // si no (contrato sustituto o ausente), usa MEJORA CONTINUA vs REAL
         let resultado: 'gana' | 'pierde' | 'pendiente'
         if (tempRealRounded === null) {
           resultado = 'pendiente'
@@ -243,39 +229,23 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         if (usado) {
           const probMkt = usado.prob_mkt
           const multIndiv = probMkt > 0 ? 100 / probMkt : 0
-          const multNetoIndiv = multIndiv - 1
           results.push({
-            fecha: date,
-            temp_original: tempOriginal,
-            temp_mejora: tempMejora,
-            umbral,
-            modo_umbral: thresholdMode,
+            fecha: date, temp_pronosticada: tempPronosticada, umbral, modo_umbral: thresholdMode,
             contratos_usados: [{
-              tipo: usado.tipo,
-              valor: usado.valor,
-              prob_mkt: probMkt,
+              tipo: usado.tipo, valor: usado.valor, prob_mkt: probMkt,
               multiplicador: Math.round(multIndiv * 100) / 100,
-              multiplicador_neto: Math.round(multNetoIndiv * 100) / 100,
+              multiplicador_neto: Math.round((multIndiv - 1) * 100) / 100,
             }],
             costo_total_pct: probMkt.toFixed(1) + '%',
             multiplicador: Math.round(multIndiv * 100) / 100,
-            multiplicador_neto: Math.round(multNetoIndiv * 100) / 100,
-            temp_real: tempReal,
-            resultado,
+            multiplicador_neto: Math.round((multIndiv - 1) * 100) / 100,
+            temp_real: tempReal, resultado,
           })
         } else {
           results.push({
-            fecha: date,
-            temp_original: tempOriginal,
-            temp_mejora: tempMejora,
-            umbral,
-            modo_umbral: thresholdMode,
-            contratos_usados: [],
-            costo_total_pct: '-',
-            multiplicador: 0,
-            multiplicador_neto: 0,
-            temp_real: tempReal,
-            resultado,
+            fecha: date, temp_pronosticada: tempPronosticada, umbral, modo_umbral: thresholdMode,
+            contratos_usados: [], costo_total_pct: '-', multiplicador: 0, multiplicador_neto: 0,
+            temp_real: tempReal, resultado,
           })
         }
       }
@@ -293,9 +263,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const netMultProm = multProm !== null ? multProm - 1 : null
 
     const summary: BacktestSummary = {
-      total_dias: total,
-      dias_ganados: ganados.length,
-      dias_perdidos: perdidos.length,
+      total_dias: total, dias_ganados: ganados.length, dias_perdidos: perdidos.length,
       dias_pendientes: pendientes.length,
       win_rate: total > 0 ? Math.round(ganados.length / total * 10000) / 100 : null,
       mult_promedio: multProm !== null ? Math.round(multProm * 100) / 100 : null,
@@ -315,7 +283,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           const val = typeof ganador.valor === 'number' ? ganador.valor : (Array.isArray(ganador.valor) ? ganador.valor[0] : null)
           if (val !== null) {
             const diff = val - r.umbral
-            const key = diff === 0 ? 'prono' : diff === -1 ? 'menos1' : diff === 1 ? 'mas1' : `otro_${diff >= 0 ? '+' : ''}${diff}`
+            const key = diff === 0 ? 'prono' : diff === -1 ? 'menos1' : diff === 1 ? 'mas1' : `otro`
             distribucionGanadores[key] = (distribucionGanadores[key] || 0) + 1
           }
         } else {
