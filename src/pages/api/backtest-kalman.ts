@@ -68,6 +68,19 @@ function ganaDe(a10: boolean, a11: boolean): KalmanDay['cur_gana'] {
   return null
 }
 
+/**
+ * Inferir run_type desde fecha_ejecucion cuando run_type es NULL.
+ * 10PM Caracas = 02:00Z, 11PM Caracas = 03:00Z
+ * Ventana generosa: 0-2Z → 10PM, 3-5Z → 11PM (permite retrasos del cron)
+ */
+function inferRunType(fechaEjecucion: string | null): '10PM' | '11PM' | null {
+  if (!fechaEjecucion) return null
+  const h = new Date(fechaEjecucion).getUTCHours()
+  if (h >= 0 && h <= 2) return '10PM'
+  if (h >= 3 && h <= 5) return '11PM'
+  return null
+}
+
 export async function computeBacktestKalman(daysLimit: number, slugFilter: string = ''): Promise<Record<string, KalmanCityResult>> {
   try {
     const client = createClient(supabaseUrl, supabaseKey)
@@ -83,7 +96,7 @@ export async function computeBacktestKalman(daysLimit: number, slugFilter: strin
     // ============ 1) forecast_history: todos los registros ============
     const { data: fhAll } = await client
       .from('forecast_history' as any)
-      .select('id, slug, fecha_objetivo, temp_real, temp_pronosticada, temp_corregida, error, run_type, created_at')
+      .select('id, slug, fecha_objetivo, temp_real, temp_pronosticada, temp_corregida, error, run_type, created_at, fecha_ejecucion')
       .gte('fecha_objetivo', startDate.toISOString())
       .order('fecha_objetivo', { ascending: true } as any)
       .order('id', { ascending: true } as any)
@@ -116,6 +129,7 @@ export async function computeBacktestKalman(daysLimit: number, slugFilter: strin
       error: number | null
       run_type: string | null
       created_at: string | null
+      fecha_ejecucion: string | null
     }
 
     const bySlug: Record<string, FhRecord[]> = {}
@@ -132,6 +146,7 @@ export async function computeBacktestKalman(daysLimit: number, slugFilter: strin
         error: r.error,
         run_type: r.run_type,
         created_at: r.created_at,
+        fecha_ejecucion: r.fecha_ejecucion,
       })
     }
 
@@ -249,8 +264,10 @@ export async function computeBacktestKalman(daysLimit: number, slugFilter: strin
         const mcPred = round2(base + mcBias)
         const kalPred = round2(base + kalBias)
 
-        const is10pm = r.run_type === '10PM'
-        const is11pm = r.run_type === '11PM'
+        // Inferir run_type desde fecha_ejecucion si es NULL
+        const effectiveRunType = r.run_type || inferRunType(r.fecha_ejecucion)
+        const is10pm = effectiveRunType === '10PM'
+        const is11pm = effectiveRunType === '11PM'
 
         if (is10pm) {
           dr.cur_10pm = mcPred
@@ -263,7 +280,7 @@ export async function computeBacktestKalman(daysLimit: number, slugFilter: strin
           const snapKey = slug + '|' + fecha + '|11PM'
           dr.modelo_11pm = snapModelo[snapKey] ?? null
         } else {
-          // Sin run_type: asignar al que falte, o al 11PM por defecto
+          // Sin run_type ni inferencia posible: asignar al que falte, o al 11PM por defecto
           if (dr.cur_11pm === null && dr.kal_11pm === null) {
             dr.cur_11pm = mcPred
             dr.kal_11pm = kalPred
