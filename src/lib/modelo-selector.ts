@@ -202,44 +202,63 @@ export function aplicarModeloGanador(
   tempBase: number,
   history: HistoricalRecord[],
   fechaObjetivo: string
-): { temp: number; modelo: ModeloActivo; bias: number; muestras: number } {
+): { temp: number; modelo: ModeloActivo; bias: number; muestras: number; temp_alt: number; modelo_alt: ModeloActivo; bias_alt: number } {
   const validos = history.filter(
     r => r.temp_real !== null && r.error !== null
   ) as (HistoricalRecord & { temp_real: number; error: number })[]
   validos.sort((a, b) => a.fecha_objetivo.localeCompare(b.fecha_objetivo))
 
   const muestras = validos.length
-  // getModeloActivo ahora usa el cache de seleccionarMejorModelo() si fue llamado antes
   const modelo = getModeloActivo(slug)
+  const modelo_alt: ModeloActivo = modelo === 'KALMAN' ? 'MEJORA CONTINUA' : 'KALMAN'
 
-  let temp = tempBase
+  // === Computar AMBOS modelos con los MISMOS datos ===
+  let tempKalman = tempBase
+  let biasKalman = 0
+  let tempMC = tempBase
+  let biasMC = 0
 
-  if (modelo === 'KALMAN') {
-    if (muestras > 0) {
-      const errors = validos.map(r => r.error)
-      const R = estimateKalmanR(errors)
-      const bias = kalmanNextBias(errors, KALMAN_Q, R)
-      temp = tempBase + bias
-    }
-    return { temp: round2(temp), modelo, bias: round2(temp - tempBase), muestras }
-  }
-
-  // MEJORA CONTINUA — pipeline adaptativo por ciudad (estacion/range/boost)
   if (muestras > 0) {
-    const cf = computeCurrentForecast(validos, {
-      slug,
-      fecha_objetivo: fechaObjetivo,
-      fecha_ejecucion: '',
-      ciudad: '',
-      temp_pronosticada: tempBase,
-      temp_corregida: tempBase,
-      temp_real: null,
-      error: null,
-      modelos_usados: 0,
-      consenso: '',
-    } as HistoricalRecord, nombre)
-    if (cf) temp = cf.combinado ?? tempBase
+    // --- KALMAN ---
+    const errors = validos.map(r => r.error)
+    const R = estimateKalmanR(errors)
+    const kalmanBias = kalmanNextBias(errors, KALMAN_Q, R)
+    tempKalman = tempBase + kalmanBias
+    biasKalman = kalmanBias
+
+    // --- MEJORA CONTINUA ---
+    try {
+      const cf = computeCurrentForecast(validos, {
+        slug,
+        fecha_objetivo: fechaObjetivo,
+        fecha_ejecucion: '',
+        ciudad: '',
+        temp_pronosticada: tempBase,
+        temp_corregida: tempBase,
+        temp_real: null,
+        error: null,
+        modelos_usados: 0,
+        consenso: '',
+      } as HistoricalRecord, nombre)
+      if (cf) {
+        tempMC = cf.combinado ?? tempBase
+        biasMC = tempMC - tempBase
+      }
+    } catch {
+      // Si MC falla, mantener base
+    }
   }
-  return { temp: round2(temp), modelo, bias: round2(temp - tempBase), muestras }
+
+  // Seleccionar ganador y perdedor
+  if (modelo === 'KALMAN') {
+    return {
+      temp: round2(tempKalman), modelo, bias: round2(biasKalman), muestras,
+      temp_alt: round2(tempMC), modelo_alt, bias_alt: round2(biasMC),
+    }
+  }
+  return {
+    temp: round2(tempMC), modelo, bias: round2(biasMC), muestras,
+    temp_alt: round2(tempKalman), modelo_alt, bias_alt: round2(biasKalman),
+  }
 }
 

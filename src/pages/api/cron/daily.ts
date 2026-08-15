@@ -1,6 +1,6 @@
 import { NextApiRequest, NextApiResponse } from 'next'
 import { runDailyAnalysis } from '@/lib/forecast-engine'
-import { saveDailyRun, saveForecastRecords, getRecordsWithoutActuals, updateActualTemperature, getHistoricalRecords, saveBacktestBias } from '@/lib/supabase'
+import { saveDailyRun, saveForecastRecords, getRecordsWithoutActuals, updateActualTemperature, getHistoricalRecords, saveBacktestBias, upsertForecastSnapshot, updateSnapshotActual } from '@/lib/supabase'
 import { fetchStationMaxTemp } from '@/lib/station-weather'
 import { fetchActualMaxTemp } from '@/lib/openmeteo'
 import { CIUDADES_ASIA } from '@/lib/cities'
@@ -131,7 +131,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       modelos_usados: Object.keys(city.forecast.ensemble_raw).length,
       consenso: city.forecast.consenso,
     }))
-    await saveForecastRecords(records)
+    // Guardar con run_type para que 10PM y 11PM coexistan
+    await saveForecastRecords(records, runLabel)
 
     await saveDailyRun({
       fecha_ejecucion: result.fecha,
@@ -139,12 +140,58 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       resultados: result.cities,
       recomendaciones: result.recommendations,
       total_asignado: result.total_allocated,
+      run_type: runLabel as '10PM' | '11PM',
     })
 
-    console.log(`[CRON] Saved ${records.length} city forecasts + daily run to Supabase`)
+    // ===== STEP 4: Upsert forecast_snapshot (pronóstico ganador bloqueado) =====
+    console.log(`[CRON] Upserting forecast snapshots (${runLabel})...`)
+    const modelCache = getModelSelectionCache()
+    for (const city of result.cities) {
+      const sel = modelCache[city.slug]
+      await upsertForecastSnapshot({
+        fecha_objetivo: fechaObjetivo,
+        slug: city.slug,
+        ciudad: city.ciudad,
+        run_type_ganadora: runLabel as '10PM' | '11PM',
+        modelo_ganador: sel?.modelo ?? 'ENSEMBLE',
+        temp_pronosticada: city.forecast.temp_ponderada,
+        temp_corregida: city.forecast.temp_corregida,
+        temp_ponderada: city.forecast.temp_ponderada,
+        consenso: city.forecast.consenso,
+        modelos_usados: Object.keys(city.forecast.ensemble_raw).length,
+        temp_10pm: runLabel === '10PM' ? city.forecast.temp_corregida : null,
+        temp_11pm: runLabel === '11PM' ? city.forecast.temp_corregida : null,
+        modelo_10pm: runLabel === '10PM' ? (sel?.modelo ?? 'ENSEMBLE') : null,
+        modelo_11pm: runLabel === '11PM' ? (sel?.modelo ?? 'ENSEMBLE') : null,
+        temp_real: null,
+        error: null,
+      })
+    }
+
+    // ===== STEP 5: Backfill temp_real en snapshots existentes =====
+    const { getPendingSnapshots } = await import('@/lib/supabase')
+    const pendingSnaps = await getPendingSnapshots()
+    let snapBackfilled = 0
+    for (const snap of pendingSnaps) {
+      if (snap.fecha_objetivo >= new Date().toISOString().slice(0, 10)) continue
+      const tempReal = await fetchStationMaxTemp(snap.slug, snap.fecha_objetivo)
+        ?? (await fetchActualMaxTemp(
+          CIUDADES_ASIA.find(c => c.slug === snap.slug)?.lat ?? 0,
+          CIUDADES_ASIA.find(c => c.slug === snap.slug)?.lon ?? 0,
+          snap.fecha_objetivo
+        ))
+      if (tempReal !== null) {
+        const ok = await updateSnapshotActual(snap.slug, snap.fecha_objetivo, tempReal)
+        if (ok) snapBackfilled++
+      }
+    }
+    if (snapBackfilled > 0) {
+      console.log(`[CRON] Snapshot backfill: ${snapBackfilled} actualizados`)
+    }
+
+    console.log(`[CRON] Saved ${records.length} city forecasts + daily run + snapshots to Supabase`)
 
     // Log selección de modelo por ciudad
-    const modelCache = getModelSelectionCache()
     const modelEntries = Object.entries(modelCache)
     if (modelEntries.length > 0) {
       console.log(`[CRON] Selección dinámica de modelo (${runLabel}):`)

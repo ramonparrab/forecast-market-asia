@@ -41,9 +41,9 @@ export async function getServerSideProps() {
     // ===== STEP 1 + 2 + 4: Paralelizar llamadas independientes =====
     const HINDCAST_DAYS = 30
 
-    const [runsResult, ayerResult, existingActualsResult, datesResult, supabaseFns] = await Promise.all([
-      // Query del día
-      client.from('daily_runs' as any).select('*').eq('fecha_objetivo', fecha).order('fecha_ejecucion', { ascending: false } as any).limit(1),
+    const [runsResult, ayerResult, existingActualsResult, datesResult, supabaseFns, snapshotsResult] = await Promise.all([
+      // Query del día — obtener 10PM y 11PM por separado
+      client.from('daily_runs' as any).select('*').eq('fecha_objetivo', fecha).order('fecha_ejecucion', { ascending: false } as any).limit(2),
       // Query del día anterior (fallback)
       (() => {
         const yc = new Date(Date.now() + (-4 * 60 * 60000))
@@ -55,13 +55,16 @@ export async function getServerSideProps() {
       client.from('daily_runs' as any).select('fecha_objetivo').order('fecha_objetivo', { ascending: false } as any).limit(90),
       // Importar funciones de supabase en paralelo con queries
       import('@/lib/supabase').then(m => m),
+      // Snapshots bloqueados para determinar qué corrida mostrar
+      client.from('forecast_snapshot' as any).select('slug, run_type_ganadora').eq('fecha_objetivo', fecha).is('temp_real', null),
     ])
 
     const { getHistoricalAccuracy, getHistoricalAccuracyInteger, computeGlobalMetrics } = supabaseFns
     const runs = runsResult.data as any[] | undefined
     const ayerData = ayerResult.data as any[] | undefined
     const existingActuals = existingActualsResult.data as any[] | undefined
-    const datesData = datesResult.data as any[] | undefined
+    const datesData = datesResult.data as any[]
+    const snapshots = snapshotsResult.data as any[] | undefined
 
     // Parsear pronóstico del día o de ayer
     let analysis: DailyAnalysis | null = null
@@ -81,8 +84,25 @@ export async function getServerSideProps() {
       }
     }
 
+    // Elegir la corrida correcta basado en snapshots
+    // Si hay snapshots, determinar qué run_type ganó en mayoría
     if ((runs as any[] | undefined)?.length) {
-      analysis = parseRun((runs as any[])[0])
+      const allRuns = runs as any[]
+      if (allRuns.length === 1) {
+        analysis = parseRun(allRuns[0])
+      } else {
+        // Hay 10PM y 11PM — usar snapshots para decidir
+        const snapWins: Record<string, string> = {}
+        for (const s of (snapshots ?? [])) {
+          snapWins[s.run_type_ganadora] = (snapWins[s.run_type_ganadora] ?? 0) + 1
+        }
+        // Si mayoría de snapshots prefieren 10PM, usar esa corrida
+        const wins10 = snapWins['10PM'] ?? 0
+        const wins11 = snapWins['11PM'] ?? 0
+        const preferred = wins10 > wins11 ? '10PM' : '11PM'
+        const chosen = allRuns.find((r: any) => r.run_type === preferred) ?? allRuns[0]
+        analysis = parseRun(chosen)
+      }
     }
     if (!analysis && (ayerData as any[] | undefined)?.length) {
       analysis = parseRun((ayerData as any[])[0])

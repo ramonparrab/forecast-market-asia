@@ -1,7 +1,7 @@
 import { NextApiRequest, NextApiResponse } from 'next'
 import { runDailyAnalysis } from '@/lib/forecast-engine'
 import { CityAnalysis } from '@/types'
-import { saveDailyRun, saveForecastRecords } from '@/lib/supabase'
+import { saveDailyRun, saveForecastRecords, upsertForecastSnapshot } from '@/lib/supabase'
 import { CIUDADES_ASIA } from '@/lib/cities'
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
@@ -39,6 +39,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       }
     } catch { /* no saved cron data — use freshly computed values */ }
 
+    // Determinar run_type para corridas manuales
+    const caracasOffset = -4 * 60 * 60000
+    const nowCaracas = new Date(Date.now() + caracasOffset)
+    const caracasHour = nowCaracas.getUTCHours()
+    const runLabel = caracasHour >= 22 || caracasHour < 1
+      ? (caracasHour >= 23 || caracasHour < 1 ? '11PM' : '10PM')
+      : 'MANUAL'
+
     // Save to Supabase (fire-and-forget for manual runs)
     const records = result.cities.map(city => ({
       fecha_ejecucion: result.fecha,
@@ -55,14 +63,40 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       consenso: city.forecast.consenso,
     }))
 
+    const { getModelSelectionCache } = await import('@/lib/modelo-selector')
+    const modelCache = getModelSelectionCache()
+
     await Promise.all([
-      saveForecastRecords(records),
+      saveForecastRecords(records, runLabel),
       saveDailyRun({
         fecha_ejecucion: result.fecha,
         fecha_objetivo: fecha,
         resultados: result.cities,
         recomendaciones: result.recommendations,
         total_asignado: result.total_allocated,
+        run_type: (runLabel === 'MANUAL' ? undefined : runLabel) as '10PM' | '11PM' | undefined,
+      }),
+      // Escribir snapshots para corridas manuales también
+      ...result.cities.map(city => {
+        const sel = modelCache[city.slug]
+        return upsertForecastSnapshot({
+          fecha_objetivo: fecha,
+          slug: city.slug,
+          ciudad: city.ciudad,
+          run_type_ganadora: (runLabel === 'MANUAL' ? '11PM' : runLabel) as '10PM' | '11PM',
+          modelo_ganador: sel?.modelo ?? 'ENSEMBLE',
+          temp_pronosticada: city.forecast.temp_ponderada,
+          temp_corregida: city.forecast.temp_corregida,
+          temp_ponderada: city.forecast.temp_ponderada,
+          consenso: city.forecast.consenso,
+          modelos_usados: Object.keys(city.forecast.ensemble_raw).length,
+          temp_10pm: null,
+          temp_11pm: null,
+          modelo_10pm: null,
+          modelo_11pm: null,
+          temp_real: null,
+          error: null,
+        })
       }),
     ])
 

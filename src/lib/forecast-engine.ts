@@ -89,7 +89,7 @@ async function analyzeCity(
   try {
     // cityHistory ya viene precargado desde runDailyAnalysis (con modelo dinámico seleccionado)
     if (cityHistory.length > 0) {
-      const { temp, modelo, bias, muestras } = aplicarModeloGanador(
+      const { temp, modelo, bias, muestras, temp_alt, modelo_alt, bias_alt } = aplicarModeloGanador(
         city.slug,
         city.nombre,
         baseTemp,
@@ -100,6 +100,10 @@ async function analyzeCity(
       forecast.modelo_activo = modelo
       forecast.sesgo_modelo = bias
       forecast.modelo_muestras = muestras
+      // Guardar también la corrección del modelo perdedor para backtest estable
+      forecast.temp_corregida_alt = temp_alt
+      forecast.modelo_alt = modelo_alt
+      forecast.sesgo_alt = bias_alt
     }
   } catch (e) {
     console.warn(`[${city.slug}] Skip winner-model (${(e as Error).message})`)

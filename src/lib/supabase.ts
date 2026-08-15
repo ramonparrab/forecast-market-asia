@@ -1,5 +1,5 @@
 import { createClient } from '@supabase/supabase-js'
-import { HistoricalRecord, DailyRun, GlobalMetrics, AccuracyMetrics } from '@/types'
+import { HistoricalRecord, DailyRun, GlobalMetrics, AccuracyMetrics, ForecastSnapshot } from '@/types'
 import { CIUDADES_ASIA } from './cities'
 import { BacktestSummary, BacktestDayResult, BacktestCityMetrics } from './backtest-engine'
 
@@ -40,6 +40,7 @@ export async function saveDailyRun(run: DailyRun): Promise<number | null> {
       resultados: JSON.stringify(run.resultados),
       recomendaciones: JSON.stringify(run.recomendaciones),
       total_asignado: run.total_asignado,
+      ...(run.run_type ? { run_type: run.run_type } : {}),
     } as any)
     .select('id')
     .single()
@@ -51,33 +52,36 @@ export async function saveDailyRun(run: DailyRun): Promise<number | null> {
   return (data as any)?.id ?? null
 }
 
-export async function saveForecastRecords(records: HistoricalRecord[]): Promise<void> {
+/**
+ * saveForecastRecords — UPSERT con run_type.
+ * Ya NO borra registros existentes. Usa upsert con onConflict para que
+ * 10PM y 11PM coexistan (UNIQUE = slug, fecha_objetivo, run_type).
+ */
+export async function saveForecastRecords(
+  records: HistoricalRecord[],
+  runType?: string
+): Promise<void> {
   const client = getServiceClient()
   if (!client || records.length === 0) return
 
-  // Delete existing records for these (slug, fecha_objetivo) combos to avoid duplicates
-  for (const r of records) {
-    await client
-      .from('forecast_history' as any)
-      .delete()
-      .eq('slug', r.slug)
-      .eq('fecha_objetivo', r.fecha_objetivo)
-  }
-
   const { error } = await client
     .from('forecast_history' as any)
-    .insert(records.map(r => ({
-      fecha_ejecucion: r.fecha_ejecucion,
-      fecha_objetivo: r.fecha_objetivo,
-      ciudad: r.ciudad,
-      slug: r.slug,
-      temp_pronosticada: r.temp_pronosticada,
-      temp_corregida: r.temp_corregida,
-      temp_real: r.temp_real,
-      error: r.error,
-      modelos_usados: r.modelos_usados,
-      consenso: r.consenso,
-    })) as any)
+    .upsert(
+      records.map(r => ({
+        fecha_ejecucion: r.fecha_ejecucion,
+        fecha_objetivo: r.fecha_objetivo,
+        ciudad: r.ciudad,
+        slug: r.slug,
+        temp_pronosticada: r.temp_pronosticada,
+        temp_corregida: r.temp_corregida,
+        temp_real: r.temp_real,
+        error: r.error,
+        modelos_usados: r.modelos_usados,
+        consenso: r.consenso,
+        ...(runType ? { run_type: runType } : {}),
+      })),
+      { onConflict: 'slug,fecha_objetivo,run_type' } as any
+    )
 
   if (error) {
     console.error('Error saving forecast records:', error)
@@ -114,17 +118,51 @@ export async function getRecentModelErrors(
   const client = getClient()
   if (!client) return {}
 
+  // Preferir forecast_snapshot para errores estables
+  const { data: snapData } = await client
+    .from('forecast_snapshot' as any)
+    .select('slug, error')
+    .not('error', 'is', null)
+    .order('fecha_objetivo', { ascending: false } as any)
+    .limit(limit * 2)
+
+  if (snapData && (snapData as any[]).length > 0) {
+    const grouped: Record<string, number[]> = {}
+    for (const row of (snapData as any[])) {
+      if (!grouped[row.slug]) grouped[row.slug] = []
+      if (grouped[row.slug].length < limit) {
+        grouped[row.slug].push(row.error)
+      }
+    }
+    return grouped
+  }
+
+  // Fallback a forecast_history
   const { data, error } = await client
     .from('forecast_history' as any)
-    .select('slug, error')
+    .select('slug, error, run_type')
     .not('error', 'is', null as any)
     .order('fecha_ejecucion', { ascending: false } as any)
     .limit(limit * 9)
 
   if (error || !data) return {}
 
-  const grouped: Record<string, number[]> = {}
+  // Dedup por (slug, fecha_objetivo) prefiriendo 11PM
+  const seen = new Map<string, any>()
   for (const row of (data as any[])) {
+    const key = row.slug
+    // Agrupar por slug con dedup por fecha
+    const dateKey = `${row.slug}|${row.fecha_ejecucion?.slice(0, 10)}`
+    const existing = seen.get(dateKey)
+    const rPrio = row.run_type === '11PM' ? 2 : row.run_type === '10PM' ? 1 : 0
+    const ePrio = existing?.run_type === '11PM' ? 2 : existing?.run_type === '10PM' ? 1 : 0
+    if (!existing || rPrio > ePrio) {
+      seen.set(dateKey, row)
+    }
+  }
+
+  const grouped: Record<string, number[]> = {}
+  for (const row of Array.from(seen.values())) {
     if (!grouped[row.slug]) grouped[row.slug] = []
     if (grouped[row.slug].length < limit) {
       grouped[row.slug].push(row.error)
@@ -136,16 +174,40 @@ export async function getRecentModelErrors(
 export async function getAllHistoricalErrors(): Promise<Record<string, number[]>> {
   const client = getClient()
   if (!client) return {}
+
+  // Preferir snapshots para errores estables
+  const { data: snapData } = await client
+    .from('forecast_snapshot' as any)
+    .select('slug, error')
+    .not('error', 'is', null)
+    .order('fecha_objetivo', { ascending: false } as any)
+    .limit(5000)
+
+  if (snapData && (snapData as any[]).length > 0) {
+    const grouped: Record<string, number[]> = {}
+    for (const row of (snapData as any[])) {
+      if (!grouped[row.slug]) grouped[row.slug] = []
+      if (grouped[row.slug].length < 100) {
+        grouped[row.slug].push(row.error)
+      }
+    }
+    return grouped
+  }
+
+  // Fallback a forecast_history
   const { data, error } = await client
     .from('forecast_history' as any)
-    .select('id, slug, fecha_objetivo, error')
+    .select('id, slug, fecha_objetivo, error, run_type')
     .not('error', 'is', null)
     .order('id', { ascending: false } as any)
   if (error || !data) return {}
   const seen = new Map<string, any>()
   for (const row of (data as any[])) {
     const key = `${row.slug}|${row.fecha_objetivo}`
-    if (!seen.has(key) || row.id > seen.get(key).id) {
+    const existing = seen.get(key)
+    const rPrio = row.run_type === '11PM' ? 2 : row.run_type === '10PM' ? 1 : 0
+    const ePrio = existing?.run_type === '11PM' ? 2 : existing?.run_type === '10PM' ? 1 : 0
+    if (!existing || rPrio > ePrio || (rPrio === ePrio && row.id > existing.id)) {
       seen.set(key, row)
     }
   }
@@ -203,9 +265,33 @@ export async function getCityHistory(slug: string): Promise<HistoricalRecord[]> 
   const client = getClient()
   if (!client) return []
 
+  // Preferir forecast_snapshot (valores bloqueados)
+  const { data: snapData } = await client
+    .from('forecast_snapshot' as any)
+    .select('fecha_objetivo, slug, ciudad, temp_pronosticada, temp_corregida, temp_real, error, modelos_usados, consenso')
+    .eq('slug', slug)
+    .not('temp_real', 'is', null)
+    .order('fecha_objetivo', { ascending: true } as any)
+
+  if (snapData && (snapData as any[]).length > 0) {
+    return (snapData as any[]).map((r: any) => ({
+      fecha_ejecucion: r.fecha_objetivo + 'T22:00:00Z',
+      fecha_objetivo: r.fecha_objetivo,
+      ciudad: r.ciudad,
+      slug: r.slug,
+      temp_pronosticada: r.temp_pronosticada,
+      temp_corregida: r.temp_corregida,
+      temp_real: r.temp_real,
+      error: r.error,
+      modelos_usados: r.modelos_usados,
+      consenso: r.consenso,
+    })) as HistoricalRecord[]
+  }
+
+  // Fallback a forecast_history con dedup por run_type
   const { data, error } = await client
     .from('forecast_history' as any)
-    .select('id, fecha_ejecucion, fecha_objetivo, ciudad, slug, temp_pronosticada, temp_corregida, temp_real, error, modelos_usados, consenso')
+    .select('id, fecha_ejecucion, fecha_objetivo, ciudad, slug, temp_pronosticada, temp_corregida, temp_real, error, modelos_usados, consenso, run_type')
     .eq('slug', slug)
     .not('temp_real', 'is', null)
     .not('error', 'is', null)
@@ -213,11 +299,14 @@ export async function getCityHistory(slug: string): Promise<HistoricalRecord[]> 
 
   if (error || !data) return []
 
-  // Dedup: keep latest id per (slug, fecha_objetivo)
+  // Dedup: keep preferred run_type per (slug, fecha_objetivo)
   const seen = new Map<string, any>()
   for (const r of (data as any[])) {
     const key = `${r.slug}|${r.fecha_objetivo}`
-    if (!seen.has(key) || r.id > seen.get(key).id) {
+    const existing = seen.get(key)
+    const rPrio = r.run_type === '11PM' ? 2 : r.run_type === '10PM' ? 1 : 0
+    const ePrio = existing?.run_type === '11PM' ? 2 : existing?.run_type === '10PM' ? 1 : 0
+    if (!existing || rPrio > ePrio || (rPrio === ePrio && r.id > existing.id)) {
       seen.set(key, r)
     }
   }
@@ -915,4 +1004,224 @@ export async function recoverEnsembleFromDailyRuns(): Promise<{ fixed: number; s
   }
 
   return { fixed, skipped, errors }
+}
+
+// ===== Forecast Snapshot (pronóstico ganador bloqueado por día) =====
+
+/**
+ * upsertForecastSnapshot — escribe o actualiza el snapshot para una ciudad/día.
+ * Se llama después de cada corrida (10PM o 11PM) con los datos de esa corrida.
+ * Si ya existe un snapshot del otro run_type, elige el ganador.
+ */
+export async function upsertForecastSnapshot(
+  snapshot: Omit<ForecastSnapshot, 'id' | 'created_at' | 'updated_at'>
+): Promise<void> {
+  const client = getServiceClient()
+  if (!client) return
+
+  const { data: existing } = await client
+    .from('forecast_snapshot' as any)
+    .select('*')
+    .eq('slug', snapshot.slug)
+    .eq('fecha_objetivo', snapshot.fecha_objetivo)
+    .single()
+
+  if (!existing) {
+    // Primer snapshot del día — insertar directamente
+    const { error } = await client
+      .from('forecast_snapshot' as any)
+      .insert(snapshot as any)
+    if (error) console.error('[snapshot] Error inserting:', error)
+    return
+  }
+
+  // Ya existe — merge con la nueva corrida
+  const e = existing as any
+  const currentRun = snapshot.run_type_ganadora // la corrida que acaba de llegar
+
+  const update: any = {
+    // Preservar la corrida que ya estaba
+    temp_10pm: currentRun === '10PM' ? snapshot.temp_corregida : (e.temp_10pm ?? snapshot.temp_corregida),
+    temp_11pm: currentRun === '11PM' ? snapshot.temp_corregida : (e.temp_11pm ?? snapshot.temp_corregida),
+    modelo_10pm: currentRun === '10PM' ? snapshot.modelo_ganador : (e.modelo_10pm ?? snapshot.modelo_ganador),
+    modelo_11pm: currentRun === '11PM' ? snapshot.modelo_ganador : (e.modelo_11pm ?? snapshot.modelo_ganador),
+  }
+
+  // Si ambas corridas existen, elegir ganador por historial MAE
+  if (update.temp_10pm !== null && update.temp_11pm !== null) {
+    const winner = await pickWinner(snapshot.slug, snapshot.fecha_objetivo)
+    update.run_type_ganadora = winner.run_type
+    update.modelo_ganador = winner.modelo
+    update.temp_corregida = winner.run_type === '10PM' ? update.temp_10pm : update.temp_11pm
+  } else {
+    // Solo una corrida disponible
+    update.run_type_ganadora = currentRun
+    update.modelo_ganador = snapshot.modelo_ganador
+    update.temp_corregida = snapshot.temp_corregida
+    update.temp_pronosticada = snapshot.temp_pronosticada
+    update.temp_ponderada = snapshot.temp_ponderada
+    update.consenso = snapshot.consenso
+    update.modelos_usados = snapshot.modelos_usados
+  }
+
+  const { error } = await client
+    .from('forecast_snapshot' as any)
+    .update(update)
+    .eq('slug', snapshot.slug)
+    .eq('fecha_objetivo', snapshot.fecha_objetivo)
+
+  if (error) console.error('[snapshot] Error updating:', error)
+}
+
+/**
+ * pickWinner — elige qué run_type (10PM o 11PM) tiene mejor historial.
+ * Si no hay suficientes datos, prefiere 11PM (más reciente).
+ */
+async function pickWinner(
+  slug: string,
+  _fechaObjetivo?: string
+): Promise<{ run_type: '10PM' | '11PM'; modelo: string }> {
+  const client = getClient()
+  if (!client) return { run_type: '11PM', modelo: 'ENSEMBLE' }
+
+  const { data } = await client
+    .from('forecast_history' as any)
+    .select('id, slug, fecha_objetivo, run_type, error')
+    .eq('slug', slug)
+    .not('error', 'is', null)
+    .not('run_type', 'is', null)
+    .order('fecha_objetivo', { ascending: false } as any)
+    .limit(60) // últimos ~30 días x 2 corridas
+
+  if (!data || (data as any[]).length < 3) {
+    return { run_type: '11PM', modelo: 'ENSEMBLE' }
+  }
+
+  // Calcular MAE por run_type
+  const errors10 = (data as any[]).filter(r => r.run_type === '10PM').map(r => Math.abs(r.error))
+  const errors11 = (data as any[]).filter(r => r.run_type === '11PM').map(r => Math.abs(r.error))
+
+  const mae10 = errors10.length >= 2 ? errors10.reduce((s, v) => s + v, 0) / errors10.length : Infinity
+  const mae11 = errors11.length >= 2 ? errors11.reduce((s, v) => s + v, 0) / errors11.length : Infinity
+
+  // Si uno no tiene datos suficientes, usar el otro
+  if (mae10 === Infinity && mae11 === Infinity) return { run_type: '11PM', modelo: 'ENSEMBLE' }
+  if (mae10 === Infinity) return { run_type: '11PM', modelo: 'ENSEMBLE' }
+  if (mae11 === Infinity) return { run_type: '10PM', modelo: 'ENSEMBLE' }
+
+  // Elegir el de menor MAE (empate → 11PM por tener datos más recientes)
+  const winner = mae11 <= mae10 ? '11PM' : '10PM'
+  return { run_type: winner as '10PM' | '11PM', modelo: 'ENSEMBLE' }
+}
+
+/**
+ * getPendingSnapshots — retorna los snapshots sin temp_real (hoy y futuros).
+ */
+export async function getPendingSnapshots(): Promise<ForecastSnapshot[]> {
+  const client = getClient()
+  if (!client) return []
+
+  const { data, error } = await client
+    .from('forecast_snapshot' as any)
+    .select('*')
+    .is('temp_real', null)
+    .order('fecha_objetivo', { ascending: false } as any)
+
+  if (error || !data) return []
+  return (data as any[]) as ForecastSnapshot[]
+}
+
+/**
+ * getLatestSnapshot — retorna el snapshot más reciente (el pronóstico bloqueado para hoy).
+ */
+export async function getLatestSnapshot(): Promise<ForecastSnapshot | null> {
+  const client = getClient()
+  if (!client) return null
+
+  const { data, error } = await client
+    .from('forecast_snapshot' as any)
+    .select('*')
+    .is('temp_real', null)
+    .order('fecha_objetivo', { ascending: false } as any)
+    .limit(1)
+
+  if (error || !data || (data as any[]).length === 0) return null
+  return (data as any[])[0] as ForecastSnapshot
+}
+
+/**
+ * getAllSnapshots — retorna todos los snapshots (para backtest y comparación).
+ */
+export async function getAllSnapshots(
+  limit = 60
+): Promise<ForecastSnapshot[]> {
+  const client = getClient()
+  if (!client) return []
+
+  const { data, error } = await client
+    .from('forecast_snapshot' as any)
+    .select('*')
+    .order('fecha_objetivo', { ascending: false } as any)
+    .limit(limit)
+
+  if (error || !data) return []
+  return (data as any[]) as ForecastSnapshot[]
+}
+
+/**
+ * updateSnapshotActuals — backfill temp_real en snapshots para el cron.
+ */
+export async function updateSnapshotActual(
+  slug: string,
+  fechaObjetivo: string,
+  tempReal: number
+): Promise<boolean> {
+  const client = getServiceClient()
+  if (!client) return false
+
+  // Get snapshot to compute error
+  const { data: snap } = await client
+    .from('forecast_snapshot' as any)
+    .select('temp_corregida')
+    .eq('slug', slug)
+    .eq('fecha_objetivo', fechaObjetivo)
+    .single()
+
+  if (!snap) return false
+
+  const tc = (snap as any).temp_corregida
+  if (tc === null) return false
+
+  const error = Math.round((tempReal - tc) * 100) / 100
+
+  const { error: updateErr } = await client
+    .from('forecast_snapshot' as any)
+    .update({ temp_real: tempReal, error })
+    .eq('slug', slug)
+    .eq('fecha_objetivo', fechaObjetivo)
+
+  if (updateErr) {
+    console.error('[snapshot] Error updating actual:', updateErr)
+    return false
+  }
+  return true
+}
+
+/**
+ * getSnapshotForDate — obtiene el snapshot bloqueado para una fecha específica.
+ * Usado por componentes de UI para mostrar el pronóstico final.
+ */
+export async function getSnapshotsForDate(
+  fechaObjetivo: string
+): Promise<ForecastSnapshot[]> {
+  const client = getClient()
+  if (!client) return []
+
+  const { data, error } = await client
+    .from('forecast_snapshot' as any)
+    .select('*')
+    .eq('fecha_objetivo', fechaObjetivo)
+
+  if (error || !data) return []
+  return (data as any[]) as ForecastSnapshot[]
 }

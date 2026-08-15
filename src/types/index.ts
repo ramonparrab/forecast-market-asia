@@ -35,6 +35,12 @@ export interface ForecastResult {
   modelo_muestras?: number
   /** Base del ensemble (sin el ajuste del modelo ganador), se persiste en forecast_history */
   temp_corregida_base?: number
+  /** Temperatura corregida por el modelo PERDEDOR (para comparación estable en backtest) */
+  temp_corregida_alt?: number
+  /** Modelo perdedor: el que NO fue seleccionado */
+  modelo_alt?: 'MEJORA CONTINUA' | 'KALMAN'
+  /** Sesgo del modelo perdedor */
+  sesgo_alt?: number
   /** Seoul usa ICON crudo como base en vez del ensemble ponderado */
   icon_base?: boolean
 }
@@ -113,6 +119,8 @@ export interface DailyRun {
   resultados: CityAnalysis[]
   recomendaciones: BetRecommendation[]
   total_asignado: number
+  /** '10PM' o '11PM' — hora de la corrida en Caracas */
+  run_type?: '10PM' | '11PM'
   created_at?: string
 }
 
@@ -129,6 +137,8 @@ export interface HistoricalRecord {
   modelos_usados: number
   consenso: string
   created_at?: string
+  /** '10PM' o '11PM' — hora de la corrida en Caracas */
+  run_type?: string
 }
 
 export interface AccuracyMetrics {
@@ -217,4 +227,27 @@ export interface DailyAnalysis {
   global_metrics: GlobalMetrics | null
   arbitrage_alerts: string[]
   historicalErrors: Record<string, number[]>
+}
+
+/** Pronóstico ganador bloqueado por día (tabla forecast_snapshot) */
+export interface ForecastSnapshot {
+  id?: number
+  fecha_objetivo: string
+  slug: string
+  ciudad: string
+  run_type_ganadora: '10PM' | '11PM'
+  modelo_ganador: string
+  temp_pronosticada: number | null
+  temp_corregida: number | null
+  temp_ponderada: number | null
+  consenso: string | null
+  modelos_usados: number
+  temp_10pm: number | null
+  temp_11pm: number | null
+  modelo_10pm: string | null
+  modelo_11pm: string | null
+  temp_real: number | null
+  error: number | null
+  created_at?: string
+  updated_at?: string
 }

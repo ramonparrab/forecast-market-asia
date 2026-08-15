@@ -1,6 +1,5 @@
 import { NextApiRequest, NextApiResponse } from 'next'
 import { createClient } from '@supabase/supabase-js'
-import { computeAllMejoras, computeCurrentForecast } from '@/lib/mejora-continua-engine'
 import { CIUDADES_ASIA } from '@/lib/cities'
 
 const supabaseUrl = (process.env.NEXT_PUBLIC_SUPABASE_URL || '').replace(/\/rest\/v1\/?$/, '')
@@ -12,6 +11,9 @@ export interface NowcastDay {
   temp_corregida_10pm: number | null
   temp_corregida_11pm: number | null
   hora_10pm: string | null
+  hora_11pm: string | null
+  modelo_ganador_10pm: string | null
+  modelo_ganador_11pm: string | null
   combinado_10pm: number | null
   combinado_11pm: number | null
   error_10pm: number | null
@@ -19,6 +21,8 @@ export interface NowcastDay {
   gana: '10PM' | '11PM' | 'EMPATE' | '10PM/11PM' | null
   pred_gana?: '10PM' | '11PM' | null
   pred_acierto?: boolean | null
+  /** true si los valores vienen de snapshots guardados (estables) */
+  estable: boolean
 }
 
 export interface NowcastCityResult {
@@ -58,22 +62,23 @@ function computeRecommendation(
   const month = parseInt(fecha_objetivo.substring(5, 7), 10)
   const trend = prevReal != null ? tc10 - prevReal : null
 
-  // Non-Jul/Aug: always 11PM
   if (month !== 7 && month !== 8) return '11PM'
-
-  // Julio/Agosto:
-  // |diff| < 0.3 → modelo estable, 10PM gana 70%
   if (Math.abs(diff) < 0.3) return '10PM'
-  // diff > 1.5 → calentamiento rápido, 11PM gana 80%
   if (diff > 1.5) return '11PM'
-  // tc10 >= 36 y 11PM cooler → depende de tendencia vs ayer
   if (tc10 >= 36 && diff < -0.3 && trend !== null) {
-    if (trend > 0.5) return '10PM' // modelo calienta, 10PM alcanza
-    return '11PM' // estable/enfría, 11PM corrige sesgo cálido
+    if (trend > 0.5) return '10PM'
+    return '11PM'
   }
   if (tc10 >= 36 && diff < -0.3) return '11PM'
-  // Default Julio: 10PM
   return '10PM'
+}
+
+interface RunSnapshot {
+  id: number
+  fecha_ejecucion: string
+  tc: number           // temp_corregida FINAL (con modelo ganador)
+  modelo_ganador: string | null
+  dist: number
 }
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
@@ -92,93 +97,33 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const slugNames: Record<string, string> = {}
     CIUDADES_ASIA.forEach((c: any) => { slugNames[c.slug] = c.nombre })
 
-    // ============ 1) Read ALL forecast_history (with and without temp_real) ============
+    // ============ 1) forecast_history: solo para temp_real ============
     let fhQuery = client
       .from('forecast_history' as any)
-      .select('id, slug, fecha_objetivo, temp_corregida, temp_real, error')
+      .select('id, slug, fecha_objetivo, temp_real')
+      .not('temp_real', 'is', null as any)
+    if (slugFilter) fhQuery = fhQuery.eq('slug', slugFilter)
+    const { data: fhRecords } = await fhQuery
 
-    if (slugFilter) {
-      fhQuery = fhQuery.eq('slug', slugFilter)
-    }
-    fhQuery = fhQuery.order('fecha_objetivo', { ascending: true } as any)
-
-    const { data: allFh } = await fhQuery
-    if (!allFh || allFh.length === 0) return res.status(200).json({ ciudades: {} })
-
-    // Separate historical (with temp_real) and pending (without temp_real) per slug
-    const fhBySlug: Record<string, { historical: any[]; pending: any[] }> = {}
-    for (const r of allFh as any[]) {
-      if (!fhBySlug[r.slug]) fhBySlug[r.slug] = { historical: [], pending: [] }
-      const bucket = fhBySlug[r.slug]
-      if (r.temp_real != null) {
-        bucket.historical.push(r)
-      } else {
-        bucket.pending.push(r)
+    const realMap: Record<string, { real: number; id: number }> = {}
+    for (const r of (fhRecords as any[]) ?? []) {
+      const key = r.slug + '|' + r.fecha_objetivo
+      const prev = realMap[key]
+      if (!prev || r.id > prev.id) {
+        realMap[key] = { real: r.temp_real, id: r.id }
       }
     }
 
-    // ============ 2) Build FH lookup: (slug|fecha) -> { tc, real } ============
-    const fhMap: Record<string, { tc: number; real: number | null }> = {}
-
-    Object.keys(fhBySlug).forEach(slug => {
-      const bucket = fhBySlug[slug]
-      // Deduplicate historical: keep latest id per target
-      const seen: Record<string, any> = {}
-      bucket.historical.forEach((r: any) => {
-        if (!seen[r.fecha_objetivo] || r.id > seen[r.fecha_objetivo].id) {
-          seen[r.fecha_objetivo] = r
-        }
-      })
-      Object.keys(seen).forEach(fecha => {
-        fhMap[slug + '|' + fecha] = { tc: seen[fecha].temp_corregida, real: seen[fecha].temp_real }
-      })
-      // Add all pending (keep latest id per fecha_objetivo to deduplicate)
-      const pendSeen: Record<string, any> = {}
-      bucket.pending.forEach((r: any) => {
-        if (!pendSeen[r.fecha_objetivo] || r.id > pendSeen[r.fecha_objetivo].id) {
-          pendSeen[r.fecha_objetivo] = r
-        }
-      })
-      Object.keys(pendSeen).forEach(fecha => {
-        fhMap[slug + '|' + fecha] = { tc: pendSeen[fecha].temp_corregida, real: null }
-      })
-    })
-
-    // Filter by daysLimit
-    const validTargets: Record<string, string[]> = {}
-    Object.keys(fhMap).forEach(key => {
-      const [slug, fecha] = key.split('|')
-      const daysAgo = Math.floor((endDate.getTime() - new Date(fecha + 'T12:00:00').getTime()) / (1000 * 60 * 60 * 24))
-      if (daysAgo >= 0 && daysAgo <= daysLimit) {
-        if (!validTargets[slug]) validTargets[slug] = []
-        if (validTargets[slug].indexOf(fecha) === -1) {
-          validTargets[slug].push(fecha)
-        }
-      }
-    })
-    // Always include pending dates (no temp_real), even if in the future
-    Object.keys(fhMap).forEach(key => {
-      const [slug, fecha] = key.split('|')
-      if (fhMap[key].real === null) {
-        if (!validTargets[slug]) validTargets[slug] = []
-        if (validTargets[slug].indexOf(fecha) === -1) {
-          validTargets[slug].push(fecha)
-        }
-      }
-    })
-
-    // ============ 3) Read daily_runs: corrida REAL de las 10PM Caracas = cron Vercel 02:00Z ============
+    // ============ 2) daily_runs: SNAPSHOTS GUARDADOS ============
     const { data: runs } = await client
       .from('daily_runs' as any)
-      .select('id, fecha_ejecucion, fecha_objetivo, resultados')
+      .select('id, fecha_ejecucion, fecha_objetivo, resultados, run_type')
       .gte('fecha_ejecucion', startDate.toISOString())
       .order('fecha_ejecucion', { ascending: true } as any)
 
-    // La 10PM de Caracas = 02:00Z (cron "0 2 * * *"). Tomamos la corrida del cron:
-    // la primera daily_runs de cada objetivo con ts >= 02:00Z (la más cercana al
-    // disparo), no "el primer run del día" que puede ser un run manual de la web
-    // anterior (p.ej. 23:59Z del día previo). Fallback: la más cercana a 02:00Z.
-    const drFirst: Record<string, { id: number; fecha_ejecucion: string; tc: number; dist: number }> = {}
+    const run10pm: Record<string, RunSnapshot> = {}
+    const run11pm: Record<string, RunSnapshot> = {}
+    const allRunKeys = new Set<string>()
 
     for (const run of (runs as any[]) ?? []) {
       const fo = run.fecha_objetivo as string
@@ -187,133 +132,97 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       try { parsed = JSON.parse(run.resultados) } catch { continue }
       if (!Array.isArray(parsed)) continue
 
-      const cronTs = new Date(fo + 'T02:00:00.000Z').getTime()
+      const cronTs10 = new Date(fo + 'T02:00:00.000Z').getTime()
+      const cronTs11 = new Date(fo + 'T03:00:00.000Z').getTime()
+      const runTs = new Date(run.fecha_ejecucion).getTime()
 
-      for (let si = 0; si < allSlugs.length; si++) {
-        const slug = allSlugs[si]
+      for (const slug of allSlugs) {
         const key = slug + '|' + fo
-        if (!fhMap[key]) continue
+        allRunKeys.add(key)
 
         const cityData = parsed.find((c: any) => c.slug === slug)
-        // Usar la BASE del ensemble (temp_corregida_base) si existe: desde el deploy del
-        // modelo ganador, daily_runs guarda el valor YA corregido; aquí se suma la
-        // corrección MC/Kalman de nuevo, así que sin esto habría doble corrección.
-        const tc = cityData?.forecast?.temp_corregida_base ?? cityData?.forecast?.temp_corregida
+        if (!cityData?.forecast) continue
+
+        // Usar temp_corregida FINAL (con modelo ganador aplicado)
+        const tc = cityData.forecast.temp_corregida
         if (tc == null) continue
 
-        const runTs = new Date(run.fecha_ejecucion).getTime()
-        const dist = Math.abs(runTs - cronTs)
-        const esCron = runTs >= cronTs
-        const prev = drFirst[key]
-        if (!prev) {
-          drFirst[key] = { id: run.id, fecha_ejecucion: run.fecha_ejecucion, tc: Number(tc), dist: esCron ? dist : dist + 24 * 60 * 60 * 1000 }
-        } else if (esCron) {
-          if (prev.dist > 24 * 60 * 60 * 1000) {
-            // primero con ts>=02:00Z: reemplaza cualquier pre-cron
-            drFirst[key] = { id: run.id, fecha_ejecucion: run.fecha_ejecucion, tc: Number(tc), dist }
-          } else if (dist < prev.dist) {
-            drFirst[key] = { id: run.id, fecha_ejecucion: run.fecha_ejecucion, tc: Number(tc), dist }
+        const entry: RunSnapshot = {
+          id: run.id,
+          fecha_ejecucion: run.fecha_ejecucion,
+          tc: Number(tc),
+          modelo_ganador: cityData.forecast.modelo_activo ?? null,
+          dist: 0,
+        }
+
+        const rt = run.run_type
+        if (rt === '10PM' || (!rt && runTs >= cronTs10 && runTs < cronTs11 + 30 * 60 * 1000)) {
+          const dist = Math.abs(runTs - cronTs10)
+          const prev = run10pm[key]
+          if (!prev || dist < prev.dist) {
+            run10pm[key] = { ...entry, dist }
+          }
+        } else if (rt === '11PM' || (!rt && runTs >= cronTs11 - 30 * 60 * 1000)) {
+          const dist = Math.abs(runTs - cronTs11)
+          const prev = run11pm[key]
+          if (!prev || dist < prev.dist) {
+            run11pm[key] = { ...entry, dist }
           }
         }
       }
     }
 
-    if (Object.keys(drFirst).length === 0) return res.status(200).json({ ciudades: {} })
+    if (Object.keys(run10pm).length === 0 && Object.keys(run11pm).length === 0) {
+      return res.status(200).json({ ciudades: {} })
+    }
 
-    // ============ 4) Compute corrections using mejora-continua engine ============
-    const slugCorrections: Record<string, Record<string, number>> = {}
+    // ============ 3) Fechas válidas ============
+    const validTargets: Record<string, string[]> = {}
+    const addFecha = (slug: string, fecha: string) => {
+      if (!validTargets[slug]) validTargets[slug] = []
+      if (validTargets[slug].indexOf(fecha) === -1) validTargets[slug].push(fecha)
+    }
+    for (const key of allRunKeys) {
+      const [slug, fecha] = key.split('|')
+      const daysAgo = Math.floor((endDate.getTime() - new Date(fecha + 'T12:00:00').getTime()) / (1000 * 60 * 60 * 24))
+      if (daysAgo >= -1 && daysAgo <= daysLimit) addFecha(slug, fecha)
+    }
 
-    Object.keys(fhBySlug).forEach(slug => {
-      const bucket = fhBySlug[slug]
-      if (bucket.historical.length === 0) return
-
-      // Deduplicate historical (keep latest id per target)
-      const seen: Record<string, any> = {}
-      bucket.historical.forEach((r: any) => {
-        if (!seen[r.fecha_objetivo] || r.id > seen[r.fecha_objetivo].id) {
-          seen[r.fecha_objetivo] = r
-        }
-      })
-      const sorted = Object.keys(seen).sort().map(f => seen[f])
-
-      const corrections: Record<string, number> = {}
-
-      // computeAllMejoras for historical dates
-      try {
-        const result = computeAllMejoras(sorted, slugNames[slug] || slug)
-        for (let di = 0; di < result.dailyResults.length; di++) {
-          const d = result.dailyResults[di]
-          corrections[d.fecha] = d.combinado.temp - d.temp_corregida
-        }
-      } catch (e) {
-        console.error('Error computing mejora for', slug, e)
-      }
-
-      // computeCurrentForecast for each pending date
-      bucket.pending.forEach((p: any) => {
-        try {
-          const cf = computeCurrentForecast(sorted, {
-            slug,
-            temp_corregida: p.temp_corregida,
-            fecha_objetivo: p.fecha_objetivo,
-          } as any, slugNames[slug] || slug)
-          if (cf) {
-            corrections[p.fecha_objetivo] = cf.combinado - p.temp_corregida
-          }
-        } catch (e) {
-          console.error('Error computing current forecast for', slug, e)
-        }
-      })
-
-      slugCorrections[slug] = corrections
-    })
-
-    // ============ 5) Build final results ============
+    // ============ 4) Resultados finales — VALORES ESTABLES ============
     const ciudades: Record<string, NowcastCityResult> = {}
 
     Object.keys(validTargets).forEach(slug => {
       const fechas = validTargets[slug]
       const resultDays: NowcastDay[] = []
-      const corrections = slugCorrections[slug] || {}
 
       for (let fi = 0; fi < fechas.length; fi++) {
         const fecha = fechas[fi]
         const key = slug + '|' + fecha
-        const first = drFirst[key]
-        const fhVal = fhMap[key]
-        if (!first || !fhVal) continue
+        const r10 = run10pm[key]
+        const r11 = run11pm[key]
+        const tempReal = realMap[key]?.real ?? null
 
-        const tcFirst = first.tc
-        const tcLast = fhVal.tc
-        const tempReal = fhVal.real
+        if (!r10 && !r11) continue
 
-        const correction = corrections[fecha] ?? 0
-        const combFirst = tcFirst + correction
-        const combLast = tcLast + correction
+        const tc10 = r10?.tc ?? null
+        const tc11 = r11?.tc ?? null
+        const estable = (r10?.tc != null && r11?.tc != null)
 
-        let errorFirst: number | null = null
-        let errorLast: number | null = null
+        let error10: number | null = null
+        let error11: number | null = null
         let gana: NowcastDay['gana'] = null
 
         if (tempReal !== null) {
-          errorFirst = round2(Math.abs(combFirst - tempReal))
-          errorLast = round2(Math.abs(combLast - tempReal))
+          if (tc10 !== null) error10 = round2(Math.abs(tc10 - tempReal))
+          if (tc11 !== null) error11 = round2(Math.abs(tc11 - tempReal))
 
           const rReal = roundInt(tempReal)
-          const r10 = roundInt(combFirst)
-          const r11 = roundInt(combLast)
-          const a10 = r10 === rReal
-          const a11 = r11 === rReal
+          const a10 = tc10 !== null && roundInt(tc10) === rReal
+          const a11 = tc11 !== null && roundInt(tc11) === rReal
 
-          if (a10 && a11) {
-            gana = '10PM/11PM'
-          } else if (a10 && !a11) {
-            gana = '10PM'
-          } else if (!a10 && a11) {
-            gana = '11PM'
-          } else {
-            gana = null
-          }
+          if (a10 && a11) gana = '10PM/11PM'
+          else if (a10 && !a11) gana = '10PM'
+          else if (!a10 && a11) gana = '11PM'
         }
 
         const [pY, pM, pD] = fecha.split('-').map(Number)
@@ -321,47 +230,45 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         const prevKey = slug + '|' + prevDate.getFullYear() + '-' +
           String(prevDate.getMonth() + 1).padStart(2, '0') + '-' +
           String(prevDate.getDate()).padStart(2, '0')
-        const prevFhVal = fhMap[prevKey]
-        const prevReal = prevFhVal?.real ?? null
-        const predGana = computeRecommendation(tcFirst, tcLast, fecha, slug, prevReal)
+        const prevReal = realMap[prevKey]?.real ?? null
+        const predGana = (tc10 != null && tc11 != null)
+          ? computeRecommendation(tc10, tc11, fecha, slug, prevReal)
+          : null
         let predAcierto: boolean | null = null
-        if (predGana && gana === '10PM/11PM') {
-          predAcierto = true
-        } else if (predGana && gana) {
-          predAcierto = predGana === gana
-        } else if (predGana && gana === null && tempReal !== null) {
-          predAcierto = false
-        }
+        if (predGana && gana === '10PM/11PM') predAcierto = true
+        else if (predGana && gana) predAcierto = predGana === gana
+        else if (predGana && gana === null && tempReal !== null) predAcierto = false
 
         resultDays.push({
           fecha_objetivo: fecha,
           temp_real: tempReal,
-          temp_corregida_10pm: round2(tcFirst),
-          temp_corregida_11pm: round2(tcLast),
-          hora_10pm: first.fecha_ejecucion,
-          combinado_10pm: round2(combFirst),
-          combinado_11pm: round2(combLast),
-          error_10pm: errorFirst,
-          error_11pm: errorLast,
+          temp_corregida_10pm: tc10,
+          temp_corregida_11pm: tc11,
+          hora_10pm: r10?.fecha_ejecucion ?? null,
+          hora_11pm: r11?.fecha_ejecucion ?? null,
+          modelo_ganador_10pm: r10?.modelo_ganador ?? null,
+          modelo_ganador_11pm: r11?.modelo_ganador ?? null,
+          combinado_10pm: tc10,
+          combinado_11pm: tc11,
+          error_10pm: error10,
+          error_11pm: error11,
           gana,
           pred_gana: predGana || undefined,
           pred_acierto: predAcierto ?? undefined,
+          estable,
         })
       }
 
       if (resultDays.length === 0) return
-
       resultDays.sort((a, b) => a.fecha_objetivo.localeCompare(b.fecha_objetivo))
 
       let g10 = 0, g11 = 0, emp = 0
       let sumErr10 = 0, sumErr11 = 0, countErr = 0
 
-      for (let di = 0; di < resultDays.length; di++) {
-        const d = resultDays[di]
+      for (const d of resultDays) {
         if (d.gana === '10PM' || d.gana === '10PM/11PM') g10++
         if (d.gana === '11PM' || d.gana === '10PM/11PM') g11++
         if (d.gana === '10PM/11PM') emp++
-
         if (d.error_10pm !== null && d.error_11pm !== null) {
           sumErr10 += d.error_10pm
           sumErr11 += d.error_11pm
