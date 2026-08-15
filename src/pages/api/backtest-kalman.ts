@@ -73,13 +73,13 @@ function ganaDe(a10: boolean, a11: boolean): KalmanDay['cur_gana'] {
 }
 
 /**
- * Extrae de un daily_run parseado los valores cur (MC) y kal (Kalman).
- * Si temp_corregida_alt existe, usa el valor guardado (estable).
- * Si no existe, calcula el modelo alternativo on-the-fly usando errores históricos.
+ * Extrae valores MC y Kalman de un daily_run.
+ * Prioridad: 1) temp_corregida_alt guardado  2) compute on-the-fly con errores walk-forward.
+ * Para datos antiguos sin modelo_activo, calcula AMBOS modelos desde temp_corregida.
  */
 function extractModelValues(
   cityData: any,
-  historyErrors: number[] | null,
+  walkForwardErrors: number[] | null
   tempBase: number | null
 ): {
   cur: number | null
@@ -90,34 +90,36 @@ function extractModelValues(
   const f = cityData.forecast
   const ganador = f.modelo_activo ?? null
   const ganadorTemp = f.temp_corregida ?? null
-  let perdedorTemp = f.temp_corregida_alt ?? null
+  const perdedorGuardado = f.temp_corregida_alt ?? null
 
-  // Si no hay temp_corregida_alt, calcular el modelo alternativo on-the-fly
-  if (perdedorTemp == null && tempBase != null && historyErrors && historyErrors.length >= 5) {
-    const R = estimateKalmanR(historyErrors)
-    const kalmanBias = kalmanNextBias(historyErrors, KALMAN_Q, R)
-    // Bias simple de estación para MC (promedio de errores históricos)
-    const stationBias = historyErrors.reduce((s, e) => s + e, 0) / historyErrors.length
-
-    if (ganador === 'KALMAN') {
-      // Ganador es Kalman → calcular predicción MC
-      perdedorTemp = round2(tempBase + stationBias)
-    } else if (ganador === 'MEJORA CONTINUA') {
-      // Ganador es MC → calcular predicción Kalman
-      perdedorTemp = round2(tempBase + kalmanBias)
-    } else {
-      // Sin modelo_activo → usar bias simple para ambos
-      perdedorTemp = round2(tempBase + stationBias)
-    }
+  // Caso 1: temp_corregida_alt existe (datos nuevos post-migration) → usar directamente
+  if (perdedorGuardado != null) {
+    if (ganador === 'MEJORA CONTINUA') return { cur: ganadorTemp, kal: perdedorGuardado, modelo_ganador: ganador }
+    if (ganador === 'KALMAN') return { cur: perdedorGuardado, kal: ganadorTemp, modelo_ganador: ganador }
+    return { cur: ganadorTemp, kal: perdedorGuardado, modelo_ganador: null }
   }
 
-  if (ganador === 'MEJORA CONTINUA') {
-    return { cur: ganadorTemp, kal: perdedorTemp, modelo_ganador: ganador }
-  } else if (ganador === 'KALMAN') {
-    return { cur: perdedorTemp, kal: ganadorTemp, modelo_ganador: ganador }
+  // Caso 2 & 3: sin temp_corregida_alt → calcular on-the-fly
+  const base = tempBase ?? ganadorTemp
+  if (base == null || !walkForwardErrors || walkForwardErrors.length < 5) {
+    // Sin datos suficientes para computar
+    if (ganador === 'MEJORA CONTINUA') return { cur: ganadorTemp, kal: null, modelo_ganador: ganador }
+    if (ganador === 'KALMAN') return { cur: null, kal: ganadorTemp, modelo_ganador: ganador }
+    return { cur: ganadorTemp, kal: ganadorTemp, modelo_ganador: null }
   }
-  // Sin modelo_activo (datos antiguos): cur=ganador, kal=computado si hay base
-  return { cur: ganadorTemp, kal: perdedorTemp ?? ganadorTemp, modelo_ganador: null }
+
+  // Calcular ambas predicciones desde base usando errores walk-forward
+  const R = estimateKalmanR(walkForwardErrors)
+  const kalmanBias = kalmanNextBias(walkForwardErrors, KALMAN_Q, R)
+  // Bias de estación simple para MC
+  const stationBias = walkForwardErrors.reduce((s, e) => s + e, 0) / walkForwardErrors.length
+  const mcPred = round2(base + stationBias)
+  const kalPred = round2(base + kalmanBias)
+
+  if (ganador === 'MEJORA CONTINUA') return { cur: ganadorTemp, kal: kalPred, modelo_ganador: ganador }
+  if (ganador === 'KALMAN') return { cur: mcPred, kal: ganadorTemp, modelo_ganador: ganador }
+  // Sin modelo_activo (antiguos): la temp_corregida ES la base, computar ambos
+  return { cur: mcPred, kal: kalPred, modelo_ganador: null }
 }
 
 interface RunSnapshot {
@@ -207,9 +209,10 @@ export async function computeBacktestKalman(daysLimit: number, slugFilter: strin
         const cityData = parsed.find((c: any) => c.slug === slug)
         if (!cityData) continue
 
-        // Obtener temp_corregida_base para compute on-the-fly si falta alt
+        // Obtener temp_corregida_base y walk-forward errors para compute on-the-fly
         const tBase = cityData.forecast?.temp_corregida_base ?? null
-        const { cur, kal, modelo_ganador } = extractModelValues(cityData, slugErrors[slug] || null, tBase)
+        const wfKey = slug + '|' + fo
+        const { cur, kal, modelo_ganador } = extractModelValues(cityData, walkForwardErrors[wfKey] || null, tBase)
         if (cur == null && kal == null) continue
 
         const entry: RunSnapshot = {
@@ -295,17 +298,26 @@ export async function computeBacktestKalman(daysLimit: number, slugFilter: strin
       .order('fecha_objetivo', { ascending: true } as any)
       .limit(5000)
 
-    // Errores históricos por ciudad para computeBothModels on-the-fly
+    // Errores históricos por ciudad y walk-forward errors por (slug, fecha)
     const slugErrors: Record<string, number[]> = {}
+    // walkForwardErrors[slug|fecha] = errores ANTERIORES a esa fecha (para compute on-the-fly)
+    const walkForwardErrors: Record<string, number[]> = {}
     if (allFhForKalman) {
-      const bySlug: Record<string, number[]> = {}
+      const bySlug: Record<string, { fecha: string; error: number }[]> = {}
       for (const r of allFhForKalman as any[]) {
         if (!bySlug[r.slug]) bySlug[r.slug] = []
-        bySlug[r.slug].push(r.error)
+        bySlug[r.slug].push({ fecha: r.fecha_objetivo, error: r.error })
       }
       for (const slug of allSlugs) {
-        const errors = bySlug[slug] || []
-        slugErrors[slug] = errors
+        const items = (bySlug[slug] || []).sort((a, b) => a.fecha.localeCompare(b.fecha))
+        slugErrors[slug] = items.map(i => i.error)
+        // Pre-computar walk-forward: para cada fecha, errores de fechas anteriores
+        for (let i = 0; i < items.length; i++) {
+          const prev = items.slice(0, i).map(x => x.error)
+          walkForwardErrors[slug + '|' + items[i].fecha] = prev
+        }
+        // Kalman meta
+        const errors = slugErrors[slug]
         if (errors.length >= 5) {
           const R = estimateKalmanR(errors)
           const ultimoBias = kalmanNextBias(errors, KALMAN_Q, R)
