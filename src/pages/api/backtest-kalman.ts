@@ -73,28 +73,51 @@ function ganaDe(a10: boolean, a11: boolean): KalmanDay['cur_gana'] {
 }
 
 /**
- * Extrae de un daily_run parseado los valores cur (MC) y kal (Kalman)
- * usando los snapshots GUARDADOS (temp_corregida = ganador, temp_corregida_alt = perdedor).
- * Esto hace que los valores sean ESTABLES — no se recalculan.
+ * Extrae de un daily_run parseado los valores cur (MC) y kal (Kalman).
+ * Si temp_corregida_alt existe, usa el valor guardado (estable).
+ * Si no existe, calcula el modelo alternativo on-the-fly usando errores históricos.
  */
-function extractModelValues(cityData: any): {
-  cur: number | null      // MC prediction
-  kal: number | null      // Kalman prediction
+function extractModelValues(
+  cityData: any,
+  historyErrors: number[] | null,
+  tempBase: number | null
+): {
+  cur: number | null
+  kal: number | null
   modelo_ganador: string | null
 } {
   if (!cityData?.forecast) return { cur: null, kal: null, modelo_ganador: null }
   const f = cityData.forecast
   const ganador = f.modelo_activo ?? null
   const ganadorTemp = f.temp_corregida ?? null
-  const perdedorTemp = f.temp_corregida_alt ?? null
+  let perdedorTemp = f.temp_corregida_alt ?? null
+
+  // Si no hay temp_corregida_alt, calcular el modelo alternativo on-the-fly
+  if (perdedorTemp == null && tempBase != null && historyErrors && historyErrors.length >= 5) {
+    const R = estimateKalmanR(historyErrors)
+    const kalmanBias = kalmanNextBias(historyErrors, KALMAN_Q, R)
+    // Bias simple de estación para MC (promedio de errores históricos)
+    const stationBias = historyErrors.reduce((s, e) => s + e, 0) / historyErrors.length
+
+    if (ganador === 'KALMAN') {
+      // Ganador es Kalman → calcular predicción MC
+      perdedorTemp = round2(tempBase + stationBias)
+    } else if (ganador === 'MEJORA CONTINUA') {
+      // Ganador es MC → calcular predicción Kalman
+      perdedorTemp = round2(tempBase + kalmanBias)
+    } else {
+      // Sin modelo_activo → usar bias simple para ambos
+      perdedorTemp = round2(tempBase + stationBias)
+    }
+  }
 
   if (ganador === 'MEJORA CONTINUA') {
     return { cur: ganadorTemp, kal: perdedorTemp, modelo_ganador: ganador }
   } else if (ganador === 'KALMAN') {
     return { cur: perdedorTemp, kal: ganadorTemp, modelo_ganador: ganador }
   }
-  // Sin modelo_activo (datos antiguos): usar temp_corregida como referencia
-  return { cur: ganadorTemp, kal: ganadorTemp, modelo_ganador: null }
+  // Sin modelo_activo (datos antiguos): cur=ganador, kal=computado si hay base
+  return { cur: ganadorTemp, kal: perdedorTemp ?? ganadorTemp, modelo_ganador: null }
 }
 
 interface RunSnapshot {
@@ -184,7 +207,9 @@ export async function computeBacktestKalman(daysLimit: number, slugFilter: strin
         const cityData = parsed.find((c: any) => c.slug === slug)
         if (!cityData) continue
 
-        const { cur, kal, modelo_ganador } = extractModelValues(cityData)
+        // Obtener temp_corregida_base para compute on-the-fly si falta alt
+        const tBase = cityData.forecast?.temp_corregida_base ?? null
+        const { cur, kal, modelo_ganador } = extractModelValues(cityData, slugErrors[slug] || null, tBase)
         if (cur == null && kal == null) continue
 
         const entry: RunSnapshot = {
@@ -270,6 +295,8 @@ export async function computeBacktestKalman(daysLimit: number, slugFilter: strin
       .order('fecha_objetivo', { ascending: true } as any)
       .limit(5000)
 
+    // Errores históricos por ciudad para computeBothModels on-the-fly
+    const slugErrors: Record<string, number[]> = {}
     if (allFhForKalman) {
       const bySlug: Record<string, number[]> = {}
       for (const r of allFhForKalman as any[]) {
@@ -278,6 +305,7 @@ export async function computeBacktestKalman(daysLimit: number, slugFilter: strin
       }
       for (const slug of allSlugs) {
         const errors = bySlug[slug] || []
+        slugErrors[slug] = errors
         if (errors.length >= 5) {
           const R = estimateKalmanR(errors)
           const ultimoBias = kalmanNextBias(errors, KALMAN_Q, R)
