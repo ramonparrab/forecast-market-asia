@@ -224,7 +224,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse<
 
     // ===== 5. Classify each position =====
     const periodDays = getPeriodDays(period)
-    const cutoffMs = periodDays !== null ? Date.now() - periodDays * 86400000 : 0
+    // Activity API timestamps are in SECONDS, so cutoff must also be in seconds
+    const cutoffSec = periodDays !== null ? Math.floor(Date.now() / 1000) - periodDays * 86400 : 0
 
     const allTrades: ParsedTrade[] = []
     const openPositionsList: OpenPosition[] = []
@@ -244,7 +245,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse<
 
       // Use earliest buy timestamp for date filtering
       const firstBuyTs = pos.buys.length > 0 ? Math.min(...pos.buys.map(b => b.timestamp)) : 0
-      if (periodDays !== null && firstBuyTs < cutoffMs) continue
+      if (periodDays !== null && firstBuyTs < cutoffSec) continue
 
       // Average entry price from buys
       const avgEntryPrice = sharesBought > 0 ? (totalBought / sharesBought) * 100 : 0
