@@ -4,34 +4,6 @@ import type { NextApiRequest, NextApiResponse } from 'next'
    Types
    ------------------------------------------------------------------ */
 
-interface RawPosition {
-  proxyWallet: string
-  asset: string
-  conditionId: string
-  size: number
-  avgPrice: number
-  initialValue: number
-  grossInitialValue: number
-  entryFeesUsdc: number
-  currentValue: number
-  cashPnl: number
-  percentPnl: number
-  totalBought: number
-  realizedPnl: number
-  percentRealizedPnl: number
-  curPrice: number
-  redeemable: boolean
-  title: string
-  slug: string
-  eventId: string
-  eventSlug: string
-  outcome: string
-  outcomeIndex: number
-  oppositeOutcome: string
-  endDate: string
-  negativeRisk: boolean
-}
-
 interface RawActivity {
   proxyWallet: string
   timestamp: number
@@ -53,21 +25,37 @@ interface RawActivity {
   pseudonym: string
 }
 
+interface RawPosition {
+  proxyWallet: string
+  conditionId: string
+  size: number
+  avgPrice: number
+  initialValue: number
+  cashPnl: number
+  percentPnl: number
+  title: string
+  outcome: string
+  endDate: string
+  redeemable: boolean
+  curPrice: number
+}
+
 interface ParsedTrade {
   title: string
   city: string
   temp: number
   date: string
   outcome: string
-  side: string
   entryPriceCents: number
-  shares: number
   invested: number
   cashPnl: number
   percentPnl: number
   won: boolean
   type: string
   tempStr: string
+  status: 'completed' | 'resolved_loss' | 'open'
+  shares: number
+  timestamp: string
 }
 
 interface CityBreakdown { city: string; count: number; wins: number; winRate: number; invested: number; pnl: number; roi: number }
@@ -81,12 +69,10 @@ interface OpenPosition {
   temp: number
   date: string
   outcome: string
-  side: string
   priceCents: number
   size: number
   invested: number
   timestamp: string
-  txHash: string
   slug: string
 }
 
@@ -110,10 +96,13 @@ export interface WalletAnalysisResponse {
   worstTrades: ParsedTrade[]
   allTrades: ParsedTrade[]
   openPositions: OpenPosition[]
-  username: string
+ username: string
   pseudonym: string
   dateRange: { from: string; to: string }
   fetchedAt: string
+  resolvedHeldLosses: number
+  resolvedHeldLossAmount: number
+  openCost: number
   error?: string
 }
 
@@ -123,37 +112,12 @@ export interface WalletAnalysisResponse {
 
 function parseWeatherTitle(title: string): { city: string; temp: number; date: string; type: string; tempStr: string } | null {
   const mHighest = title.match(/Will the (highest) temperature in ([A-Za-z\s]+?) be (\d+)°C.*?on ([A-Za-z]+ \d+)(?:,? (\d{4}))?/)
-  if (mHighest) {
-    const dateStr = mHighest[4] + (mHighest[5] ? ', ' + mHighest[5] : '')
-    return { city: mHighest[2].trim(), temp: parseInt(mHighest[3]), date: dateStr, type: 'highest', tempStr: mHighest[3] + '°C' }
-  }
+  if (mHighest) return { city: mHighest[2].trim(), temp: parseInt(mHighest[3]), date: mHighest[4] + (mHighest[5] ? ', ' + mHighest[5] : ''), type: 'highest', tempStr: mHighest[3] + '°C' }
   const mLowest = title.match(/Will the (lowest) temperature in ([A-Za-z\s]+?) be (\d+)°C.*?on ([A-Za-z]+ \d+)(?:,? (\d{4}))?/)
-  if (mLowest) {
-    const dateStr = mLowest[4] + (mLowest[5] ? ', ' + mLowest[5] : '')
-    return { city: mLowest[2].trim(), temp: parseInt(mLowest[3]), date: dateStr, type: 'lowest', tempStr: mLowest[3] + '°C' }
-  }
+  if (mLowest) return { city: mLowest[2].trim(), temp: parseInt(mLowest[3]), date: mLowest[4] + (mLowest[5] ? ', ' + mLowest[5] : ''), type: 'lowest', tempStr: mLowest[3] + '°C' }
   const mOrBelow = title.match(/Will the (highest) temperature in ([A-Za-z\s]+?) be (\d+)°C or below.*?on ([A-Za-z]+ \d+)(?:,? (\d{4}))?/)
-  if (mOrBelow) {
-    const dateStr = mOrBelow[4] + (mOrBelow[5] ? ', ' + mOrBelow[5] : '')
-    return { city: mOrBelow[2].trim(), temp: parseInt(mOrBelow[3]), date: dateStr, type: 'highest', tempStr: mOrBelow[3] + '°C or below' }
-  }
+  if (mOrBelow) return { city: mOrBelow[2].trim(), temp: parseInt(mOrBelow[3]), date: mOrBelow[4] + (mOrBelow[5] ? ', ' + mOrBelow[5] : ''), type: 'highest', tempStr: mOrBelow[3] + '°C or below' }
   return null
-}
-
-function parseEndDate(endDate: string): Date {
-  // endDate is "2026-06-06" format
-  const parts = endDate.split('-')
-  return new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]), 23, 59, 59)
-}
-
-function parseTradeDate(dateStr: string): Date {
-  // dateStr is "June 6" or "June 6, 2026"
-  const now = new Date()
-  const currentYear = now.getFullYear()
-  // Try with year first
-  const withYear = new Date(dateStr + (dateStr.includes(',') ? '' : ', ' + currentYear))
-  if (!isNaN(withYear.getTime())) return withYear
-  return new Date(dateStr)
 }
 
 function getPriceBucket(cents: number): { bucket: string; label: string } {
@@ -177,6 +141,10 @@ function getPeriodLabel(period: string): string {
   return `Ultimos ${period} dias`
 }
 
+function fmtN(n: number, d = 2): string {
+  return n.toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d })
+}
+
 /* ------------------------------------------------------------------
    API Route
    ------------------------------------------------------------------ */
@@ -192,215 +160,227 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse<
       totalInvested: 0, totalPnl: 0, roi: 0, avgEntryPrice: 0,
       byCity: [], byPriceBucket: [], bySide: [], byType: [],
       bestTrades: [], worstTrades: [], allTrades: [], openPositions: [],
-      username: '', pseudonym: '', dateRange: { from: '', to: '' }, fetchedAt: new Date().toISOString(),
-      error: 'Wallet address invalida. Debe ser 0x... (40 hex chars)'
+      username: '', pseudonym: '', dateRange: { from: '', to: '' },
+      fetchedAt: new Date().toISOString(), resolvedHeldLosses: 0, resolvedHeldLossAmount: 0, openCost: 0,
+      error: 'Wallet invalida. Formato: 0x... (40 hex chars)'
     })
   }
 
   try {
-    // 1. Fetch ALL positions (paginated)
-    const allRawPositions: RawPosition[] = []
+    // ===== 1. Fetch ALL activity (paginated) =====
+    const allActivity: RawActivity[] = []
     let offset = 0
-    const limit = 200
-    while (true) {
-      const url = `https://data-api.polymarket.com/positions?user=${wallet}&limit=${limit}&offset=${offset}`
-      const resp = await fetch(url, {
-        headers: { 'Accept': 'application/json' },
-        signal: AbortSignal.timeout(20000)
-      })
-      if (!resp.ok) throw new Error(`Positions API error: ${resp.status}`)
-      const batch: RawPosition[] = await resp.json()
-      allRawPositions.push(...batch)
-      if (batch.length < limit) break
-      offset += limit
-      if (offset > 2000) break // safety limit
-    }
-
-    // 2. Fetch activity (open/active positions - last 200 trades)
-    let allActivity: RawActivity[] = []
+    const limit = 500
     let username = ''
     let pseudonym = ''
-    try {
-      const actUrl = `https://data-api.polymarket.com/activity?user=${wallet}&limit=200&offset=0`
-      const actResp = await fetch(actUrl, {
-        headers: { 'Accept': 'application/json' },
-        signal: AbortSignal.timeout(20000)
-      })
-      if (actResp.ok) {
-        allActivity = await actResp.json()
-        if (allActivity.length > 0) {
-          username = allActivity[0].name || ''
-          pseudonym = allActivity[0].pseudonym || ''
-        }
+
+    while (true) {
+      const url = `https://data-api.polymarket.com/activity?user=${wallet}&limit=${limit}&offset=${offset}`
+      const resp = await fetch(url, { headers: { 'Accept': 'application/json' }, signal: AbortSignal.timeout(25000) })
+      if (!resp.ok) throw new Error(`Activity API ${resp.status}`)
+      const batch: RawActivity[] = await resp.json()
+      if (batch.length === 0) break
+      allActivity.push(...batch)
+      if (!username && batch.length > 0) { username = batch[0].name || ''; pseudonym = batch[0].pseudonym || '' }
+      if (batch.length < limit) break
+      offset += limit
+      if (offset > 5000) break
+    }
+
+    // ===== 2. Fetch positions (for resolved held-to-expiration LOSERS) =====
+    const allPositions: RawPosition[] = []
+    offset = 0
+    while (true) {
+      const url = `https://data-api.polymarket.com/positions?user=${wallet}&limit=200&offset=${offset}`
+      const resp = await fetch(url, { headers: { 'Accept': 'application/json' }, signal: AbortSignal.timeout(20000) })
+      if (!resp.ok) break
+      const batch: RawPosition[] = await resp.json()
+      if (batch.length === 0) break
+      allPositions.push(...batch)
+      if (batch.length < 200) break
+      offset += 200
+      if (offset > 2000) break
+    }
+
+    // ===== 3. Filter weather activity and group into positions =====
+    const weatherActivity = allActivity.filter(a => a.title.toLowerCase().includes('temperature'))
+
+    const posMap = new Map<string, { buys: RawActivity[]; sells: RawActivity[]; title: string; outcome: string }>()
+    for (const a of weatherActivity) {
+      const key = a.conditionId + '_' + a.outcome
+      if (!posMap.has(key)) posMap.set(key, { buys: [], sells: [], title: a.title, outcome: a.outcome })
+      const entry = posMap.get(key)!
+      if (a.side === 'BUY') entry.buys.push(a)
+      else entry.sells.push(a)
+    }
+
+    // ===== 4. Build resolved-positions set (conditionId+outcome) from positions API =====
+    const resolvedLossSet = new Set<string>()
+    for (const p of allPositions) {
+      if (p.title.toLowerCase().includes('temperature') && p.redeemable && p.curPrice === 0) {
+        resolvedLossSet.add(p.conditionId + '_' + p.outcome)
       }
-    } catch { /* non-critical */ }
+    }
 
-    // 3. Filter weather positions
-    const weatherRaw = allRawPositions.filter(p =>
-      p.title.toLowerCase().includes('temperature')
-    )
+    // ===== 5. Classify each position =====
+    const periodDays = getPeriodDays(period)
+    const cutoffMs = periodDays !== null ? Date.now() - periodDays * 86400000 : 0
 
-    // 4. Parse trades
     const allTrades: ParsedTrade[] = []
-    for (const p of weatherRaw) {
-      const parsed = parseWeatherTitle(p.title)
+    const openPositionsList: OpenPosition[] = []
+    let resolvedHeldLosses = 0
+    let resolvedHeldLossAmount = 0
+    let openCost = 0
+
+    for (const [key, pos] of posMap) {
+      const parsed = parseWeatherTitle(pos.title)
       if (!parsed) continue
 
-      const endDate = parseEndDate(p.endDate)
-      allTrades.push({
-        title: p.title,
-        city: parsed.city,
-        temp: parsed.temp,
-        date: p.endDate,
-        outcome: p.outcome,
-        side: p.outcome, // Yes or No
-        entryPriceCents: Math.round(p.avgPrice * 1000) / 10,
-        shares: p.size,
-        invested: Math.abs(p.initialValue),
-        cashPnl: p.cashPnl,
-        percentPnl: p.percentPnl,
-        won: p.cashPnl > 0,
-        type: parsed.type,
-        tempStr: parsed.tempStr,
-      })
+      const sharesBought = pos.buys.reduce((s, a) => s + a.size, 0)
+      const sharesSold = pos.sells.reduce((s, a) => s + a.size, 0)
+      const totalBought = pos.buys.reduce((s, a) => s + a.usdcSize, 0)
+      const totalSold = pos.sells.reduce((s, a) => s + a.usdcSize, 0)
+      const netShares = sharesBought - sharesSold
+
+      // Use earliest buy timestamp for date filtering
+      const firstBuyTs = pos.buys.length > 0 ? Math.min(...pos.buys.map(b => b.timestamp)) : 0
+      if (periodDays !== null && firstBuyTs < cutoffMs) continue
+
+      // Average entry price from buys
+      const avgEntryPrice = sharesBought > 0 ? (totalBought / sharesBought) * 100 : 0
+
+      // Trade date from activity timestamp
+      const tradeDate = firstBuyTs > 0 ? new Date(firstBuyTs * 1000).toISOString().slice(0, 10) : parsed.date.replace(/.*?(\d{4})/, '$1')
+
+      if (Math.abs(netShares) < 0.05) {
+        // === COMPLETED: all shares sold ===
+        const pnl = totalSold - totalBought
+        const pctPnl = totalBought > 0 ? (pnl / totalBought) * 100 : 0
+        allTrades.push({
+          title: pos.title, city: parsed.city, temp: parsed.temp, date: tradeDate,
+          outcome: pos.outcome, entryPriceCents: Math.round(avgEntryPrice * 10) / 10,
+          invested: totalBought, cashPnl: pnl, percentPnl: pctPnl,
+          won: pnl > 0, type: parsed.type, tempStr: parsed.tempStr,
+          status: 'completed', shares: sharesBought, timestamp: new Date(firstBuyTs * 1000).toISOString()
+        })
+      } else if (netShares > 0) {
+        // === STILL HOLDING shares ===
+        const isResolvedLoss = resolvedLossSet.has(key)
+        if (isResolvedLoss) {
+          // Resolved loser held to expiration
+          const heldCost = totalBought - totalSold
+          resolvedHeldLosses++
+          resolvedHeldLossAmount += heldCost
+          allTrades.push({
+            title: pos.title, city: parsed.city, temp: parsed.temp, date: tradeDate,
+            outcome: pos.outcome, entryPriceCents: Math.round(avgEntryPrice * 10) / 10,
+            invested: totalBought, cashPnl: -(totalBought - totalSold), percentPnl: -100,
+            won: false, type: parsed.type, tempStr: parsed.tempStr,
+            status: 'resolved_loss', shares: sharesBought, timestamp: new Date(firstBuyTs * 1000).toISOString()
+          })
+        } else {
+          // Still open (not resolved or resolved winner)
+          const heldCost = totalBought - totalSold
+          openCost += heldCost
+          // Add to open positions list
+          const latestBuy = pos.buys.length > 0 ? pos.buys[pos.buys.length - 1] : null
+          openPositionsList.push({
+            title: pos.title, city: parsed.city, temp: parsed.temp, date: tradeDate,
+            outcome: pos.outcome, priceCents: Math.round(avgEntryPrice * 10) / 10,
+            size: netShares, invested: heldCost,
+            timestamp: new Date(firstBuyTs * 1000).toISOString(),
+            slug: latestBuy?.slug || ''
+          })
+        }
+      }
+      // Ignore negative net shares (sell before buy anomaly)
     }
 
-    // 5. Filter by period
-    const periodDays = getPeriodDays(period)
-    let filteredTrades = allTrades
-    if (periodDays !== null) {
-      const cutoff = new Date()
-      cutoff.setDate(cutoff.getDate() - periodDays)
-      filteredTrades = allTrades.filter(t => parseEndDate(t.date) >= cutoff)
-    }
-
-    // 6. Compute summaries
-    const wins = filteredTrades.filter(t => t.won).length
-    const losses = filteredTrades.filter(t => !t.won).length
-    const totalInvested = filteredTrades.reduce((s, t) => s + t.invested, 0)
-    const totalPnl = filteredTrades.reduce((s, t) => s + t.cashPnl, 0)
+    // ===== 6. Compute summaries =====
+    const closedTrades = allTrades.filter(t => t.status !== 'open')
+    const wins = closedTrades.filter(t => t.won).length
+    const losses = closedTrades.length - wins
+    const totalInvested = closedTrades.reduce((s, t) => s + t.invested, 0)
+    const totalPnl = closedTrades.reduce((s, t) => s + t.cashPnl, 0)
     const roi = totalInvested > 0 ? (totalPnl / totalInvested) * 100 : 0
-    const avgEntryPrice = filteredTrades.length > 0
-      ? filteredTrades.reduce((s, t) => s + t.entryPriceCents, 0) / filteredTrades.length
+    const avgEntryPrice = closedTrades.length > 0
+      ? closedTrades.reduce((s, t) => s + t.entryPriceCents, 0) / closedTrades.length
       : 0
 
-    // 7. By City
+    // ===== 7. Breakdowns =====
     const cityMap = new Map<string, ParsedTrade[]>()
-    for (const t of filteredTrades) {
+    const bucketMap = new Map<string, ParsedTrade[]>()
+    const sideMap = new Map<string, ParsedTrade[]>()
+    const typeMap = new Map<string, ParsedTrade[]>()
+
+    for (const t of closedTrades) {
       if (!cityMap.has(t.city)) cityMap.set(t.city, [])
       cityMap.get(t.city)!.push(t)
-    }
-    const byCity: CityBreakdown[] = Array.from(cityMap.entries())
-      .map(([city, trades]) => {
-        const w = trades.filter(t => t.won).length
-        const inv = trades.reduce((s, t) => s + t.invested, 0)
-        const pnl = trades.reduce((s, t) => s + t.cashPnl, 0)
-        return { city, count: trades.length, wins: w, winRate: trades.length > 0 ? (w / trades.length) * 100 : 0, invested: inv, pnl, roi: inv > 0 ? (pnl / inv) * 100 : 0 }
-      })
-      .sort((a, b) => b.roi - a.roi)
-
-    // 8. By Price Bucket
-    const bucketMap = new Map<string, ParsedTrade[]>()
-    for (const t of filteredTrades) {
       const { bucket } = getPriceBucket(t.entryPriceCents)
       if (!bucketMap.has(bucket)) bucketMap.set(bucket, [])
       bucketMap.get(bucket)!.push(t)
-    }
-    const byPriceBucket: PriceBucket[] = Array.from(bucketMap.entries())
-      .map(([bucket, trades]) => {
-        const w = trades.filter(t => t.won).length
-        const inv = trades.reduce((s, t) => s + t.invested, 0)
-        const pnl = trades.reduce((s, t) => s + t.cashPnl, 0)
-        const { label } = getPriceBucket(trades[0].entryPriceCents)
-        return { bucket, label, count: trades.length, wins: w, winRate: trades.length > 0 ? (w / trades.length) * 100 : 0, invested: inv, pnl, roi: inv > 0 ? (pnl / inv) * 100 : 0 }
-      })
-      .sort((a, b) => {
-        const order = ['<10', '10-24', '25-44', '45-64', '65-84', '85+']
-        return order.indexOf(a.bucket) - order.indexOf(b.bucket)
-      })
-
-    // 9. By Side (Yes/No)
-    const sideMap = new Map<string, ParsedTrade[]>()
-    for (const t of filteredTrades) {
-      if (!sideMap.has(t.side)) sideMap.set(t.side, [])
-      sideMap.get(t.side)!.push(t)
-    }
-    const bySide: SideBreakdown[] = Array.from(sideMap.entries())
-      .map(([side, trades]) => {
-        const w = trades.filter(t => t.won).length
-        const inv = trades.reduce((s, t) => s + t.invested, 0)
-        const pnl = trades.reduce((s, t) => s + t.cashPnl, 0)
-        return { side, count: trades.length, wins: w, winRate: trades.length > 0 ? (w / trades.length) * 100 : 0, invested: inv, pnl, roi: inv > 0 ? (pnl / inv) * 100 : 0 }
-      })
-
-    // 10. By Type (highest/lowest)
-    const typeMap = new Map<string, ParsedTrade[]>()
-    for (const t of filteredTrades) {
+      if (!sideMap.has(t.outcome)) sideMap.set(t.outcome, [])
+      sideMap.get(t.outcome)!.push(t)
       if (!typeMap.has(t.type)) typeMap.set(t.type, [])
       typeMap.get(t.type)!.push(t)
     }
-    const byType: TypeBreakdown[] = Array.from(typeMap.entries())
-      .map(([type, trades]) => {
-        const w = trades.filter(t => t.won).length
-        const inv = trades.reduce((s, t) => s + t.invested, 0)
-        const pnl = trades.reduce((s, t) => s + t.cashPnl, 0)
-        return { type, count: trades.length, wins: w, winRate: trades.length > 0 ? (w / trades.length) * 100 : 0, invested: inv, pnl, roi: inv > 0 ? (pnl / inv) * 100 : 0 }
-      })
 
-    // 11. Best / Worst trades
-    const sorted = [...filteredTrades].sort((a, b) => b.cashPnl - a.cashPnl)
+    const byCity: CityBreakdown[] = Array.from(cityMap.entries()).map(([city, trades]) => {
+      const w = trades.filter(t => t.won).length
+      const inv = trades.reduce((s, t) => s + t.invested, 0)
+      const pnl = trades.reduce((s, t) => s + t.cashPnl, 0)
+      return { city, count: trades.length, wins: w, winRate: (w / trades.length) * 100, invested: inv, pnl, roi: inv > 0 ? (pnl / inv) * 100 : 0 }
+    }).sort((a, b) => b.roi - a.roi)
+
+    const bucketOrder = ['<10', '10-24', '25-44', '45-64', '65-84', '85+']
+    const byPriceBucket: PriceBucket[] = Array.from(bucketMap.entries()).map(([bucket, trades]) => {
+      const w = trades.filter(t => t.won).length
+      const inv = trades.reduce((s, t) => s + t.invested, 0)
+      const pnl = trades.reduce((s, t) => s + t.cashPnl, 0)
+      const { label } = getPriceBucket(trades[0].entryPriceCents)
+      return { bucket, label, count: trades.length, wins: w, winRate: (w / trades.length) * 100, invested: inv, pnl, roi: inv > 0 ? (pnl / inv) * 100 : 0 }
+    }).sort((a, b) => bucketOrder.indexOf(a.bucket) - bucketOrder.indexOf(b.bucket))
+
+    const bySide: SideBreakdown[] = Array.from(sideMap.entries()).map(([side, trades]) => {
+      const w = trades.filter(t => t.won).length
+      const inv = trades.reduce((s, t) => s + t.invested, 0)
+      const pnl = trades.reduce((s, t) => s + t.cashPnl, 0)
+      return { side, count: trades.length, wins: w, winRate: (w / trades.length) * 100, invested: inv, pnl, roi: inv > 0 ? (pnl / inv) * 100 : 0 }
+    })
+
+    const byType: TypeBreakdown[] = Array.from(typeMap.entries()).map(([type, trades]) => {
+      const w = trades.filter(t => t.won).length
+      const inv = trades.reduce((s, t) => s + t.invested, 0)
+      const pnl = trades.reduce((s, t) => s + t.cashPnl, 0)
+      return { type, count: trades.length, wins: w, winRate: (w / trades.length) * 100, invested: inv, pnl, roi: inv > 0 ? (pnl / inv) * 100 : 0 }
+    })
+
+    // ===== 8. Best / Worst =====
+    const sorted = [...closedTrades].sort((a, b) => b.cashPnl - a.cashPnl)
     const bestTrades = sorted.slice(0, 10)
     const worstTrades = sorted.slice(-10).reverse()
 
-    // 12. Open positions (from activity - trades on unresolved markets)
-    const resolvedConditionIds = new Set(allRawPositions.map(p => p.conditionId))
-    const openTrades = allActivity
-      .filter(a => !resolvedConditionIds.has(a.conditionId) && a.title.toLowerCase().includes('temperature'))
-    const seenOpen = new Set<string>()
-    const openPositions: OpenPosition[] = []
-    for (const a of openTrades) {
-      const key = a.conditionId + a.outcome
-      if (seenOpen.has(key)) continue
-      seenOpen.add(key)
-      const parsed = parseWeatherTitle(a.title)
-      if (!parsed) continue
-      const ts = new Date(a.timestamp * 1000).toISOString()
-      openPositions.push({
-        title: a.title,
-        city: parsed.city,
-        temp: parsed.temp,
-        date: a.title.match(/on ([A-Za-z]+ \d+)(?:,? (\d{4}))?/)?.[0]?.replace('on ', '') || '',
-        outcome: a.outcome,
-        side: a.side,
-        priceCents: Math.round(a.price * 1000) / 10,
-        size: a.size,
-        invested: a.usdcSize,
-        timestamp: ts,
-        txHash: a.transactionHash,
-        slug: a.slug,
-      })
-    }
-
-    // 13. Date range
-    const dates = filteredTrades.map(t => t.date).sort()
-    const dateRange = dates.length > 0
-      ? { from: dates[0], to: dates[dates.length - 1] }
-      : { from: '', to: '' }
+    // ===== 9. Date range =====
+    const dates = closedTrades.map(t => t.date).sort()
+    const dateRange = dates.length > 0 ? { from: dates[0], to: dates[dates.length - 1] } : { from: '', to: '' }
 
     res.status(200).json({
       wallet, period, periodLabel: getPeriodLabel(period),
-      totalWeatherTrades: filteredTrades.length,
+      totalWeatherTrades: closedTrades.length,
       wins, losses,
-      winRate: filteredTrades.length > 0 ? (wins / filteredTrades.length) * 100 : 0,
+      winRate: closedTrades.length > 0 ? (wins / closedTrades.length) * 100 : 0,
       totalInvested: Math.round(totalInvested * 100) / 100,
       totalPnl: Math.round(totalPnl * 100) / 100,
       roi: Math.round(roi * 100) / 100,
       avgEntryPrice: Math.round(avgEntryPrice * 10) / 10,
       byCity, byPriceBucket, bySide, byType,
-      bestTrades, worstTrades, allTrades: filteredTrades,
-      openPositions,
+      bestTrades, worstTrades, allTrades: closedTrades,
+      openPositions: openPositionsList,
       username, pseudonym, dateRange,
       fetchedAt: new Date().toISOString(),
+      resolvedHeldLosses,
+      resolvedHeldLossAmount: Math.round(resolvedHeldLossAmount * 100) / 100,
+      openCost: Math.round(openCost * 100) / 100,
     })
   } catch (err: any) {
     console.error('[wallet-analysis]', err)
@@ -411,8 +391,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse<
       byCity: [], byPriceBucket: [], bySide: [], byType: [],
       bestTrades: [], worstTrades: [], allTrades: [], openPositions: [],
       username: '', pseudonym: '', dateRange: { from: '', to: '' },
-      fetchedAt: new Date().toISOString(),
-      error: err.message || 'Error desconocido al obtener datos de Polymarket'
+      fetchedAt: new Date().toISOString(), resolvedHeldLosses: 0, resolvedHeldLossAmount: 0, openCost: 0,
+      error: err.message || 'Error obteniendo datos de Polymarket'
     })
   }
 }

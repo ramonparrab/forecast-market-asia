@@ -312,7 +312,7 @@ export default function WalletAnalysis() {
                     <div className="col-span-3 text-white truncate">{t.city}</div>
                     <div className="col-span-2 text-gray-400">{t.date}</div>
                     <div className="col-span-2 text-blue-400">{t.tempStr}</div>
-                    <div className="col-span-1 text-gray-400">{t.side}</div>
+                    <div className="col-span-1 text-gray-400">{t.outcome}</div>
                     <div className="col-span-1 text-right text-gray-400">{t.entryPriceCents}¢</div>
                     <div className={`col-span-2 text-right font-bold ${pnlColor(t.cashPnl)}`}>{t.cashPnl >= 0 ? '+' : ''}{fmt(t.cashPnl)}</div>
                   </div>
@@ -335,7 +335,7 @@ export default function WalletAnalysis() {
                     <div className="col-span-3 text-white truncate">{t.city}</div>
                     <div className="col-span-2 text-gray-400">{t.date}</div>
                     <div className="col-span-2 text-blue-400">{t.tempStr}</div>
-                    <div className="col-span-1 text-gray-400">{t.side}</div>
+                    <div className="col-span-1 text-gray-400">{t.outcome}</div>
                     <div className="col-span-1 text-right text-gray-400">{t.entryPriceCents}¢</div>
                     <div className={`col-span-2 text-right font-bold ${pnlColor(t.cashPnl)}`}>{t.cashPnl >= 0 ? '+' : ''}{fmt(t.cashPnl)}</div>
                   </div>
@@ -344,23 +344,42 @@ export default function WalletAnalysis() {
             </details>
           )}
 
+          {/* Resolved held losses + Open positions cost */}
+          {(d.resolvedHeldLosses > 0 || d.openCost > 0) && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {d.resolvedHeldLosses > 0 && (
+                <div className="rounded-xl bg-red-500/10 border border-red-500/20 p-4 text-center">
+                  <p className="text-2xl font-bold text-red-400">{d.resolvedHeldLosses}</p>
+                  <p className="text-[10px] text-gray-500 mt-1">PERDIDAS HOLD HASTA EXPIRACION</p>
+                  <p className="text-xs text-red-300 mt-1">-${fmt(d.resolvedHeldLossAmount)} total</p>
+                </div>
+              )}
+              {d.openCost > 0 && (
+                <div className="rounded-xl bg-blue-500/10 border border-blue-500/20 p-4 text-center">
+                  <p className="text-2xl font-bold text-blue-400">{d.openPositions.length}</p>
+                  <p className="text-[10px] text-gray-500 mt-1">POSICIONES ABIERTAS</p>
+                  <p className="text-xs text-blue-300 mt-1">${fmt(d.openCost)} invertado</p>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Open Positions */}
           {d.openPositions.length > 0 && (
-            <details open className="rounded-xl bg-blue-500/5 border border-blue-500/20 overflow-hidden">
+            <details className="rounded-xl bg-blue-500/5 border border-blue-500/20 overflow-hidden">
               <summary className="cursor-pointer px-4 py-3 text-sm font-medium text-blue-400 hover:text-blue-300 transition flex items-center gap-2">
                 <span>📊</span> Posiciones Abiertas
                 <span className="ml-auto text-xs text-gray-600">{d.openPositions.length} activas</span>
               </summary>
               <div className="p-4 pt-2 space-y-1.5">
                 {d.openPositions.map((p, i) => (
-                  <div key={i} className="grid grid-cols-12 gap-2 items-center rounded-lg bg-slate-900/50 px-3 py-2 text-xs">
-                    <div className="col-span-3 text-white truncate">{p.city}</div>
-                    <div className="col-span-2 text-gray-400">{p.temp}°C</div>
-                    <div className="col-span-2 text-blue-400">{p.outcome}</div>
-                    <div className="col-span-1 text-gray-400">{p.side}</div>
+                  <div key={i} className="grid grid-cols-7 gap-2 items-center rounded-lg bg-slate-900/50 px-3 py-2 text-xs">
+                    <div className="col-span-2 text-white truncate">{p.city}</div>
+                    <div className="col-span-1 text-gray-400">{p.temp}°C</div>
+                    <div className="col-span-1 text-blue-400">{p.outcome}</div>
                     <div className="col-span-1 text-right text-gray-400">{p.priceCents}¢</div>
                     <div className="col-span-1 text-right text-gray-400">{p.size.toFixed(1)}</div>
-                    <div className="col-span-2 text-right text-gray-300">${fmt(p.invested, 1)}</div>
+                    <div className="col-span-1 text-right text-gray-300">${fmt(p.invested, 1)}</div>
                   </div>
                 ))}
               </div>
@@ -397,7 +416,7 @@ export default function WalletAnalysis() {
                           <td className="py-1.5 px-2 text-white">{t.city}</td>
                           <td className="py-1.5 px-2 text-blue-400">{t.tempStr}</td>
                           <td className="py-1.5 px-2">
-                            <span className={t.side === 'Yes' ? 'text-emerald-400' : 'text-red-400'}>{t.side}</span>
+                            <span className={t.outcome === 'Yes' ? 'text-emerald-400' : 'text-red-400'}>{t.outcome}</span>
                           </td>
                           <td className="py-1.5 px-2 text-right text-gray-400">{t.entryPriceCents}¢</td>
                           <td className="py-1.5 px-2 text-right text-gray-400">${fmt(t.invested, 1)}</td>
