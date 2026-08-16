@@ -16,6 +16,7 @@ import PerformanceAnalisis from '@/components/PerformanceAnalisis'
 import LadderBetting from '@/components/LadderBetting'
 import Arquitectura from '@/components/Arquitectura'
 import VsRivales from '@/components/VsRivales'
+import WalletAnalysis from '@/components/WalletAnalysis'
 
 import { DailyAnalysis, GlobalMetrics, CityAnalysis } from '@/types'
 import { getModeloNombre } from '@/lib/modelo-selector'
@@ -209,7 +210,7 @@ export async function getServerSideProps() {
   }
 }
 
-type View = 'executive' | 'dashboard' | 'metrics' | 'comparison' | 'backtest' | 'arbitrage' | 'architecture' | 'signals' | 'coverage' | 'mejora-continua' | 'backtest-si' | 'performance' | 'ladder' | 'rivales'
+type View = 'executive' | 'dashboard' | 'metrics' | 'comparison' | 'backtest' | 'arbitrage' | 'architecture' | 'signals' | 'coverage' | 'mejora-continua' | 'backtest-si' | 'performance' | 'ladder' | 'rivales' | 'wallet'
 
 /** Returns a friendly confidence label + color class */
 function getConfidence(city: CityAnalysis): { label: string; color: string; bg: string } {
@@ -678,6 +679,7 @@ export default function Home({ initialAnalysis, initialMetrics, initialAvailable
     { key: 'performance', label: 'Performance', icon: '📈', desc: 'Precisión 10PM/11PM vs Real', group: 'av' },
     { key: 'ladder', label: 'Ladder Betting', icon: '🪜', desc: 'Escalera Kelly vs Polymarket', group: 'av' },
     { key: 'rivales', label: 'VS RIVALES', icon: '⚔️', desc: 'Nuestro vs modelos vs REAL', group: 'av' },
+    { key: 'wallet', label: 'POLYMARKET x WALLET', icon: '🦔', desc: 'Analisis de wallet en Polymarket', group: 'ex' },
   ]
 
   return (
@@ -960,6 +962,9 @@ export default function Home({ initialAnalysis, initialMetrics, initialAvailable
 
       {/* VS RIVALES View */}
       {activeView === 'rivales' && <VsRivales />}
+
+      {/* Polymarket Wallet Analysis View */}
+      {activeView === 'wallet' && <WalletAnalysis />}
 
       {/* System Architecture View */}
       {activeView === 'architecture' && <Arquitectura />}
