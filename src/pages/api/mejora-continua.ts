@@ -99,10 +99,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       const nombre = ciudadMap.get(slug) || slug
       const result = computeAllMejoras(records, nombre)
 
-      // Fetch current pending forecast: preferir snapshot bloqueado
+      // Fetch current pending forecast: usar temp_pronosticada (cruda) como base para MC,
+      // ya que el engine aplica station/range/boost encima. Si usamos temp_corregida del
+      // snapshot (que ya incluye MC), se duplicaria la correccion.
       let currentQuery = client
         .from('forecast_snapshot' as any)
-        .select('fecha_objetivo, temp_corregida, run_type_ganadora, modelo_ganador')
+        .select('fecha_objetivo, temp_pronosticada, temp_corregida, run_type_ganadora, modelo_ganador')
         .eq('slug', slug)
         .is('temp_real', null)
         .order('fecha_objetivo', { ascending: false } as any)
@@ -112,9 +114,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
       if ((currentRaw as any[])?.length) {
         const c = (currentRaw as any[])[0]
+        // Si hay temp_pronosticada, usarla como base cruda para el engine.
+        // Si no existe, mantener temp_corregida como fallback.
+        const baseTemp = c.temp_pronosticada ?? c.temp_corregida
         result.currentForecast = computeCurrentForecast(records, {
           slug,
-          temp_corregida: c.temp_corregida,
+          temp_corregida: baseTemp,
         } as any, nombre)
       }
 
