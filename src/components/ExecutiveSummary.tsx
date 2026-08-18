@@ -52,14 +52,14 @@ interface Alert {
   text: string
 }
 
-function SystemAlertBar({ alerts }: { alerts: Alert[] }) {
+function SystemAlertBar({ alerts, cityCount }: { alerts: Alert[]; cityCount: number }) {
   const critical = alerts.filter(a => a.type === 'error')
   const warnings = alerts.filter(a => a.type === 'warning')
   if (critical.length === 0 && warnings.length === 0) {
     return (
       <div className="rounded-xl bg-emerald-500/10 border border-emerald-500/20 p-3 flex items-center gap-2 text-sm">
         <span className="text-emerald-400 font-bold">✅</span>
-        <span className="text-emerald-300">Sistema operativo — 9/9 ciudades con datos, nowcasting activo</span>
+        <span className="text-emerald-300">Sistema operativo — {cityCount}/{cityCount} ciudades con datos, nowcasting activo</span>
       </div>
     )
   }
@@ -254,7 +254,7 @@ export default function ExecutiveSummaryPanel({ analysis, metrics, previousAnaly
   return (
     <div className="space-y-4">
       {/* ===== ALERT BAR ===== */}
-      <SystemAlertBar alerts={alerts} />
+      <SystemAlertBar alerts={alerts} cityCount={analysis.cities.length} />
 
       {/* ===== ALERTA CLIMÁTICA (FRENTE FRÍO / CALOR / NIEVE / LLUVIA) ===== */}
       <AlertaClimaBanner />
@@ -312,7 +312,7 @@ export default function ExecutiveSummaryPanel({ analysis, metrics, previousAnaly
 
         <div className="rounded-xl bg-gradient-to-br from-blue-600/15 to-blue-500/5 border border-blue-500/20 p-4">
           <p className="text-[10px] text-blue-300 font-semibold tracking-wider mb-1">📊 SISTEMA</p>
-          <p className="text-lg font-extrabold text-white">{analysis.cities.length}/9 ciudades</p>
+          <p className="text-lg font-extrabold text-white">{analysis.cities.length}/{analysis.cities.length} ciudades</p>
           <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-gray-400 mt-1">
             <span>{metrics?.total_muestras ?? 0} muestras históricas</span>
             <span>· Precisión <span className="text-emerald-400 font-bold">{metrics?.accuracy_pct.toFixed(1) ?? '?'}%</span></span>
@@ -457,7 +457,7 @@ export default function ExecutiveSummaryPanel({ analysis, metrics, previousAnaly
         <h3 className="text-xs font-bold text-gray-400 mb-3 flex items-center gap-2">
           <span>🏙️</span> CIUDADES — PRONÓSTICO vs PRECISIÓN
         </h3>
-        <div className="grid grid-cols-3 sm:grid-cols-5 lg:grid-cols-9 gap-2">
+        <div className="grid grid-cols-3 sm:grid-cols-5 lg:grid-cols-10 gap-2">
           {analysis.cities.sort((a, b) => b.exito_pct - a.exito_pct).map(c => {
             const numModels = Object.keys(c.forecast.ensemble_raw ?? {}).length
             const hasNowcast = c.nowcast?.activo
