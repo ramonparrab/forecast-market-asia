@@ -150,8 +150,17 @@ export async function computeBacktestKalman(daysLimit: number, slugFilter: strin
         const cityData = parsed.find((c: any) => c.slug === slug)
         if (!cityData?.forecast) continue
         // temp_corregida_base = ensemble crudo antes de modelo ganador (evita doble corrección)
-        const base = cityData.forecast.temp_corregida_base ?? cityData.forecast.temp_ponderada
-        if (base == null) continue
+        // Fallback chain: temp_corregida_base → temp_ponderada → extraer de ensemble_raw
+        let base: number | null = cityData.forecast.temp_corregida_base ?? cityData.forecast.temp_ponderada ?? null
+        if (base === null) {
+          // Último recurso: promediar ensemble_raw si existe
+          const raw = cityData.forecast.ensemble_raw
+          if (raw && typeof raw === 'object') {
+            const vals = Object.values(raw).filter((v: any) => typeof v === 'number')
+            if (vals.length > 0) base = vals.reduce((s: number, v: number) => s + v, 0) / vals.length
+          }
+        }
+        if (base === null) continue
         const key = slug + '|' + fo + '|' + runType
         dailyRunBase[key] = Number(base)
       }
