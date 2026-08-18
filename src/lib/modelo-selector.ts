@@ -1,6 +1,6 @@
 import { HistoricalRecord } from '@/types'
 import { computeCurrentForecast } from './mejora-continua-engine'
-import { kalmanNextBias, estimateKalmanR, KALMAN_Q } from './kalman-engine'
+import { kalmanNextBias, estimateKalmanR, KALMAN_Q, getKalmanQ } from './kalman-engine'
 
 export type ModeloActivo = 'MEJORA CONTINUA' | 'KALMAN'
 
@@ -80,7 +80,7 @@ export function seleccionarMejorModelo(
     // --- Simular KALMAN ---
     const trainErrors = trainData.map(r => r.error)
     const R = estimateKalmanR(trainErrors)
-    const kalmanBias = kalmanNextBias(trainErrors, KALMAN_Q, R)
+    const kalmanBias = kalmanNextBias(trainErrors, getKalmanQ(slug), R)
     const kalmanPred = baseTemp + kalmanBias
     const kalmanErr = Math.abs(dayRecord.temp_real - kalmanPred)
     kalmanErrors.push(kalmanErr)
@@ -222,7 +222,7 @@ export function aplicarModeloGanador(
     // --- KALMAN ---
     const errors = validos.map(r => r.error)
     const R = estimateKalmanR(errors)
-    const kalmanBias = kalmanNextBias(errors, KALMAN_Q, R)
+    const kalmanBias = kalmanNextBias(errors, getKalmanQ(slug), R)
     tempKalman = tempBase + kalmanBias
     biasKalman = kalmanBias
 

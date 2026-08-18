@@ -1,7 +1,7 @@
 import { NextApiRequest, NextApiResponse } from 'next'
 import { createClient } from '@supabase/supabase-js'
 import { PipelineStep } from '@/lib/mejora-continua-engine'
-import { kalmanBiasPredictions, kalmanNextBias, estimateKalmanR, KALMAN_Q } from '@/lib/kalman-engine'
+import { kalmanBiasPredictions, kalmanNextBias, estimateKalmanR, KALMAN_Q, getKalmanQ } from '@/lib/kalman-engine'
 import { CIUDADES_ASIA } from '@/lib/cities'
 
 const supabaseUrl = (process.env.NEXT_PUBLIC_SUPABASE_URL || '').replace(/\/rest\/v1\/?$/, '')
@@ -149,9 +149,10 @@ export async function computeBacktestKalman(daysLimit: number, slugFilter: strin
       for (const slug of allSlugs) {
         const cityData = parsed.find((c: any) => c.slug === slug)
         if (!cityData?.forecast) continue
-        // Usar temp_corregida FINAL (con modelo ganador aplicado, igual que NOWCAST)
-        // Fallback: temp_ponderada si temp_corregida no existe en runs antiguos
-        const base = cityData.forecast.temp_corregida ?? cityData.forecast.temp_ponderada ?? null
+        // Usar temp_corregida_base (sin KALMAN del día de la corrida) para evitar
+        // doble corrección de KALMAN en el walk-forward del backtest.
+        // Fallback: temp_corregida para runs antiguos que no tienen _base.
+        const base = cityData.forecast.temp_corregida_base ?? cityData.forecast.temp_corregida ?? cityData.forecast.temp_ponderada ?? null
         if (base === null) continue
         const key = slug + '|' + fo + '|' + runType
         dailyRunBase[key] = Number(base)
@@ -235,7 +236,8 @@ export async function computeBacktestKalman(daysLimit: number, slugFilter: strin
       // Pre-compute Kalman R and metadata
       const validRawErrors = rawErrors.filter((e): e is number => e !== null)
       const R = estimateKalmanR(validRawErrors)
-      const ultimoBias = validRawErrors.length >= 5 ? kalmanNextBias(validRawErrors, KALMAN_Q, R) : 0
+      const cityQ = getKalmanQ(slug)
+      const ultimoBias = validRawErrors.length >= 5 ? kalmanNextBias(validRawErrors, cityQ, R) : 0
 
       // Pre-compute MC bias predictions (running mean) and Kalman bias predictions
       // For day i: MC bias = mean of rawErrors[0..i-1], Kalman bias = Kalman filter state before day i
@@ -244,7 +246,7 @@ export async function computeBacktestKalman(daysLimit: number, slugFilter: strin
       let sumErrors = 0
       let countErrors = 0
       // Run Kalman filter
-      const kalPreds = kalmanBiasPredictions(validRawErrors, KALMAN_Q, R)
+      const kalPreds = kalmanBiasPredictions(validRawErrors, cityQ, R)
       let validIdx = 0
       for (let i = 0; i < timeline.length; i++) {
         if (rawErrors[i] !== null) {

@@ -20,6 +20,21 @@
 export const KALMAN_Q = 0.01
 
 /**
+ * Override de Q por ciudad — las que usan base de modelo único (HK=BestMatch, Seoul=ICON)
+ * tienen más bias sistemático que el ensemble ponderado, y KALMAN necesita reaccionar más rápido.
+ * Q=0.03 → K_ss ≈ sqrt(0.03/R), memoria ≈ 4-5 días (vs ~9 con Q=0.01).
+ */
+const CITY_Q: Record<string, number> = {
+  'hong-kong': 0.03,
+  seoul: 0.03,
+}
+
+/** Q efectivo para una ciudad: override si existe, sino el global */
+export function getKalmanQ(slug: string): number {
+  return CITY_Q[slug] ?? KALMAN_Q
+}
+
+/**
  * Estima R (varianza del ruido de observación) desde los errores históricos.
  * Mínimo de 0.3 para evitar filtros degenerados con pocas muestras.
  */
