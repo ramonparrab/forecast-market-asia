@@ -113,6 +113,50 @@ export async function computeBacktestKalman(daysLimit: number, slugFilter: strin
       snapModelo[k] = s.modelo_ganador
     }
 
+    // ============ 2b) daily_runs: base temperatures REALES (no corruptos por backup) ============
+    // El backup del cron sobreescribió forecast_history 10PM con datos 11PM.
+    // daily_runs guarda cada corrida por separado — son los datos correctos.
+    // Extraemos temp_corregida_base (ensemble crudo, antes de modelo ganador)
+    // para usar como base en MC/Kalman sin doble corrección.
+    const { data: dailyRuns } = await client
+      .from('daily_runs' as any)
+      .select('id, fecha_ejecucion, fecha_objetivo, resultados')
+      .gte('fecha_ejecucion', startDate.toISOString())
+      .order('fecha_ejecucion', { ascending: true } as any)
+
+    const dailyRunBase: Record<string, number> = {} // key: "slug|fecha|10PM" o "slug|fecha|11PM"
+
+    for (const run of (dailyRuns as any[]) ?? []) {
+      const fo = run.fecha_objetivo as string
+      if (!fo) continue
+      let parsed: any[]
+      try { parsed = JSON.parse(run.resultados) } catch { continue }
+      if (!Array.isArray(parsed)) continue
+
+      const cronTs10 = new Date(fo + 'T02:00:00.000Z').getTime()
+      const cronTs11 = new Date(fo + 'T03:00:00.000Z').getTime()
+      const runTs = new Date(run.fecha_ejecucion).getTime()
+      const midpoint = cronTs10 + 30 * 60 * 1000
+
+      let runType: '10PM' | '11PM' | null = null
+      if (runTs >= cronTs10 - 60 * 60 * 1000 && runTs < midpoint) {
+        runType = '10PM'
+      } else if (runTs >= midpoint && runTs < cronTs11 + 90 * 60 * 1000) {
+        runType = '11PM'
+      }
+      if (!runType) continue
+
+      for (const slug of allSlugs) {
+        const cityData = parsed.find((c: any) => c.slug === slug)
+        if (!cityData?.forecast) continue
+        // temp_corregida_base = ensemble crudo antes de modelo ganador (evita doble corrección)
+        const base = cityData.forecast.temp_corregida_base ?? cityData.forecast.temp_ponderada
+        if (base == null) continue
+        const key = slug + '|' + fo + '|' + runType
+        dailyRunBase[key] = Number(base)
+      }
+    }
+
     // ============ 3) Build per-slug timelines ============
     // For each slug, collect ALL records sorted by fecha, id.
     // Then build walk-forward errors from the raw ensemble error (temp_real - temp_pronosticada).
@@ -257,17 +301,21 @@ export async function computeBacktestKalman(daysLimit: number, slugFilter: strin
         const tlIdx = timeline.findIndex(t => t.fecha === fecha)
         if (tlIdx < 0) continue
 
-        const base = r.temp_pronosticada
         const mcBias = mcBiases[tlIdx]
         const kalBias = kalBiases[tlIdx]
-
-        const mcPred = round2(base + mcBias)
-        const kalPred = round2(base + kalBias)
 
         // Inferir run_type desde fecha_ejecucion si es NULL
         const effectiveRunType = r.run_type || inferRunType(r.fecha_ejecucion)
         const is10pm = effectiveRunType === '10PM'
         const is11pm = effectiveRunType === '11PM'
+
+        // Base temp: preferir daily_runs (datos reales sin corrupción del backup)
+        // Si no hay en daily_runs, caer a forecast_history (datos corruptos para 10PM histórico)
+        const drKey = slug + '|' + fecha + '|' + (effectiveRunType || '')
+        const base = dailyRunBase[drKey] ?? r.temp_pronosticada
+
+        const mcPred = round2(base + mcBias)
+        const kalPred = round2(base + kalBias)
 
         if (is10pm) {
           dr.cur_10pm = mcPred
