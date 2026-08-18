@@ -757,7 +757,11 @@ export default function Home({ initialAnalysis, initialMetrics, initialAvailable
                   title={v.desc}
                 >
                   {v.icon === 'PM' ? (
-                    <span className="text-[10px] font-bold tracking-tight text-purple-300 leading-none">The Stock<br/>Market of<br/>Events</span>
+                    <img
+                      src="https://polymarket.com/images/polymarket-logo-white.png"
+                      alt="Polymarket"
+                      className="h-4 w-auto object-contain"
+                    />
                   ) : (
                     <span>{v.icon}</span>
                   )} {v.label}
