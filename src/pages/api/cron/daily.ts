@@ -1,6 +1,6 @@
 import { NextApiRequest, NextApiResponse } from 'next'
 import { runDailyAnalysis } from '@/lib/forecast-engine'
-import { saveDailyRun, saveForecastRecords, getRecordsWithoutActuals, updateActualTemperature, getHistoricalRecords, saveBacktestBias, upsertForecastSnapshot, updateSnapshotActual } from '@/lib/supabase'
+import { saveDailyRun, saveForecastRecords, getRecordsWithoutActuals, updateActualTemperature, getHistoricalRecords, saveBacktestBias, upsertForecastSnapshot, updateSnapshotActual, getServiceClient } from '@/lib/supabase'
 import { fetchStationMaxTemp } from '@/lib/station-weather'
 import { fetchActualMaxTemp } from '@/lib/openmeteo'
 import { CIUDADES_ASIA } from '@/lib/cities'
@@ -136,10 +136,25 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     // ===== STEP 3b: Respaldo 10PM desde corrida 11PM =====
     // Si el cron de 10PM (2:00Z) no ejecutó, el de 11PM guarda también como 10PM.
-    // El upsert (slug, fecha_objetivo, run_type) evita duplicados si 10PM ya existe.
+    // CRÍTICO: solo respaldar ciudades que NO tengan ya un registro 10PM real.
+    // El upsert (slug, fecha_objetivo, run_type) sobreescribiría el dato original.
     if (runLabel === '11PM') {
-      console.log('[CRON] Guardando respaldo 10PM por si faltó la corrida de 2:00Z...')
-      await saveForecastRecords(records, '10PM')
+      const serviceClient = getServiceClient()
+      if (serviceClient) {
+        const { data: existing10pm } = await serviceClient
+          .from('forecast_history' as any)
+          .select('slug')
+          .eq('fecha_objetivo', fechaObjetivo)
+          .eq('run_type', '10PM')
+        const existingSlugs = new Set((existing10pm as any[])?.map((r: any) => r.slug) ?? [])
+        const missing = records.filter(r => !existingSlugs.has(r.slug))
+        if (missing.length > 0) {
+          console.log(`[CRON] Respaldo 10PM: ${missing.length} ciudades sin corrida 2:00Z (${records.length - missing.length} ya existen)`)
+          await saveForecastRecords(missing, '10PM')
+        } else {
+          console.log('[CRON] Respaldo 10PM: no necesario, todas las ciudades ya tienen registro 10PM')
+        }
+      }
     }
 
     await saveDailyRun({
