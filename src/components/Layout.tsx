@@ -18,7 +18,7 @@ export default function Layout({ children, lastUpdated }: LayoutProps) {
                 Forecast Market · Asia
               </h1>
               <p className="text-xs text-gray-400 sm:text-sm">
-                6 modelos (ECMWF · GFS · ICON · JMA · MeteoFrance) vs precios Polymarket · Nowcasting · Student-t ν=4
+                6 modelos (BestMatch · ECMWF · GFS · ICON · JMA · MeteoFrance) vs precios Polymarket · Nowcasting · Student-t ν=4
               </p>
             </div>
             <div className="flex items-center gap-3 text-xs text-gray-500">
