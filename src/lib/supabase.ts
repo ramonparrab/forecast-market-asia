@@ -1074,6 +1074,8 @@ export async function upsertForecastSnapshot(
 
 /**
  * pickWinner — elige qué run_type (10PM o 11PM) tiene mejor historial.
+ * Calcula errores desde daily_runs (datos reales sin corrupción del backup)
+ * cruzados con forecast_history solo para obtener temp_real.
  * Si no hay suficientes datos, prefiere 11PM (más reciente).
  */
 async function pickWinner(
@@ -1083,22 +1085,66 @@ async function pickWinner(
   const client = getClient()
   if (!client) return { run_type: '11PM', modelo: 'ENSEMBLE' }
 
-  const { data } = await client
+  // Obtener temp_real desde forecast_history (ese dato no está corrupto por el backup)
+  const since = new Date()
+  since.setDate(since.getDate() - 35)
+  const { data: fhData } = await client
     .from('forecast_history' as any)
-    .select('id, slug, fecha_objetivo, run_type, error')
+    .select('slug, fecha_objetivo, temp_real')
     .eq('slug', slug)
-    .not('error', 'is', null)
-    .not('run_type', 'is', null)
-    .order('fecha_objetivo', { ascending: false } as any)
-    .limit(60) // últimos ~30 días x 2 corridas
-
-  if (!data || (data as any[]).length < 3) {
-    return { run_type: '11PM', modelo: 'ENSEMBLE' }
+    .not('temp_real', 'is', null)
+    .gte('fecha_objetivo', since.toISOString())
+  const realMap: Record<string, number> = {}
+  for (const r of (fhData as any[]) ?? []) {
+    realMap[r.fecha_objetivo] = r.temp_real
   }
 
-  // Calcular MAE por run_type
-  const errors10 = (data as any[]).filter(r => r.run_type === '10PM').map(r => Math.abs(r.error))
-  const errors11 = (data as any[]).filter(r => r.run_type === '11PM').map(r => Math.abs(r.error))
+  // Obtener temp_corregida por corrida desde daily_runs (datos reales, no corruptos)
+  const { data: runs } = await client
+    .from('daily_runs' as any)
+    .select('fecha_ejecucion, fecha_objetivo, resultados')
+    .gte('fecha_ejecucion', since.toISOString())
+    .order('fecha_ejecucion', { ascending: false } as any)
+    .limit(200)
+
+  const errors10: number[] = []
+  const errors11: number[] = []
+  const seenDates = new Set<string>()
+
+  for (const run of (runs as any[]) ?? []) {
+    const fo = run.fecha_objetivo as string
+    if (!fo || !realMap[fo]) continue
+    if (seenDates.has(fo)) continue // un real por fecha
+
+    let parsed: any[]
+    try { parsed = JSON.parse(run.resultados) } catch { continue }
+    if (!Array.isArray(parsed)) continue
+
+    const cityData = parsed.find((c: any) => c.slug === slug)
+    if (!cityData?.forecast) continue
+
+    const tc = cityData.forecast.temp_corregida ?? cityData.forecast.temp_ponderada
+    if (tc == null) continue
+
+    // Determinar run_type por timestamp
+    const cronTs10 = new Date(fo + 'T02:00:00.000Z').getTime()
+    const cronTs11 = new Date(fo + 'T03:00:00.000Z').getTime()
+    const runTs = new Date(run.fecha_ejecucion).getTime()
+    const midpoint = cronTs10 + 30 * 60 * 1000
+
+    let runType: '10PM' | '11PM' | null = null
+    if (runTs >= cronTs10 - 60 * 60 * 1000 && runTs < midpoint) {
+      runType = '10PM'
+    } else if (runTs >= midpoint && runTs < cronTs11 + 90 * 60 * 1000) {
+      runType = '11PM'
+    }
+    if (!runType) continue
+
+    const err = Math.abs(tc - realMap[fo])
+    if (runType === '10PM') errors10.push(err)
+    else errors11.push(err)
+    seenDates.add(fo)
+  }
 
   const mae10 = errors10.length >= 2 ? errors10.reduce((s, v) => s + v, 0) / errors10.length : Infinity
   const mae11 = errors11.length >= 2 ? errors11.reduce((s, v) => s + v, 0) / errors11.length : Infinity

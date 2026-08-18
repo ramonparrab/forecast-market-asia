@@ -113,11 +113,11 @@ export async function computeBacktestKalman(daysLimit: number, slugFilter: strin
       snapModelo[k] = s.modelo_ganador
     }
 
-    // ============ 2b) daily_runs: base temperatures REALES (no corruptos por backup) ============
+    // ============ 2b) daily_runs: temperaturas REALES por corrida (no corruptos por backup) ============
     // El backup del cron sobreescribió forecast_history 10PM con datos 11PM.
     // daily_runs guarda cada corrida por separado — son los datos correctos.
-    // Extraemos temp_corregida_base (ensemble crudo, antes de modelo ganador)
-    // para usar como base en MC/Kalman sin doble corrección.
+    // Extraemos temp_corregida (valor FINAL con modelo ganador, igual que NOWCAST)
+    // para que MC vs KALMAN muestre los mismos valores que NOWCAST 10PM vs 11PM.
     const { data: dailyRuns } = await client
       .from('daily_runs' as any)
       .select('id, fecha_ejecucion, fecha_objetivo, resultados')
@@ -149,23 +149,9 @@ export async function computeBacktestKalman(daysLimit: number, slugFilter: strin
       for (const slug of allSlugs) {
         const cityData = parsed.find((c: any) => c.slug === slug)
         if (!cityData?.forecast) continue
-        // Fallback chain para obtener la base del ensemble:
-        // 1. temp_corregida_base = ensemble crudo antes de modelo ganador (ideal)
-        // 2. temp_ponderada = promedio ponderado del ensemble
-        // 3. ensemble_raw = promediar modelos individuales
-        // 4. temp_corregida = incluye modelo ganador + nowcasting (doble corrección
-        //    leve, pero es el único disponible en daily_runs muy antiguos)
-        let base: number | null = cityData.forecast.temp_corregida_base ?? cityData.forecast.temp_ponderada ?? null
-        if (base === null) {
-          const raw = cityData.forecast.ensemble_raw
-          if (raw && typeof raw === 'object') {
-            const vals = Object.values(raw).filter((v: any) => typeof v === 'number')
-            if (vals.length > 0) base = vals.reduce((s: number, v: number) => s + v, 0) / vals.length
-          }
-        }
-        if (base === null) {
-          base = cityData.forecast.temp_corregida ?? null
-        }
+        // Usar temp_corregida FINAL (con modelo ganador aplicado, igual que NOWCAST)
+        // Fallback: temp_ponderada si temp_corregida no existe en runs antiguos
+        const base = cityData.forecast.temp_corregida ?? cityData.forecast.temp_ponderada ?? null
         if (base === null) continue
         const key = slug + '|' + fo + '|' + runType
         dailyRunBase[key] = Number(base)
