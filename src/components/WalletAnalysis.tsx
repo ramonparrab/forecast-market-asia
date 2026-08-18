@@ -36,16 +36,44 @@ export default function WalletAnalysis() {
   const [data, setData] = useState<WalletAnalysisResponse | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [resolvedAddr, setResolvedAddr] = useState<string | null>(null)
 
   const analyze = useCallback(async (w?: string, p?: string) => {
-    const addr = (w || wallet).trim()
-    if (!addr) return
+    const input = (w || wallet).trim()
+    if (!input) return
     setLoading(true)
     setError(null)
     try {
       const per = p || period
+      let addr = input
+
+      // If not a wallet address, try to resolve username
+      if (!/^0x[a-fA-F0-9]{40}$/.test(input)) {
+        const resResp = await fetch(`/api/resolve-username?q=${encodeURIComponent(input)}`)
+        const resJson = await resResp.json()
+        if (!resResp.ok || !resJson.address) {
+          setError(resJson.error || `No se encontro wallet para "${input}"`)
+          setLoading(false)
+          return
+        }
+        addr = resJson.address
+        setResolvedAddr(addr)
+      } else {
+        setResolvedAddr(null)
+      }
+
       const resp = await fetch(`/api/wallet-analysis?wallet=${addr}&period=${per}`)
       const json = await resp.json()
+
+      // Auto-register username mapping for future searches
+      if (json.username && json.wallet) {
+        fetch('/api/resolve-username', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username: json.username, address: json.wallet }),
+        }).catch(() => {})
+      }
+
       if (json.error && json.totalWeatherTrades === 0) {
         setError(json.error)
         setData(null)
@@ -71,7 +99,8 @@ export default function WalletAnalysis() {
       {/* Input Section */}
       <div className="rounded-xl bg-gradient-to-r from-purple-900/30 via-blue-900/20 to-purple-900/30 border border-purple-500/20 p-5">
         <h2 className="text-lg font-bold text-white mb-1 flex items-center gap-2">
-          <span className="text-2xl">🔬</span> ANALISIS POLYMARKET x WALLET
+          <img src="https://polymarket.com/images/polymarket-logo-white.png" alt="Polymarket" className="h-5 w-5 rounded-sm object-contain brightness-0 invert" />
+          ANALISIS POLYMARKET x WALLET
         </h2>
         <p className="text-xs text-gray-400 mb-4">Analiza las apuestas de temperatura de cualquier wallet en Polymarket</p>
         <div className="flex flex-col sm:flex-row gap-3">
@@ -80,8 +109,8 @@ export default function WalletAnalysis() {
             value={wallet}
             onChange={e => setWallet(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && analyze()}
-            placeholder="0x... (direccion de wallet)"
-            className="flex-1 rounded-lg bg-slate-800 border border-gray-600 px-4 py-2.5 text-sm text-white font-mono placeholder:text-gray-500 focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500/30"
+            placeholder="Wallet (0x...) o username de Polymarket"
+            className="flex-1 rounded-lg bg-slate-800 border border-gray-600 px-4 py-2.5 text-sm text-white placeholder:text-gray-500 focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500/30"
           />
           <button
             onClick={() => analyze()}
@@ -138,6 +167,7 @@ export default function WalletAnalysis() {
         <div className="space-y-5">
           {/* User Info Bar */}
           <div className="flex items-center gap-3 text-xs text-gray-500">
+            {resolvedAddr && <span className="text-purple-400 font-medium">{wallet}</span>}
             <span className="font-mono text-gray-400 truncate max-w-[200px] sm:max-w-none">{d.wallet}</span>
             {d.username && <span>· {d.username}</span>}
             {d.pseudonym && <span className="text-purple-400">({d.pseudonym})</span>}

@@ -679,7 +679,7 @@ export default function Home({ initialAnalysis, initialMetrics, initialAvailable
     { key: 'performance', label: 'Performance', icon: '📈', desc: 'Precisión 10PM/11PM vs Real', group: 'av' },
     { key: 'ladder', label: 'Ladder Betting', icon: '🪜', desc: 'Escalera Kelly vs Polymarket', group: 'av' },
     { key: 'rivales', label: 'VS RIVALES', icon: '⚔️', desc: 'Nuestro vs modelos vs REAL', group: 'av' },
-    { key: 'wallet', label: 'POLYMARKET x WALLET', icon: '🦔', desc: 'Analisis de wallet en Polymarket', group: 'ex' },
+    { key: 'wallet', label: 'POLYMARKET x WALLET', icon: 'PM', desc: 'The World\'s Largest Prediction Market', group: 'ex' },
   ]
 
   return (
@@ -756,7 +756,15 @@ export default function Home({ initialAnalysis, initialMetrics, initialAvailable
                   }`}
                   title={v.desc}
                 >
-                  {v.icon} {v.label}
+                  {v.icon === 'PM' ? (
+                    <img
+                      src="https://polymarket.com/images/polymarket-logo-white.png"
+                      alt="Polymarket"
+                      className="h-4 w-4 rounded-sm object-contain brightness-0 invert"
+                    />
+                  ) : (
+                    <span>{v.icon}</span>
+                  )} {v.label}
                 </button>
               ))}
             </div>
