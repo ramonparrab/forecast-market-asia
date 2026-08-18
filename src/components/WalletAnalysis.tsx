@@ -99,7 +99,7 @@ export default function WalletAnalysis() {
       {/* Input Section */}
       <div className="rounded-xl bg-gradient-to-r from-purple-900/30 via-blue-900/20 to-purple-900/30 border border-purple-500/20 p-5">
         <h2 className="text-lg font-bold text-white mb-1 flex items-center gap-2">
-          <img src="https://polymarket.com/images/polymarket-logo-white.png" alt="Polymarket" className="h-5 w-5 rounded-sm object-contain brightness-0 invert" />
+          <span className="text-xs font-bold tracking-tight text-purple-300">THE STOCK MARKET OF EVENTS</span>
           ANALISIS POLYMARKET x WALLET
         </h2>
         <p className="text-xs text-gray-400 mb-4">Analiza las apuestas de temperatura de cualquier wallet en Polymarket</p>
