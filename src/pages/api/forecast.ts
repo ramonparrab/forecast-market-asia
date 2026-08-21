@@ -45,7 +45,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       ? (caracasHour >= 23 || caracasHour < 1 ? '11PM' : '10PM')
       : 'MANUAL'
 
-    // Save to Supabase (fire-and-forget for manual runs)
+    // === RESPONDER AL FRONTEND INMEDIATAMENTE ===
+    // Los cálculos ya terminaron; los saves a Supabase van en background
+    // para no bloquear la respuesta HTTP.
+    res.status(200).json(result)
+
+    // Save to Supabase (fire-and-forget — no bloquea la respuesta)
     const records = result.cities.map(city => ({
       fecha_ejecucion: result.fecha,
       fecha_objetivo: fecha,
@@ -64,7 +69,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const { getModelSelectionCache } = await import('@/lib/modelo-selector')
     const modelCache = getModelSelectionCache()
 
-    await Promise.all([
+    // Fire-and-forget: guardar sin await para no bloquear
+    Promise.all([
       saveForecastRecords(records, runLabel),
       saveDailyRun({
         fecha_ejecucion: result.fecha,
@@ -74,7 +80,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         total_asignado: result.total_allocated,
         run_type: (runLabel === 'MANUAL' ? undefined : runLabel) as '10PM' | '11PM' | undefined,
       }),
-      // Escribir snapshots para corridas manuales también
       ...result.cities.map(city => {
         const sel = modelCache[city.slug]
         return upsertForecastSnapshot({
@@ -96,14 +101,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           error: null,
         })
       }),
-    ])
-
-    return res.status(200).json(result)
+    ]).catch(err => console.error('[forecast] Background save error:', err))
   } catch (error) {
     console.error('Forecast API error:', error)
-    return res.status(500).json({
-      error: 'Error ejecutando análisis',
-      details: (error as Error).message,
-    })
+    if (!res.headersSent) {
+      res.status(500).json({
+        error: 'Error ejecutando análisis',
+        details: (error as Error).message,
+      })
+    }
   }
 }
