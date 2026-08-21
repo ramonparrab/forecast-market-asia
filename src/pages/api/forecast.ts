@@ -20,11 +20,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const fecha = fechaQuery || defaultFecha
     const result = await runDailyAnalysis(fecha, true)
 
-    // Preserve temp_corregida from the 10PM Caracas cron run if it exists
+    // === RESPONDER AL FRONTEND INMEDIATAMENTE ===
+    // Los cálculos ya terminaron; los saves a Supabase van en background
+    // para no bloquear la respuesta HTTP.
+    res.status(200).json(result)
+
+    // Preserve temp_corregida from the 10PM Caracas cron run if it exists (background)
     try {
       const savedResp = await fetch(`${process.env.NEXT_PUBLIC_SUPABASE_URL}/rest/v1/daily_runs?fecha_objetivo=eq.${fecha}&order=fecha_ejecucion.desc&limit=1`, {
         headers: { apikey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '', Authorization: `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''}` },
-        signal: AbortSignal.timeout(5000),
+        signal: AbortSignal.timeout(3000),
       })
       if (savedResp.ok) {
         const savedRows = await savedResp.json()
@@ -37,18 +42,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           }
         }
       }
-    } catch { /* no saved cron data — use freshly computed values */ }
+    } catch { /* no saved cron data */ }
 
-    // Determinar run_type para corridas manuales (reusar nowCaracas ya calculado arriba)
+    // Determinar run_type para corridas manuales
     const caracasHour = nowCaracas.getUTCHours()
     const runLabel = caracasHour >= 22 || caracasHour < 1
       ? (caracasHour >= 23 || caracasHour < 1 ? '11PM' : '10PM')
       : 'MANUAL'
-
-    // === RESPONDER AL FRONTEND INMEDIATAMENTE ===
-    // Los cálculos ya terminaron; los saves a Supabase van en background
-    // para no bloquear la respuesta HTTP.
-    res.status(200).json(result)
 
     // Save to Supabase (fire-and-forget — no bloquea la respuesta)
     const records = result.cities.map(city => ({

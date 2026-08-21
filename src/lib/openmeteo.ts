@@ -109,11 +109,11 @@ export async function fetchWeatherModels(
   const modelsParam = toTry.join(',')
   const baseUrl = `${OPENMETEO_BASE}?latitude=${lat}&longitude=${lon}&daily=temperature_2m_max,weather_code,precipitation_sum,precipitation_probability_max&temperature_unit=celsius&start_date=${fechaISO}&end_date=${fechaISO}&models=${modelsParam}&timezone=auto`
 
-  // Retry logic: try up to 3 times with exponential backoff
+  // Retry logic: try up to 2 times with short backoff (rate-limit friendly)
   let lastError: Error | null = null
-  for (let attempt = 1; attempt <= 3; attempt++) {
+  for (let attempt = 1; attempt <= 2; attempt++) {
     try {
-      const resp = await fetch(baseUrl, { signal: AbortSignal.timeout(20000) })
+      const resp = await fetch(baseUrl, { signal: AbortSignal.timeout(12000) })
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
       const data = await resp.json()
 
@@ -146,16 +146,16 @@ export async function fetchWeatherModels(
       }
     } catch (e) {
       lastError = e as Error
-      console.warn(`Open-Meteo attempt ${attempt}/3 failed for lat=${lat} lon=${lon}:`, (e as Error).message)
-      if (attempt < 3) {
-        await new Promise(resolve => setTimeout(resolve, 1000 * attempt)) // backoff: 1s, 2s
+      console.warn(`Open-Meteo attempt ${attempt}/2 failed for lat=${lat} lon=${lon}:`, (e as Error).message)
+      if (attempt < 2) {
+        await new Promise(resolve => setTimeout(resolve, 800))
       }
     }
   }
 
   // All attempts failed - return whatever we got (might be empty)
   if (Object.keys(results).length === 0) {
-    console.error(`Open-Meteo FAILED for lat=${lat} lon=${lon} after 3 attempts:`, lastError?.message)
+    console.error(`Open-Meteo FAILED for lat=${lat} lon=${lon} after 2 attempts:`, lastError?.message)
   }
 
   return { models: results, ensembleMembers, weatherCode: 0, precipitation: 0 }
