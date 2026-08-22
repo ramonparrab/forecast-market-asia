@@ -93,7 +93,7 @@ export async function getServerSideProps() {
         analysis = parseRun(allRuns[0])
       } else {
         // Hay 10PM y 11PM — usar snapshots para decidir
-        const snapWins: Record<string, string> = {}
+        const snapWins: Record<string, number> = {}
         for (const s of (snapshots ?? [])) {
           snapWins[s.run_type_ganadora] = (snapWins[s.run_type_ganadora] ?? 0) + 1
         }
@@ -925,7 +925,7 @@ export default function Home({ initialAnalysis, initialMetrics, initialAvailable
       {activeView === 'signals' && <SignalsPanel />}
 
       {/* Metrics View - Per city with backtesting data */}
-      {activeView === 'metrics' && <MetricsChart metrics={metrics} />}
+      {activeView === 'metrics' && <MetricsChart />}
 
       {/* Comparison View - Forecast vs Actual per city */}
       {activeView === 'comparison' && (
@@ -948,12 +948,7 @@ export default function Home({ initialAnalysis, initialMetrics, initialAvailable
       {activeView === 'backtest' && <BacktestChart />}
 
       {/* Arbitrage View */}
-      {activeView === 'arbitrage' && (
-        <ArbitragePanel
-          alerts={analysis?.arbitrage_alerts ?? []}
-          citiesCount={analysis?.cities.length ?? 0}
-        />
-      )}
+      {activeView === 'arbitrage' && <ArbitragePanel />}
 
       {/* Cobertura SI/NO View */}
       {activeView === 'coverage' && <CoberturaSiNo />}
