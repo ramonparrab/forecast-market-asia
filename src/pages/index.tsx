@@ -5,6 +5,7 @@ import AllocationPanel from '@/components/AllocationPanel'
 import MetricsChart from '@/components/MetricsChart'
 import ForecastVsActualChart from '@/components/ForecastVsActualChart'
 import ArbitragePanel from '@/components/ArbitragePanel'
+import ForecastTable from '@/components/ForecastTable'
 import BacktestChart from '@/components/BacktestChart'
 import ExecutiveSummaryPanel from '@/components/ExecutiveSummary'
 import ComparisonPanel from '@/components/ComparisonPanel'
@@ -16,7 +17,7 @@ import PerformanceAnalisis from '@/components/PerformanceAnalisis'
 import LadderBetting from '@/components/LadderBetting'
 import Arquitectura from '@/components/Arquitectura'
 import VsRivales from '@/components/VsRivales'
-import WalletAnalysis from '@/components/WalletAnalysis'
+import TomarDecision from '@/components/TomarDecision'
 
 import { DailyAnalysis, GlobalMetrics, CityAnalysis } from '@/types'
 import { getModeloNombre } from '@/lib/modelo-selector'
@@ -92,7 +93,7 @@ export async function getServerSideProps() {
         analysis = parseRun(allRuns[0])
       } else {
         // Hay 10PM y 11PM — usar snapshots para decidir
-        const snapWins: Record<string, number> = {}
+        const snapWins: Record<string, string> = {}
         for (const s of (snapshots ?? [])) {
           snapWins[s.run_type_ganadora] = (snapWins[s.run_type_ganadora] ?? 0) + 1
         }
@@ -210,7 +211,7 @@ export async function getServerSideProps() {
   }
 }
 
-type View = 'executive' | 'dashboard' | 'metrics' | 'comparison' | 'backtest' | 'arbitrage' | 'architecture' | 'signals' | 'coverage' | 'mejora-continua' | 'backtest-si' | 'performance' | 'ladder' | 'rivales' | 'wallet'
+type View = 'executive' | 'dashboard' | 'table' | 'metrics' | 'comparison' | 'backtest' | 'arbitrage' | 'architecture' | 'signals' | 'coverage' | 'mejora-continua' | 'backtest-si' | 'performance' | 'ladder' | 'rivales' | 'decision'
 
 /** Returns a friendly confidence label + color class */
 function getConfidence(city: CityAnalysis): { label: string; color: string; bg: string } {
@@ -606,18 +607,23 @@ export default function Home({ initialAnalysis, initialMetrics, initialAvailable
       setIsHistorical(false)
       setSelectedDate(data.fecha_objetivo)
       setLastUpdated(new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit', second: '2-digit' }))
-      // Cargar métricas y fechas en paralelo; día anterior en background (no bloquea UI)
       await Promise.all([fetchMetrics(), fetchAvailableDates()])
-      // Cargar día anterior SIN bloquear — fire-and-forget
-      const targetDateObj = new Date(data.fecha_objetivo + 'T12:00:00Z')
-      targetDateObj.setUTCDate(targetDateObj.getUTCDate() - 1)
-      const prevDate = targetDateObj.toISOString().slice(0, 10)
-      fetch(`/api/forecast-history?fecha=${prevDate}`).then(r => r.ok ? r.json() : null).catch(() => null).then(prevData => {
-        if (prevData && prevData.cities) setPreviousAnalysis(prevData)
-      })
-      fetch(`/api/metrics?fecha=${prevDate}`).then(r => r.ok ? r.json() : null).catch(() => null).then(prevMetrics => {
-        if (prevMetrics && prevMetrics.overall_mae !== undefined) setPreviousMetrics(prevMetrics)
-      })
+      // Cargar día anterior si hay fechas disponibles
+      const datesResp = await fetch('/api/forecast-history?action=dates').catch(() => null)
+      if (datesResp?.ok) {
+        const datesData = await datesResp.json()
+        const sortedDates = (datesData.dates ?? []).sort().reverse()
+        const idx = sortedDates.indexOf(data.fecha_objetivo)
+        if (idx >= 0 && idx < sortedDates.length - 1) {
+          const prevDate = sortedDates[idx + 1]
+          const [prevData, prevMetrics] = await Promise.all([
+            fetch(`/api/forecast-history?fecha=${prevDate}`).then(r => r.ok ? r.json() : null).catch(() => null),
+            fetch(`/api/metrics?fecha=${prevDate}`).then(r => r.ok ? r.json() : null).catch(() => null),
+          ])
+          if (prevData && prevData.cities) setPreviousAnalysis(prevData)
+          if (prevMetrics && prevMetrics.overall_mae !== undefined) setPreviousMetrics(prevMetrics)
+        }
+      }
     } catch (e) {
       setError((e as Error).message)
     } finally {
@@ -662,6 +668,7 @@ export default function Home({ initialAnalysis, initialMetrics, initialAvailable
   const views: { key: View; label: string; icon: string; desc: string; group?: string }[] = [
     { key: 'executive', label: 'Resumen', icon: '🎯', desc: 'Recomendaciones del día', group: 'op' },
     { key: 'dashboard', label: 'Dashboard', icon: '🏠', desc: 'Vista general por ciudad', group: 'op' },
+    { key: 'table', label: 'Tabla', icon: '📊', desc: 'Datos completos', group: 'op' },
     { key: 'signals', label: 'Señales', icon: '📡', desc: 'Datos para cobertura', group: 'an' },
     { key: 'metrics', label: 'Precisión', icon: '📈', desc: 'Métricas históricas', group: 'an' },
     { key: 'comparison', label: 'Comparación', icon: '📉', desc: 'Pronóstico vs Real', group: 'an' },
@@ -674,7 +681,7 @@ export default function Home({ initialAnalysis, initialMetrics, initialAvailable
     { key: 'performance', label: 'Performance', icon: '📈', desc: 'Precisión 10PM/11PM vs Real', group: 'av' },
     { key: 'ladder', label: 'Ladder Betting', icon: '🪜', desc: 'Escalera Kelly vs Polymarket', group: 'av' },
     { key: 'rivales', label: 'VS RIVALES', icon: '⚔️', desc: 'Nuestro vs modelos vs REAL', group: 'av' },
-    { key: 'wallet', label: 'POLYMARKET x WALLET', icon: 'PM', desc: 'The World\'s Largest Prediction Market', group: 'ex' },
+    { key: 'decision', label: 'TOMAR DECISIÓN', icon: '🎯', desc: 'MC vs KALMAN completo para apostar', group: 'av' },
   ]
 
   return (
@@ -751,15 +758,7 @@ export default function Home({ initialAnalysis, initialMetrics, initialAvailable
                   }`}
                   title={v.desc}
                 >
-                  {v.icon === 'PM' ? (
-                    <img
-                      src="https://polymarket.com/images/polymarket-logo-white.png"
-                      alt="Polymarket"
-                      className="h-4 w-auto object-contain"
-                    />
-                  ) : (
-                    <span>{v.icon}</span>
-                  )} {v.label}
+                  {v.icon} {v.label}
                 </button>
               ))}
             </div>
@@ -909,6 +908,9 @@ export default function Home({ initialAnalysis, initialMetrics, initialAvailable
         </div>
       )}
 
+      {/* Table View */}
+      {activeView === 'table' && analysis && <ForecastTable data={analysis} />}
+
       {/* Executive Summary View */}
       {activeView === 'executive' && (
         <ExecutiveSummaryPanel
@@ -922,8 +924,8 @@ export default function Home({ initialAnalysis, initialMetrics, initialAvailable
       {/* Signals View */}
       {activeView === 'signals' && <SignalsPanel />}
 
-      {/* Metrics View */}
-      {activeView === 'metrics' && <MetricsChart />}
+      {/* Metrics View - Per city with backtesting data */}
+      {activeView === 'metrics' && <MetricsChart metrics={metrics} />}
 
       {/* Comparison View - Forecast vs Actual per city */}
       {activeView === 'comparison' && (
@@ -946,7 +948,12 @@ export default function Home({ initialAnalysis, initialMetrics, initialAvailable
       {activeView === 'backtest' && <BacktestChart />}
 
       {/* Arbitrage View */}
-      {activeView === 'arbitrage' && <ArbitragePanel />}
+      {activeView === 'arbitrage' && (
+        <ArbitragePanel
+          alerts={analysis?.arbitrage_alerts ?? []}
+          citiesCount={analysis?.cities.length ?? 0}
+        />
+      )}
 
       {/* Cobertura SI/NO View */}
       {activeView === 'coverage' && <CoberturaSiNo />}
@@ -966,8 +973,8 @@ export default function Home({ initialAnalysis, initialMetrics, initialAvailable
       {/* VS RIVALES View */}
       {activeView === 'rivales' && <VsRivales />}
 
-      {/* Polymarket Wallet Analysis View */}
-      {activeView === 'wallet' && <WalletAnalysis />}
+      {/* TOMAR DECISIÓN View */}
+      {activeView === 'decision' && <TomarDecision />}
 
       {/* System Architecture View */}
       {activeView === 'architecture' && <Arquitectura />}
