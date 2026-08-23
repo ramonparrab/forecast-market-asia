@@ -575,14 +575,17 @@ export default function Home({ initialAnalysis, initialMetrics, initialAvailable
     init()
   }, [])
 
-  async function fetchAvailableDates() {
+  async function fetchAvailableDates(): Promise<string[]> {
     try {
       const resp = await fetch('/api/forecast-history?action=dates')
       if (resp.ok) {
         const data = await resp.json()
-        setAvailableDates(data.dates ?? [])
+        const dates = data.dates ?? []
+        setAvailableDates(dates)
+        return dates
       }
     } catch { /* silent */ }
+    return []
   }
 
   async function fetchMetrics() {
@@ -607,22 +610,22 @@ export default function Home({ initialAnalysis, initialMetrics, initialAvailable
       setIsHistorical(false)
       setSelectedDate(data.fecha_objetivo)
       setLastUpdated(new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit', second: '2-digit' }))
-      await Promise.all([fetchMetrics(), fetchAvailableDates()])
-      // Cargar día anterior si hay fechas disponibles
-      const datesResp = await fetch('/api/forecast-history?action=dates').catch(() => null)
-      if (datesResp?.ok) {
-        const datesData = await datesResp.json()
-        const sortedDates = (datesData.dates ?? []).sort().reverse()
-        const idx = sortedDates.indexOf(data.fecha_objetivo)
-        if (idx >= 0 && idx < sortedDates.length - 1) {
-          const prevDate = sortedDates[idx + 1]
-          const [prevData, prevMetrics] = await Promise.all([
-            fetch(`/api/forecast-history?fecha=${prevDate}`).then(r => r.ok ? r.json() : null).catch(() => null),
-            fetch(`/api/metrics?fecha=${prevDate}`).then(r => r.ok ? r.json() : null).catch(() => null),
-          ])
-          if (prevData && prevData.cities) setPreviousAnalysis(prevData)
-          if (prevMetrics && prevMetrics.overall_mae !== undefined) setPreviousMetrics(prevMetrics)
-        }
+      // Cargar metrics, dates y día anterior todo en paralelo (sin duplicados)
+      const [_, dates] = await Promise.all([
+        fetchMetrics(),
+        fetchAvailableDates(),
+      ])
+      // Buscar día anterior con las fechas ya obtenidas (sin re-fetch)
+      const sortedDates = [...dates].sort().reverse()
+      const idx = sortedDates.indexOf(data.fecha_objetivo)
+      if (idx >= 0 && idx < sortedDates.length - 1) {
+        const prevDate = sortedDates[idx + 1]
+        const [prevData, prevMetrics] = await Promise.all([
+          fetch(`/api/forecast-history?fecha=${prevDate}`).then(r => r.ok ? r.json() : null).catch(() => null),
+          fetch(`/api/metrics?fecha=${prevDate}`).then(r => r.ok ? r.json() : null).catch(() => null),
+        ])
+        if (prevData && prevData.cities) setPreviousAnalysis(prevData)
+        if (prevMetrics && prevMetrics.overall_mae !== undefined) setPreviousMetrics(prevMetrics)
       }
     } catch (e) {
       setError((e as Error).message)

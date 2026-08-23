@@ -4,6 +4,8 @@ import { CIUDADES_ASIA } from '@/lib/cities'
 interface DecisionDay {
   fecha_objetivo: string
   temp_real: number | null
+  /** true si la base fue reconstruida (estimada) vs viene de temp_corregida_base real */
+  base_estimada: boolean
   base_10pm: number | null
   base_11pm: number | null
   mc_10pm: number | null
@@ -330,6 +332,7 @@ function CityTable({ city }: { city: DecisionCityResult }) {
                 >
                   <td className="px-2 py-1.5 text-gray-300 whitespace-nowrap">
                     {formatFecha(day.fecha_objetivo)}
+                    {day.base_estimada && <span className="ml-1 text-[8px] text-amber-500/70" title="Base estimada (temp_corregida_base no existía en esta corrida)">~</span>}
                   </td>
                   <td className={`px-2 py-1.5 text-center font-medium ${isPending ? 'text-gray-600' : 'text-white'}`}>
                     {day.temp_real !== null ? day.temp_real.toFixed(1) : '...'}

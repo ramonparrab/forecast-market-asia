@@ -507,6 +507,7 @@ export async function getAllCalibrationPairs(): Promise<{ slug: string; predicti
     .select('id, slug, fecha_objetivo, error')
     .not('error', 'is', null)
     .order('id', { ascending: false } as any)
+    .limit(3000)
 
   if (error || !data) return []
 

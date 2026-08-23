@@ -61,22 +61,29 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const globalMetrics = await computeGlobalMetrics()
   const globalAccuracyPct = globalMetrics?.accuracy_pct ?? 50
 
-  for (const city of resultados) {
-    const hist = await getHistoricalAccuracy(city.slug)
-    let exitoPct: number
-    if (hist.muestras >= 5) {
-      const priorStrength = 10
-      exitoPct = Math.round(
-        (hist.accuracy * hist.muestras + globalAccuracyPct * priorStrength)
-        / (hist.muestras + priorStrength)
-      )
-    } else {
-      exitoPct = Math.round(globalAccuracyPct)
-    }
-    // Weather penalty: only nublado (code 3) gets -1%
-    if (city.forecast.weather?.code === 3) {
-      exitoPct = Math.max(10, exitoPct - 1)
-    }
+  // Parallelizar getHistoricalAccuracy para todas las ciudades
+  const histMap = await Promise.all(
+    resultados.map(async city => {
+      const hist = await getHistoricalAccuracy(city.slug)
+      let exitoPct: number
+      if (hist.muestras >= 5) {
+        const priorStrength = 10
+        exitoPct = Math.round(
+          (hist.accuracy * hist.muestras + globalAccuracyPct * priorStrength)
+          / (hist.muestras + priorStrength)
+        )
+      } else {
+        exitoPct = Math.round(globalAccuracyPct)
+      }
+      if (city.forecast.weather?.code === 3) {
+        exitoPct = Math.max(10, exitoPct - 1)
+      }
+      return { slug: city.slug, exitoPct }
+    })
+  )
+  for (const { slug, exitoPct } of histMap) {
+    const city = resultados.find((c: any) => c.slug === slug)!
+
     city.exito_pct = exitoPct
     city.exito_pct_integer = exitoPct
   }

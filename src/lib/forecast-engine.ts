@@ -44,8 +44,12 @@ async function analyzeCity(
   globalAccuracyPct: number,
   cityHistory: HistoricalRecord[]
 ): Promise<{ cityAnalysis: CityAnalysis | null; recommendations: BetRecommendation[] }> {
-  // 1. Weather models (includes ECMWF ENS 51 members)
-  const weatherModelsResult = await fetchWeatherModels(city.lat, city.lon, fechaISO)
+  // 1. Lanzar en paralelo: weather models, recentErrors y polymarket (no dependen entre sí)
+  const [weatherModelsResult, recentErrors, contractsPre] = await Promise.all([
+    fetchWeatherModels(city.lat, city.lon, fechaISO),
+    getRecentErrors(city.slug, 30),
+    fetchPrices ? fetchPolymarketPrices(city.slug, fechaObjetivo).catch(() => [] as PolymarketContract[]) : Promise.resolve([] as PolymarketContract[]),
+  ])
   const ensembleRaw = weatherModelsResult.models
   const ensembleMembers = weatherModelsResult.ensembleMembers
   const weatherCode = weatherModelsResult.weatherCode
@@ -55,7 +59,6 @@ async function analyzeCity(
   }
 
   // 2. Ensemble with biases + Z-score filter + empirical CDF
-  const recentErrors = await getRecentErrors(city.slug, 30)
   const cityModelErrors: Record<string, number[]> = {}
   for (const [slug, errs] of Object.entries(recentModelErrors)) {
     if (slug === city.slug) cityModelErrors[slug] = errs
@@ -109,11 +112,8 @@ async function analyzeCity(
     console.warn(`[${city.slug}] Skip winner-model (${(e as Error).message})`)
   }
 
-  // 4. Polymarket prices
-  let contracts: PolymarketContract[] = []
-  if (fetchPrices) {
-    contracts = await fetchPolymarketPrices(city.slug, fechaObjetivo)
-  }
+  // 4. Polymarket prices (ya obtenidos en paralelo al inicio)
+  let contracts: PolymarketContract[] = contractsPre
 
   // Calculate success probability using real historical accuracy
   let exitoPct: number
