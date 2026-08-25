@@ -306,8 +306,9 @@ export async function computeBacktestKalman(daysLimit: number, slugFilter: strin
         if (base == null) continue
 
         // Find the index in the deduplicated timeline for this fecha
-        const tlIdx = timeline.findIndex(t => t.fecha === fecha)
-        if (tlIdx < 0) continue
+        // Si la fecha no está en timeline (día futuro sin temp_real), usar el último índice disponible
+        let tlIdx = timeline.findIndex(t => t.fecha === fecha)
+        if (tlIdx < 0) tlIdx = timeline.length - 1
 
         const mcBias = mcBiases[tlIdx]
         const kalBias = kalBiases[tlIdx]
@@ -338,6 +339,44 @@ export async function computeBacktestKalman(daysLimit: number, slugFilter: strin
             const snapKey = slug + '|' + fecha + '|10PM'
             dr.modelo_10pm = snapModelo[snapKey] ?? null
           }
+        }
+      }
+
+      // --- 4b-extra) Completar dayMap con fechas de dailyRunBase que no se agregaron ---
+      // Esto cubre días futuros que tienen datos en daily_runs pero no en forecast_history
+      for (const [key, baseTemp] of Object.entries(dailyRunBase)) {
+        if (!key.startsWith(slug + '|')) continue
+        const parts = key.split('|')
+        const fecha = parts[1]
+        const rt = parts[2] as '10PM' | '11PM'
+        if (!fecha || !dayMap.has(fecha)) {
+          if (!dayMap.has(fecha)) {
+            dayMap.set(fecha, {
+              fecha,
+              temp_real: null,
+              cur_10pm: null,
+              cur_11pm: null,
+              kal_10pm: null,
+              kal_11pm: null,
+              modelo_10pm: null,
+              modelo_11pm: null,
+            })
+            fechaOrder.push(fecha)
+          }
+        }
+        const dr = dayMap.get(fecha)!
+        // Usar el último bias disponible (mismo comportamiento que fechas sin timeline)
+        const tlIdx = timeline.length - 1
+        const mcBias = mcBiases[tlIdx] ?? 0
+        const kalBias = kalBiases[tlIdx] ?? 0
+        const mcPred = round2(baseTemp + mcBias)
+        const kalPred = round2(baseTemp + kalBias)
+        if (rt === '10PM' && dr.cur_10pm === null) {
+          dr.cur_10pm = mcPred
+          dr.kal_10pm = kalPred
+        } else if (rt === '11PM' && dr.cur_11pm === null) {
+          dr.cur_11pm = mcPred
+          dr.kal_11pm = kalPred
         }
       }
 
