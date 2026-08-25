@@ -1,6 +1,8 @@
 import { NextApiRequest, NextApiResponse } from 'next'
-import { getClient, updateActualTemperature } from '@/lib/supabase'
+import { getClient, updateActualTemperature, getPendingSnapshots, updateSnapshotActual } from '@/lib/supabase'
 import { fetchStationMaxTemp } from '@/lib/station-weather'
+import { fetchActualMaxTemp } from '@/lib/openmeteo'
+import { CIUDADES_ASIA } from '@/lib/cities'
 
 /**
  * POST /api/backfill
@@ -11,6 +13,15 @@ import { fetchStationMaxTemp } from '@/lib/station-weather'
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' })
+  }
+
+  // Auth: permitir sin secret (para el botón CARGAR de la UI) o con secret (para el cron)
+  const authHeader = req.headers.authorization
+  const expectedSecret = process.env.CRON_SECRET || ''
+  if (expectedSecret && authHeader) {
+    if (authHeader !== `Bearer ${expectedSecret}`) {
+      return res.status(401).json({ error: 'Unauthorized' })
+    }
   }
 
   try {
@@ -73,10 +84,30 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       }
     }
 
+    // ===== También actualizar snapshots pendientes =====
+    console.log('[BACKFILL] Actualizando snapshots pendientes...')
+    const pendingSnaps = await getPendingSnapshots()
+    let snapsUpdated = 0
+    for (const snap of pendingSnaps) {
+      if (snap.fecha_objetivo >= new Date().toISOString().slice(0, 10)) continue
+      const tempReal = await fetchStationMaxTemp(snap.slug, snap.fecha_objetivo)
+        ?? (await fetchActualMaxTemp(
+          CIUDADES_ASIA.find(c => c.slug === snap.slug)?.lat ?? 0,
+          CIUDADES_ASIA.find(c => c.slug === snap.slug)?.lon ?? 0,
+          snap.fecha_objetivo
+        ))
+      if (tempReal !== null) {
+        const ok = await updateSnapshotActual(snap.slug, snap.fecha_objetivo, tempReal)
+        if (ok) snapsUpdated++
+      }
+    }
+    console.log(`[BACKFILL] Snapshots: ${snapsUpdated} actualizados`)
+
     return res.status(200).json({
       status: 'ok',
-      message: `Backfill completado: ${updated} actualizados, ${errors} errores`,
+      message: `Backfill completado: ${updated} forecast_history + ${snapsUpdated} snapshots, ${errors} errores`,
       updated,
+      snapshots_updated: snapsUpdated,
       errors,
       total: pendientes.length,
       omitidos_en_curso: records.length - pendientes.length,

@@ -1,0 +1,68 @@
+name: Forecast Cron Automático
+
+on:
+  schedule:
+    # 10:00 PM Caracas (UTC-4) = 02:00 UTC
+    - cron: '0 2 * * *'
+    # 11:00 PM Caracas (UTC-4) = 03:00 UTC
+    - cron: '0 3 * * *'
+    # 12:00 PM Caracas = 16:00 UTC — backfill reales del día que cerró en Asia
+    - cron: '0 16 * * *'
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Qué ejecutar: daily o backfill'
+        required: true
+        default: 'daily'
+        type: choice
+        options:
+          - daily
+          - backfill
+
+jobs:
+  run-cron:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Determinar acción según hora UTC
+        id: determine
+        run: |
+          HOUR=$(date -u +%H)
+          if [ "${{ github.event.inputs.action }}" != "" ]; then
+            ACTION="${{ github.event.inputs.action }}"
+          elif [ "$HOUR" = "02" ] || [ "$HOUR" = "03" ]; then
+            ACTION="daily"
+          else
+            ACTION="backfill"
+          fi
+          echo "action=$ACTION" >> $GITHUB_OUTPUT
+          echo "Ejecutando: $ACTION (UTC hour: $HOUR)"
+
+      - name: Ejecutar corrida principal (forecast + backfill)
+        if: steps.determine.outputs.action == 'daily'
+        run: |
+          echo "=== CORRIDA PRINCIPAL $(date -u) ==="
+          curl -sS --max-time 300 -X GET \
+            "${{ secrets.VERCEL_URL }}/api/cron/daily" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            -H "Content-Type: application/json"
+
+      - name: Backfill temperaturas reales + snapshots
+        if: steps.determine.outputs.action == 'backfill'
+        run: |
+          echo "=== BACKFILL REALES $(date -u) ==="
+          # 1) Backfill forecast_history
+          curl -sS --max-time 120 -X POST \
+            "${{ secrets.VERCEL_URL }}/api/backfill?limit=200" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}"
+          echo ""
+          echo "=== BACKFILL SNAPSHOTS ==="
+          # 2) Backfill snapshots
+          curl -sS --max-time 120 -X POST \
+            "${{ secrets.VERCEL_URL }}/api/cron/backfill-reales" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}"
+
+      - name: Log resultado
+        if: always()
+        run: |
+          echo "Workflow completado: $(date -u)"
