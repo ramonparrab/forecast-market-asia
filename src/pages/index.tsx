@@ -611,27 +611,26 @@ export default function Home({ initialAnalysis, initialMetrics, initialAvailable
       setIsHistorical(false)
       setSelectedDate(data.fecha_objetivo)
       setLastUpdated(new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit', second: '2-digit' }))
-      // Cargar metrics, dates y día anterior todo en paralelo (sin duplicados)
-      const [_, dates] = await Promise.all([
-        fetchMetrics(),
-        fetchAvailableDates(),
-      ])
-      // Buscar día anterior con las fechas ya obtenidas (sin re-fetch)
-      const sortedDates = [...dates].sort().reverse()
-      const idx = sortedDates.indexOf(data.fecha_objetivo)
-      if (idx >= 0 && idx < sortedDates.length - 1) {
-        const prevDate = sortedDates[idx + 1]
-        const [prevData, prevMetrics] = await Promise.all([
-          fetch(`/api/forecast-history?fecha=${prevDate}`).then(r => r.ok ? r.json() : null).catch(() => null),
-          fetch(`/api/metrics?fecha=${prevDate}`).then(r => r.ok ? r.json() : null).catch(() => null),
-        ])
-        if (prevData && prevData.cities) setPreviousAnalysis(prevData)
-        if (prevMetrics && prevMetrics.overall_mae !== undefined) setPreviousMetrics(prevMetrics)
-      }
     } catch (e) {
       setError((e as Error).message)
     } finally {
       setLoading(false)
+    }
+    // Cargar metrics, dates y día anterior en background (no bloquea el botón)
+    const dates = await fetchAvailableDates()
+    fetchMetrics()
+    const sortedDates = [...dates].sort().reverse()
+    const targetDate = fecha || selectedDate || getDefaultTargetDate()
+    const idx = sortedDates.indexOf(targetDate)
+    if (idx >= 0 && idx < sortedDates.length - 1) {
+      const prevDate = sortedDates[idx + 1]
+      Promise.all([
+        fetch(`/api/forecast-history?fecha=${prevDate}`).then(r => r.ok ? r.json() : null).catch(() => null),
+        fetch(`/api/metrics?fecha=${prevDate}`).then(r => r.ok ? r.json() : null).catch(() => null),
+      ]).then(([prevData, prevMetrics]) => {
+        if (prevData && prevData.cities) setPreviousAnalysis(prevData)
+        if (prevMetrics && prevMetrics.overall_mae !== undefined) setPreviousMetrics(prevMetrics)
+      })
     }
   }, [selectedDate])
 
