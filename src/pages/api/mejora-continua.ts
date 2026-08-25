@@ -22,23 +22,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // Para backtesting de MC, usamos forecast_snapshot (valores bloqueados) cuando existe,
     // sino caemos a forecast_history con dedup por run_type.
     //
-    // Primero intentamos leer de forecast_snapshot para datos historicos
-    const { data: snapshots } = await client
-      .from('forecast_snapshot' as any)
-      .select('fecha_objetivo, slug, ciudad, temp_pronosticada, temp_corregida, temp_real, error, modelos_usados, consenso')
-      .not('temp_real', 'is', null)
-      .order('fecha_objetivo', { ascending: true } as any)
-
-    // Mapear snapshots por slug
-    const snapBySlug = new Map<string, any[]>()
-    for (const r of (snapshots as any[]) ?? []) {
-      if (!snapBySlug.has(r.slug)) snapBySlug.set(r.slug, [])
-      snapBySlug.get(r.slug)!.push(r)
-    }
-
-    // Si hay snapshots suficientes, usarlos como fuente principal
-    const useSnapshots = (snapshots as any[])?.length > 5
-
+    // Leer snapshots y forecast_history EN PARALELO
     let query = client
       .from('forecast_history' as any)
       .select('id, fecha_objetivo, slug, ciudad, temp_pronosticada, temp_corregida, temp_real, error, modelos_usados, consenso, run_type')
@@ -49,9 +33,24 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       query = query.eq('slug', slugFilter)
     }
 
-    const { data: rawRecords, error } = await query
+    const [{ data: snapshots }, { data: rawRecords, error }] = await Promise.all([
+      client
+        .from('forecast_snapshot' as any)
+        .select('fecha_objetivo, slug, ciudad, temp_pronosticada, temp_corregida, temp_real, error, modelos_usados, consenso')
+        .not('temp_real', 'is', null)
+        .order('fecha_objetivo', { ascending: true } as any),
+      query,
+    ])
 
     if (error) return res.status(500).json({ error: error.message })
+
+    // Mapear snapshots por slug
+    const snapBySlug = new Map<string, any[]>()
+    for (const r of (snapshots as any[]) ?? []) {
+      if (!snapBySlug.has(r.slug)) snapBySlug.set(r.slug, [])
+      snapBySlug.get(r.slug)!.push(r)
+    }
+    const useSnapshots = (snapshots as any[])?.length > 5
 
     const bySlug = new Map<string, any[]>()
 
@@ -95,34 +94,39 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     const ciudades: Record<string, CityMejoraResult> = {}
 
+    // Computar mejoras para todas las ciudades
+    const mejoraResults = new Map<string, CityMejoraResult>()
     for (const [slug, records] of Array.from(bySlug.entries())) {
       const nombre = ciudadMap.get(slug) || slug
-      const result = computeAllMejoras(records, nombre)
+      mejoraResults.set(slug, computeAllMejoras(records, nombre))
+    }
 
-      // Fetch current pending forecast: usar temp_pronosticada (cruda) como base para MC,
-      // ya que el engine aplica station/range/boost encima. Si usamos temp_corregida del
-      // snapshot (que ya incluye MC), se duplicaria la correccion.
-      let currentQuery = client
-        .from('forecast_snapshot' as any)
-        .select('fecha_objetivo, temp_pronosticada, temp_corregida, run_type_ganadora, modelo_ganador')
-        .eq('slug', slug)
-        .is('temp_real', null)
-        .order('fecha_objetivo', { ascending: false } as any)
-        .limit(1)
+    // Fetch current pending forecasts en PARALELO para todas las ciudades
+    const slugs = Array.from(mejoraResults.keys())
+    const currentResults = await Promise.all(
+      slugs.map(async slug => {
+        const { data } = await client
+          .from('forecast_snapshot' as any)
+          .select('fecha_objetivo, temp_pronosticada, temp_corregida, run_type_ganadora, modelo_ganador')
+          .eq('slug', slug)
+          .is('temp_real', null)
+          .order('fecha_objetivo', { ascending: false } as any)
+          .limit(1)
+        return { slug, data: data as any[] }
+      })
+    )
 
-      const { data: currentRaw } = await currentQuery
-
-      if ((currentRaw as any[])?.length) {
-        const c = (currentRaw as any[])[0]
-        // Si hay temp_pronosticada, usarla como base cruda para el engine.
-        // Si no existe, mantener temp_corregida como fallback.
+    for (const { slug, data } of currentResults) {
+      const result = mejoraResults.get(slug)!
+      if (data?.length) {
+        const c = data[0]
         const baseTemp = c.temp_pronosticada ?? c.temp_corregida
-        result.currentForecast = computeCurrentForecast(records, {
-          slug,
-          temp_corregida: baseTemp,
-        } as any, nombre)
+        result.currentForecast = computeCurrentForecast(
+          bySlug.get(slug) ?? [],
+          { slug, temp_corregida: baseTemp } as any,
+          ciudadMap.get(slug) || slug
+        )
       }
-
       ciudades[slug] = result
     }
 

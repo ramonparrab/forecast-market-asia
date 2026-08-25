@@ -93,36 +93,32 @@ export async function computeBacktestKalman(daysLimit: number, slugFilter: strin
     const slugNames: Record<string, string> = {}
     CIUDADES_ASIA.forEach((c: any) => { slugNames[c.slug] = c.nombre })
 
-    // ============ 1) forecast_history: todos los registros ============
-    const { data: fhAll } = await client
-      .from('forecast_history' as any)
-      .select('id, slug, fecha_objetivo, temp_real, temp_pronosticada, temp_corregida, error, run_type, created_at, fecha_ejecucion')
-      .gte('fecha_objetivo', startDate.toISOString())
-      .order('fecha_objetivo', { ascending: true } as any)
-      .order('id', { ascending: true } as any)
-      .limit(10000)
+    // ============ 1) Queries EN PARALELO: forecast_history + forecast_snapshot + daily_runs ============
+    const [{ data: fhAll }, { data: snapshots }, { data: dailyRuns }] = await Promise.all([
+      client
+        .from('forecast_history' as any)
+        .select('id, slug, fecha_objetivo, temp_real, temp_pronosticada, temp_corregida, error, run_type, created_at, fecha_ejecucion')
+        .gte('fecha_objetivo', startDate.toISOString())
+        .order('fecha_objetivo', { ascending: true } as any)
+        .order('id', { ascending: true } as any)
+        .limit(10000),
+      client
+        .from('forecast_snapshot' as any)
+        .select('slug, fecha_objetivo, modelo_ganador, run_type_ganadora')
+        .gte('fecha_objetivo', startDate.toISOString()),
+      client
+        .from('daily_runs' as any)
+        .select('id, fecha_ejecucion, fecha_objetivo, resultados')
+        .gte('fecha_ejecucion', startDate.toISOString())
+        .order('fecha_ejecucion', { ascending: true } as any),
+    ])
 
-    // ============ 2) forecast_snapshot: modelo_ganador por (slug, fecha, run_type) ============
-    const { data: snapshots } = await client
-      .from('forecast_snapshot' as any)
-      .select('slug, fecha_objetivo, modelo_ganador, run_type_ganadora')
-      .gte('fecha_objetivo', startDate.toISOString())
+    // Mapear snapshots: modelo_ganador por (slug, fecha, run_type)
     const snapModelo: Record<string, string> = {}
     for (const s of (snapshots as any[]) ?? []) {
       const k = s.slug + '|' + s.fecha_objetivo + '|' + (s.run_type_ganadora || '')
       snapModelo[k] = s.modelo_ganador
     }
-
-    // ============ 2b) daily_runs: temperaturas REALES por corrida (no corruptos por backup) ============
-    // El backup del cron sobreescribió forecast_history 10PM con datos 11PM.
-    // daily_runs guarda cada corrida por separado — son los datos correctos.
-    // Extraemos temp_corregida (valor FINAL con modelo ganador, igual que NOWCAST)
-    // para que MC vs KALMAN muestre los mismos valores que NOWCAST 10PM vs 11PM.
-    const { data: dailyRuns } = await client
-      .from('daily_runs' as any)
-      .select('id, fecha_ejecucion, fecha_objetivo, resultados')
-      .gte('fecha_ejecucion', startDate.toISOString())
-      .order('fecha_ejecucion', { ascending: true } as any)
 
     const dailyRunBase: Record<string, number> = {} // key: "slug|fecha|10PM" o "slug|fecha|11PM"
 
@@ -298,7 +294,16 @@ export async function computeBacktestKalman(daysLimit: number, slugFilter: strin
         const dr = dayMap.get(fecha)!
         dr.temp_real = r.temp_real
 
-        if (r.temp_pronosticada == null) continue
+        // Inferir run_type desde fecha_ejecucion si es NULL
+        const effectiveRunType = r.run_type || inferRunType(r.fecha_ejecucion)
+        const is10pm = effectiveRunType === '10PM'
+        const is11pm = effectiveRunType === '11PM'
+
+        // Base temp: preferir daily_runs (datos reales sin corrupción del backup)
+        // Si no hay en daily_runs, caer a forecast_pronosticada de forecast_history
+        const drKey = slug + '|' + fecha + '|' + (effectiveRunType || '')
+        const base = dailyRunBase[drKey] ?? r.temp_pronosticada
+        if (base == null) continue
 
         // Find the index in the deduplicated timeline for this fecha
         const tlIdx = timeline.findIndex(t => t.fecha === fecha)
@@ -306,16 +311,6 @@ export async function computeBacktestKalman(daysLimit: number, slugFilter: strin
 
         const mcBias = mcBiases[tlIdx]
         const kalBias = kalBiases[tlIdx]
-
-        // Inferir run_type desde fecha_ejecucion si es NULL
-        const effectiveRunType = r.run_type || inferRunType(r.fecha_ejecucion)
-        const is10pm = effectiveRunType === '10PM'
-        const is11pm = effectiveRunType === '11PM'
-
-        // Base temp: preferir daily_runs (datos reales sin corrupción del backup)
-        // Si no hay en daily_runs, caer a forecast_history (datos corruptos para 10PM histórico)
-        const drKey = slug + '|' + fecha + '|' + (effectiveRunType || '')
-        const base = dailyRunBase[drKey] ?? r.temp_pronosticada
 
         const mcPred = round2(base + mcBias)
         const kalPred = round2(base + kalBias)
