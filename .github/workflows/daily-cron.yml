@@ -1,15 +1,11 @@
-name: Forecast Cron Automático
+name: Forecast Cron Manual (Respaldo)
+
+# Este workflow es SOLO para ejecución manual (workflow_dispatch).
+# La automatización principal corre via Vercel Cron Jobs (vercel.json).
+# GitHub Actions schedule es poco confiable para crons nocturnos.
+# Mantener como respaldo manual si Vercel falla.
 
 on:
-  schedule:
-    # 10:00 PM Caracas (UTC-4) = 02:00 UTC — corrida 10PM
-    - cron: '0 2 * * *'
-    # 10:30 PM Caracas = 02:30 UTC — backfill seguridad post-10PM
-    - cron: '30 2 * * *'
-    # 11:00 PM Caracas (UTC-4) = 03:00 UTC — corrida 11PM
-    - cron: '0 3 * * *'
-    # 11:30 PM Caracas = 03:30 UTC — backfill seguridad post-11PM
-    - cron: '30 3 * * *'
   workflow_dispatch:
     inputs:
       action:
@@ -26,36 +22,19 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Determinar acción según hora UTC
-        id: determine
-        run: |
-          HOUR=$(date -u +%H)
-          MINUTE=$(date -u +%M)
-          if [ "${{ github.event.inputs.action }}" != "" ]; then
-            ACTION="${{ github.event.inputs.action }}"
-          elif [ "$HOUR" = "02" ] && [ "$MINUTE" = "00" ]; then
-            ACTION="daily"
-          elif [ "$HOUR" = "03" ] && [ "$MINUTE" = "00" ]; then
-            ACTION="daily"
-          else
-            ACTION="backfill"
-          fi
-          echo "action=$ACTION" >> $GITHUB_OUTPUT
-          echo "Ejecutando: $ACTION (UTC $HOUR:$MINUTE / Caracas $(($HOUR - 4)):$MINUTE)"
-
       - name: Corrida principal (forecast + backfill reales + snapshots)
-        if: steps.determine.outputs.action == 'daily'
+        if: inputs.action == 'daily'
         run: |
-          echo "=== CORRIDA PRINCIPAL $(date -u) ==="
+          echo "=== CORRIDA MANUAL $(date -u) ==="
           curl -sS --max-time 300 -X GET \
             "${{ secrets.VERCEL_URL }}/api/cron/daily" \
             -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
             -H "Content-Type: application/json"
 
-      - name: Backfill temperaturas reales + snapshots (seguridad)
-        if: steps.determine.outputs.action == 'backfill'
+      - name: Backfill temperaturas reales + snapshots
+        if: inputs.action == 'backfill'
         run: |
-          echo "=== BACKFILL REALES $(date -u) ==="
+          echo "=== BACKFILL MANUAL $(date -u) ==="
           curl -sS --max-time 120 -X POST \
             "${{ secrets.VERCEL_URL }}/api/backfill?limit=200" \
             -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}"
