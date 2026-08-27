@@ -235,7 +235,7 @@ export interface ForecastSnapshot {
   fecha_objetivo: string
   slug: string
   ciudad: string
-  run_type_ganadora: '10PM' | '11PM'
+  run_type_ganadora: '10PM' | '11PM' | string
   modelo_ganador: string
   temp_pronosticada: number | null
   temp_corregida: number | null

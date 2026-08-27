@@ -33,9 +33,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const caracasOffset = -4 * 60 * 60000
     const nowCaracas = new Date(Date.now() + caracasOffset)
     const caracasHour = nowCaracas.getUTCHours()
-    const runLabel = caracasHour >= 22 || caracasHour < 1
-      ? (caracasHour >= 23 || caracasHour < 1 ? '11PM' : '10PM')
-      : `${caracasHour}:00`
+    // Solo 10PM (22h) o 11PM (23h) Caracas son etiquetas válidas.
+    // Las horas 0-21 se etiquetan como HH:00. Esto evita que corridas
+    // de medianoche (00:xx Caracas = 04:xx UTC) se confundan con 11PM.
+    const runLabel = caracasHour === 23 ? '11PM'
+      : caracasHour === 22 ? '10PM'
+      : `${String(caracasHour).padStart(2, '0')}:00`
     console.log(`[CRON] === CORRIDA ${runLabel} CARACAS === Fecha: ${nowCaracas.toISOString().slice(0, 10)} ${nowCaracas.toISOString().slice(11, 16)} Caracas`)
 
     // ===== STEP 1: Backfill actual temps for pending records (PARALELO) =====
@@ -163,7 +166,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       resultados: result.cities,
       recomendaciones: result.recommendations,
       total_asignado: result.total_allocated,
-      run_type: runLabel as '10PM' | '11PM',
+      run_type: (runLabel === '10PM' || runLabel === '11PM') ? runLabel : undefined,
     })
 
     // ===== STEP 4: Upsert forecast_snapshot (pronóstico ganador bloqueado) =====
@@ -175,7 +178,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         fecha_objetivo: fechaObjetivo,
         slug: city.slug,
         ciudad: city.ciudad,
-        run_type_ganadora: runLabel as '10PM' | '11PM',
+        run_type_ganadora: runLabel,
         modelo_ganador: sel?.modelo ?? 'ENSEMBLE',
         temp_pronosticada: city.forecast.temp_ponderada,
         temp_corregida: city.forecast.temp_corregida,

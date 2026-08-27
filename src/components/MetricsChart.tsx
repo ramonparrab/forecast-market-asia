@@ -26,7 +26,7 @@ const PERIODS = [
 ]
 
 type PrecisionData = {
-  daily: { fecha: string; slug: string; ciudad: string; error: number }[]
+  daily: { fecha: string; slug: string; ciudad: string; error: number; temp_corregida?: number; temp_real?: number }[]
   perCity: {
     slug: string; ciudad: string; mae: number; rmse: number; bias: number
     accuracy_pct: number; muestras: number
@@ -283,6 +283,48 @@ export default function MetricsChart() {
         <p className="mt-3 text-[10px] text-gray-600">
           Click en una ciudad para aislarla en el gráfico · MAE = error absoluto medio · Sesgo = dirección promedio del error
         </p>
+      </div>
+
+      {/* Tabla de datos: Pronóstico vs Real */}
+      <div className="card">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-sm font-medium text-gray-400">
+            Datos individuales — Pronóstico vs Real
+            <span className="ml-2 text-[10px] text-gray-600">({g.total} registros)</span>
+          </h3>
+          <span className="text-[10px] text-emerald-400 flex items-center gap-1">
+            <span className="inline-block h-2 w-2 rounded-full bg-emerald-400" />
+            Última fecha con real: {data.daily.reduce((max, r) => r.fecha > max ? r.fecha : max, data.daily[0]?.fecha ?? '')}
+          </span>
+        </div>
+        <div className="max-h-80 overflow-y-auto">
+          <table className="w-full text-xs text-gray-400">
+            <thead className="sticky top-0 bg-slate-800">
+              <tr className="text-left text-gray-500 border-b border-gray-700/30">
+                <th className="p-2">Fecha</th>
+                <th className="p-2">Ciudad</th>
+                <th className="p-2 text-right">Pronóstico</th>
+                <th className="p-2 text-right text-emerald-400">Real</th>
+                <th className="p-2 text-right">Error</th>
+              </tr>
+            </thead>
+            <tbody>
+              {[...data.daily]
+                .sort((a, b) => b.fecha.localeCompare(a.fecha) || a.ciudad.localeCompare(b.ciudad))
+                .map((r, i) => (
+                  <tr key={`prec-row-${i}`} className="border-t border-gray-700/30 hover:bg-slate-800/50">
+                    <td className="p-2 text-gray-300">{r.fecha.slice(5)}</td>
+                    <td className="p-2 text-gray-300">{r.ciudad}</td>
+                    <td className="p-2 text-right text-blue-300 font-mono">{r.temp_corregida != null ? r.temp_corregida.toFixed(1) : '-'}</td>
+                    <td className="p-2 text-right text-emerald-400 font-mono font-medium">{r.temp_real != null ? r.temp_real.toFixed(1) : '-'}</td>
+                    <td className={`p-2 text-right font-mono ${Math.abs(r.error) <= 1 ? 'text-emerald-400' : 'text-red-400'}`}>
+                      {r.error > 0 ? '+' : ''}{r.error.toFixed(2)}°
+                    </td>
+                  </tr>
+                ))}
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   )
