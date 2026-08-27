@@ -82,7 +82,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const slugNames: Record<string, string> = {}
     CIUDADES_ASIA.forEach((c: any) => { slugNames[c.slug] = c.nombre })
 
-    // ============ 1) forecast_history: temp_real (con filtro de fecha para evitar límite de 1000 filas) ============
+    // ============ 1) forecast_history: temp_real (con filtro + límite alto para evitar corte en 1000) ============
     const realSince = new Date()
     realSince.setDate(realSince.getDate() - daysLimit - 20)
     const { data: fhRecords } = await client
@@ -90,6 +90,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       .select('id, slug, fecha_objetivo, temp_real')
       .not('temp_real', 'is', null as any)
       .gte('fecha_objetivo', realSince.toISOString().slice(0, 10))
+      .order('id', { ascending: false } as any)
+      .limit(5000)
 
     const realMap: Record<string, number> = {}
     for (const r of (fhRecords as any[]) ?? []) {

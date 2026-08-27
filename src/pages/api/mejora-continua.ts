@@ -23,7 +23,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // sino caemos a forecast_history con dedup por run_type.
     //
     // Leer snapshots y forecast_history EN PARALELO
-    // Filtro de fecha para evitar límite de 1000 filas de PostgREST
+    // Filtro de fecha + límite alto para evitar corte en 1000 filas de PostgREST
     const mcSince = new Date()
     mcSince.setDate(mcSince.getDate() - 120)
     const mcSinceStr = mcSince.toISOString().slice(0, 10)
@@ -33,7 +33,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       .select('id, fecha_objetivo, slug, ciudad, temp_pronosticada, temp_corregida, temp_real, error, modelos_usados, consenso, run_type')
       .not('temp_real', 'is', null)
       .gte('fecha_objetivo', mcSinceStr)
-      .order('fecha_objetivo', { ascending: true } as any)
+      .order('id', { ascending: false } as any)
+      .limit(5000)
 
     if (slugFilter && slugFilter !== 'todas') {
       query = query.eq('slug', slugFilter)
@@ -45,7 +46,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         .select('fecha_objetivo, slug, ciudad, temp_pronosticada, temp_corregida, temp_real, error, modelos_usados, consenso')
         .not('temp_real', 'is', null)
         .gte('fecha_objetivo', mcSinceStr)
-        .order('fecha_objetivo', { ascending: true } as any),
+        .limit(5000),
       query,
     ])
 

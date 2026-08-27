@@ -469,6 +469,8 @@ export async function getForecastVsActual(
     .select('id, fecha_objetivo, ciudad, slug, temp_pronosticada, temp_corregida, temp_real, error')
     .not('temp_real', 'is', null)
     .gte('fecha_ejecucion', sinceStr)
+    .order('id', { ascending: false } as any)
+    .limit(5000)
 
   if (slug) {
     q = q.eq('slug', slug)
