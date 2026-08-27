@@ -40,6 +40,7 @@ export async function saveDailyRun(run: DailyRun): Promise<number | null> {
       resultados: JSON.stringify(run.resultados),
       recomendaciones: JSON.stringify(run.recomendaciones),
       total_asignado: run.total_asignado,
+      ...(run.run_type ? { run_type: run.run_type } : {}),
     } as any)
     .select('id')
     .single()
