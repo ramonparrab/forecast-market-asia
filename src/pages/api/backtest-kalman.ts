@@ -93,15 +93,31 @@ export async function computeBacktestKalman(daysLimit: number, slugFilter: strin
     const slugNames: Record<string, string> = {}
     CIUDADES_ASIA.forEach((c: any) => { slugNames[c.slug] = c.nombre })
 
-    // ============ 1) Queries EN PARALELO: forecast_history + forecast_snapshot + daily_runs ============
-    const [{ data: fhAll }, { data: snapshots }, { data: dailyRuns }] = await Promise.all([
-      client
-        .from('forecast_history' as any)
-        .select('id, slug, fecha_objetivo, temp_real, temp_pronosticada, temp_corregida, error, run_type, created_at, fecha_ejecucion')
-        .gte('fecha_objetivo', startDate.toISOString())
-        .order('fecha_objetivo', { ascending: true } as any)
-        .order('id', { ascending: true } as any)
-        .limit(10000),
+    // ============ 1) Queries: forecast_snapshot + daily_runs en paralelo, forecast_history paginado ============
+    // Nota: PostgREST tiene un máximo de 1000 filas por defecto. Cuando el dataset
+    // supera ese límite, los registros más recientes quedan truncados y las temperaturas
+    // reales de días recientes aparecen como null. Se usa paginación para evitarlo.
+    const fhQuery = client
+      .from('forecast_history' as any)
+      .select('id, slug, fecha_objetivo, temp_real, temp_pronosticada, temp_corregida, error, run_type, created_at, fecha_ejecucion')
+      .gte('fecha_objetivo', startDate.toISOString())
+      .order('fecha_objetivo', { ascending: true } as any)
+      .order('id', { ascending: true } as any)
+
+    // Paginar forecast_history (máx 1000 por página) para capturar todos los registros
+    const PAGE_SIZE = 1000
+    let fhAll: any[] = []
+    let pageFrom = 0
+    while (true) {
+      const { data: page, error: pageErr } = await fhQuery.range(pageFrom, pageFrom + PAGE_SIZE - 1)
+      if (pageErr) throw pageErr
+      if (!page || page.length === 0) break
+      fhAll = fhAll.concat(page)
+      if (page.length < PAGE_SIZE) break
+      pageFrom += PAGE_SIZE
+    }
+
+    const [{ data: snapshots }, { data: dailyRuns }] = await Promise.all([
       client
         .from('forecast_snapshot' as any)
         .select('slug, fecha_objetivo, modelo_ganador, run_type_ganadora')
