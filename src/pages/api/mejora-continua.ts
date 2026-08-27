@@ -23,10 +23,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // sino caemos a forecast_history con dedup por run_type.
     //
     // Leer snapshots y forecast_history EN PARALELO
+    // Filtro de fecha para evitar límite de 1000 filas de PostgREST
+    const mcSince = new Date()
+    mcSince.setDate(mcSince.getDate() - 120)
+    const mcSinceStr = mcSince.toISOString().slice(0, 10)
+
     let query = client
       .from('forecast_history' as any)
       .select('id, fecha_objetivo, slug, ciudad, temp_pronosticada, temp_corregida, temp_real, error, modelos_usados, consenso, run_type')
       .not('temp_real', 'is', null)
+      .gte('fecha_objetivo', mcSinceStr)
       .order('fecha_objetivo', { ascending: true } as any)
 
     if (slugFilter && slugFilter !== 'todas') {
@@ -38,6 +44,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         .from('forecast_snapshot' as any)
         .select('fecha_objetivo, slug, ciudad, temp_pronosticada, temp_corregida, temp_real, error, modelos_usados, consenso')
         .not('temp_real', 'is', null)
+        .gte('fecha_objetivo', mcSinceStr)
         .order('fecha_objetivo', { ascending: true } as any),
       query,
     ])
