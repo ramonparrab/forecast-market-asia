@@ -172,6 +172,18 @@ export async function computeBacktestKalman(daysLimit: number, slugFilter: strin
       }
     }
 
+    // FALLBACK: forecast_history con run_type explícito para días donde la
+    // clasificación por tiempo de daily_runs falló (crons fuera de ventana).
+    // Esto recupera las temperaturas base correctas sin cambiar ningún cálculo.
+    for (const r of (fhAll as any[]) ?? []) {
+      const rt = r.run_type as string
+      if (rt !== '10PM' && rt !== '11PM') continue
+      const key = r.slug + '|' + r.fecha_objetivo + '|' + rt
+      if (!dailyRunBase[key] && r.temp_pronosticada != null) {
+        dailyRunBase[key] = Number(r.temp_pronosticada)
+      }
+    }
+
     // ============ 3) Build per-slug timelines ============
     // For each slug, collect ALL records sorted by fecha, id.
     // Then build walk-forward errors from the raw ensemble error (temp_real - temp_pronosticada).

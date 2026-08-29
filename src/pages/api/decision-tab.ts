@@ -168,6 +168,51 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       }
     }
 
+    // ============ 2b) FALLBACK: forecast_history con run_type explícito ============
+    // Cuando los daily_runs se ejecutan fuera de la ventana horaria esperada
+    // (crons manuales, retrasos, etc.), la clasificación por tiempo falla y
+    // los datos de ese día desaparecen. Este fallback usa el run_type explícito
+    // de forecast_history para recuperar esos días sin cambiar ningún cálculo.
+    const fhSince = new Date()
+    fhSince.setDate(fhSince.getDate() - daysLimit - 20)
+    const fhSinceStr = fhSince.toISOString().slice(0, 10)
+    const fhQuery = client
+      .from('forecast_history' as any)
+      .select('id, slug, fecha_objetivo, temp_pronosticada, temp_corregida, run_type, modelos_usados')
+      .gte('fecha_objetivo', fhSinceStr)
+      .in('run_type', ['10PM', '11PM'])
+      .order('id', { ascending: false } as any)
+    // Paginar para evitar truncamiento de PostgREST (máx 1000 filas por defecto)
+    const FH_PAGE = 1000
+    let fhAll: any[] = []
+    let fhFrom = 0
+    while (true) {
+      const { data: fhPage, error: fhErr } = await fhQuery.range(fhFrom, fhFrom + FH_PAGE - 1)
+      if (fhErr) break
+      if (!fhPage || fhPage.length === 0) break
+      fhAll = fhAll.concat(fhPage)
+      if (fhPage.length < FH_PAGE) break
+      fhFrom += FH_PAGE
+    }
+    // Llenar runDataMap solo para claves que no tiene (no sobreescribir datos de daily_runs)
+    for (const r of fhAll) {
+      const key = r.slug + '|' + r.fecha_objetivo + '|' + r.run_type
+      if (runDataMap[key]) continue
+      let modeloActivo: string | null = null
+      try {
+        const modelos = typeof r.modelos_usados === 'string' ? JSON.parse(r.modelos_usados) : r.modelos_usados
+        modeloActivo = modelos?.active ?? modelos?.modelo_activo ?? null
+      } catch { /* ignore */ }
+      runDataMap[key] = {
+        run_type: r.run_type as '10PM' | '11PM',
+        has_real_base: false,
+        temp_corregida_base: r.temp_pronosticada ?? r.temp_corregida ?? 0,
+        temp_corregida: r.temp_corregida ?? r.temp_pronosticada ?? 0,
+        modelo_activo: modeloActivo,
+      }
+      processedRuns++
+    }
+
     // ============ 3) Por cada slug ============
     const ciudades: Record<string, DecisionCityResult> = {}
 
