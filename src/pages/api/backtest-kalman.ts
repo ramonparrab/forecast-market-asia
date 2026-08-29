@@ -356,17 +356,22 @@ export async function computeBacktestKalman(daysLimit: number, slugFilter: strin
           const snapKey = slug + '|' + fecha + '|11PM'
           dr.modelo_11pm = snapModelo[snapKey] ?? null
         } else {
-          // Sin run_type ni inferencia posible: asignar al que falte, o al 11PM por defecto
-          if (dr.cur_11pm === null && dr.kal_11pm === null) {
-            dr.cur_11pm = mcPred
-            dr.kal_11pm = kalPred
-            const snapKey = slug + '|' + fecha + '|11PM'
-            dr.modelo_11pm = snapModelo[snapKey] ?? null
-          } else if (dr.cur_10pm === null && dr.kal_10pm === null) {
-            dr.cur_10pm = mcPred
-            dr.kal_10pm = kalPred
-            const snapKey = slug + '|' + fecha + '|10PM'
-            dr.modelo_10pm = snapModelo[snapKey] ?? null
+          // Sin run_type válido (MANUAL, null sin inferencia, etc.):
+          // Solo asignar a fechas HISTÓRICAS (con temp_real).
+          // Para fechas futuras, NO mostrar datos de runs no-oficiales —
+          // hay que esperar a que los runs 10PM/11PM oficiales se ejecuten.
+          if (dr.temp_real !== null) {
+            if (dr.cur_11pm === null && dr.kal_11pm === null) {
+              dr.cur_11pm = mcPred
+              dr.kal_11pm = kalPred
+              const snapKey = slug + '|' + fecha + '|11PM'
+              dr.modelo_11pm = snapModelo[snapKey] ?? null
+            } else if (dr.cur_10pm === null && dr.kal_10pm === null) {
+              dr.cur_10pm = mcPred
+              dr.kal_10pm = kalPred
+              const snapKey = slug + '|' + fecha + '|10PM'
+              dr.modelo_10pm = snapModelo[snapKey] ?? null
+            }
           }
         }
       }
