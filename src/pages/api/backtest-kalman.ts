@@ -174,12 +174,19 @@ export async function computeBacktestKalman(daysLimit: number, slugFilter: strin
 
     // FALLBACK: forecast_history con run_type explícito para días donde la
     // clasificación por tiempo de daily_runs falló (crons fuera de ventana).
-    // Esto recupera las temperaturas base correctas sin cambiar ningún cálculo.
+    // TIME GATE: solo incluir si el cron correspondiente ya ejecutó.
+    // 10PM cron = fecha_objetivo T02:00Z, 11PM cron = fecha_objetivo T03:00Z.
+    const nowUtcMs = Date.now()
     for (const r of (fhAll as any[]) ?? []) {
       const rt = r.run_type as string
       if (rt !== '10PM' && rt !== '11PM') continue
       const key = r.slug + '|' + r.fecha_objetivo + '|' + rt
       if (!dailyRunBase[key] && r.temp_pronosticada != null) {
+        // TIME GATE: verificar que el cron para este run_type ya pasó
+        const cronTs = rt === '10PM'
+          ? new Date(r.fecha_objetivo + 'T02:00:00.000Z').getTime()
+          : new Date(r.fecha_objetivo + 'T03:00:00.000Z').getTime()
+        if (nowUtcMs < cronTs) continue
         dailyRunBase[key] = Number(r.temp_pronosticada)
       }
     }

@@ -82,7 +82,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
 // ============ Helpers ============
 
-function buildAnalysisFromDailyRun(row: any, res: NextApiResponse) {
+async function buildAnalysisFromDailyRun(row: any, res: NextApiResponse) {
   let resultados: CityAnalysis[]
   let recomendaciones: BetRecommendation[]
 
@@ -127,15 +127,15 @@ async function buildAnalysisFromSnapshot(
         slug: c.slug,
         contratos: [],
         forecast: {
-          temp_ponderada: sc?.temp_pronosticada ?? c.defaultTemp ?? 25,
-          temp_corregida: sc?.temp_corregida ?? c.defaultTemp ?? 25,
-          temp_corregida_base: sc?.temp_pronosticada ?? c.defaultTemp ?? 25,
-          modelo_activo: sc?.modelo_ganador ?? 'ENSEMBLE',
-          consenso: sc?.consenso ?? '-',
+          temp_ponderada: 25,
+          temp_corregida: 25,
+          temp_corregida_base: 25,
+          modelo_activo: 'ENSEMBLE',
+          consenso: '-',
           ensemble_raw: {},
-        } as any,
+        },
         arbitraje: { desvio: 0, nivel: '-' },
-        nowcast: { diff: 0, diffPct: 0 },
+        nowcast: { activo: false, peso_observacion: 0, temp_observada: null, estacion: c.estacion, hora_local: 0 },
         exito_pct: 50,
         exito_pct_integer: 50,
         explicacion: `Sin datos de snapshot para ${c.nombre}`,
@@ -155,18 +155,17 @@ async function buildAnalysisFromSnapshot(
       forecast: {
         temp_ponderada: tempPron,
         temp_corregida: tempCorr,
-        temp_corregida_base: tempPronst,
+        temp_corregida_base: tempPron,
         modelo_activo: modelo,
         consenso: consenso,
         ensemble_raw: {},
       } as any,
       arbitraje: { desvio: 0, nivel: '-' },
-      nowcast: { diff: 0, diffPct: 0 },
+      nowcast: { activo: false, peso_observacion: 0, temp_observada: null, estacion: c.estacion, hora_local: 0 },
       exito_pct: 50,
       exito_pct_integer: 50,
       explicacion: `Pronóstico ${modelo} (${c.nombre}): ${tempCorr}°C (desde forecast_snapshot)`,
     }
-  })
   }).filter(c => c !== null)
 
   return buildAnalysisFromData(

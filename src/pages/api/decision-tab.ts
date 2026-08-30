@@ -195,9 +195,18 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       fhFrom += FH_PAGE
     }
     // Llenar runDataMap solo para claves que no tiene (no sobreescribir datos de daily_runs)
+    // TIME GATE: solo incluir forecast_history si el cron correspondiente ya ejecutó.
+    // 10PM cron = fecha_objetivo T02:00Z, 11PM cron = fecha_objetivo T03:00Z.
+    // Esto evita mostrar datos de runs MANUAL o fuera de ventana para fechas futuras.
+    const nowUtcMs = Date.now()
     for (const r of fhAll) {
       const key = r.slug + '|' + r.fecha_objetivo + '|' + r.run_type
       if (runDataMap[key]) continue
+      // TIME GATE: verificar que el cron para este run_type ya pasó
+      const cronTs = r.run_type === '10PM'
+        ? new Date(r.fecha_objetivo + 'T02:00:00.000Z').getTime()
+        : new Date(r.fecha_objetivo + 'T03:00:00.000Z').getTime()
+      if (nowUtcMs < cronTs) continue
       let modeloActivo: string | null = null
       try {
         const modelos = typeof r.modelos_usados === 'string' ? JSON.parse(r.modelos_usados) : r.modelos_usados
