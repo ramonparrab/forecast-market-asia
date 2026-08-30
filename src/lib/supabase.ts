@@ -43,13 +43,14 @@ export async function saveDailyRun(run: DailyRun): Promise<number | null> {
       ...(run.run_type ? { run_type: run.run_type } : {}),
     } as any)
     .select('id')
-    .single()
 
   if (error) {
-    console.error('Error saving daily run:', error)
+    console.error('[saveDailyRun] Error saving daily run:', error.message, error)
     return null
   }
-  return (data as any)?.id ?? null
+  const runId = (data as any)?.id ?? null
+  console.log(`[saveDailyRun] Saved daily_run id=${runId} for ${run.fecha_objetivo} run_type=${run.run_type || 'none'}`)
+  return runId
 }
 
 /**
