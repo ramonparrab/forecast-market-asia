@@ -6,7 +6,7 @@ const HKO_API = 'https://data.weather.gov.hk/weatherAPI/opendata/opendata.php'
 
 const ICAO_COUNTRY: Record<string, string> = {
   ZBAA: 'CN', ZSPD: 'CN', ZHHH: 'CN', ZUCK: 'CN', ZUUU: 'CN',
-  RKSI: 'KR', RJTT: 'JP',
+  RKSI: 'KR', RJTT: 'JP', WSSS: 'SG',
 }
 
 const STATION_MAP: Record<string, { station: string; type: string }> = {
@@ -19,6 +19,7 @@ const STATION_MAP: Record<string, { station: string; type: string }> = {
   'wuhan':     { station: 'ZHHH', type: 'icao' },
   'chongqing': { station: 'ZUCK', type: 'icao' },
   'chengdu':   { station: 'ZUUU', type: 'icao' },
+  'singapore':  { station: 'WSSS', type: 'icao' },  // Changi Intl Airport
 }
 
 function buildTWCUrl(icao: string, dateStr: string): string | null {
