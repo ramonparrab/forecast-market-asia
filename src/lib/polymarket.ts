@@ -24,9 +24,13 @@ const MONTHS = ['january','february','march','april','may','june',
 
 /**
  * Fetch the actual settlement temperature from resolved Polymarket contracts.
- * After resolution, each contract has YES price = 1 (true) or 0 (false).
- * The highest temperature value with YES=1 is the real temperature (integer °C).
- * Handles both formats: "34°C" (exact) and "34°C or higher" (superior).
+ *
+ * Strategy (3 passos):
+ * 1. PASSO RÍGIDO: Busca contratos con yesPrice EXACTAMENTE 1.0 (resolución formal on-chain reflejada en Gamma).
+ * 2. PASSO EVENTO CERRADO: Si el evento tiene `closed: true` pero Gamma aún no actualizó a 1.0,
+ *    infiere la temperatura real del contrato "exacto" con mayor precio YES.
+ * 3. PASSO INFERENCIA: Si ningún contrato tiene yes=1 pero hay un contrato exacto con > 0.95,
+ *    lo usa como temperatura real (caso raro: mercado resuelto pero Gamma retrasada).
  */
 export async function fetchActualTempFromPolymarket(
   slug: string,
@@ -47,9 +51,18 @@ export async function fetchActualTempFromPolymarket(
     const events = await eventsResp.json()
     if (!events?.length) return null
 
+    const eventClosed = !!events[0].closed
     const markets: GammaMarket[] = events[0].markets || []
     let maxResolved = -Infinity
     let anyResolved = false
+
+    // Passo 1 y 2: recolectar todos los contratos con precios
+    interface ParsedContract {
+      value: number
+      yesPrice: number
+      tipo: 'exacto' | 'superior' | 'inferior'
+    }
+    const parsed: ParsedContract[] = []
 
     for (const market of markets) {
       let outcomePrices: string[]
@@ -61,12 +74,9 @@ export async function fetchActualTempFromPolymarket(
       if (!outcomePrices?.length) continue
 
       const yesPrice = parseFloat(outcomePrices[0])
-      if (yesPrice !== 0 && yesPrice !== 1) continue
-
       const texto = (market as any).groupItemTitle || market.question || ''
       if (!texto) continue
 
-      // Skip "or below" contracts (inferior/range) — we want the highest YES
       const lower = texto.toLowerCase()
       if (lower.includes('or below') || lower.includes('under') || lower.includes('or lower')) continue
 
@@ -74,17 +84,51 @@ export async function fetchActualTempFromPolymarket(
       if (!nums) continue
 
       const value = parseInt(nums[0])
-      anyResolved = true
+      const tipo: 'exacto' | 'superior' = (lower.includes('or higher') || lower.includes('above') || lower.includes('over'))
+        ? 'superior' : 'exacto'
 
-      if (yesPrice === 1 && value > maxResolved) {
+      parsed.push({ value, yesPrice, tipo })
+
+      // PASSO 1: resolución formal reflejada en Gamma (yesPrice === 1)
+      if (yesPrice === 1 && tipo === 'exacto' && value > maxResolved) {
         maxResolved = value
+      }
+      if (yesPrice === 0 || yesPrice === 1) {
+        anyResolved = true
+      }
+    }
+
+    // PASSO 1 resultado: si encontramos un exacto con YES=1, ya tenemos la temp real
+    if (maxResolved !== -Infinity) {
+      return maxResolved
+    }
+
+    // PASSO 2: evento cerrado pero Gamma aún no actualizó precios a 1.0
+    // Usar el contrato "exacto" con mayor precio YES como temperatura inferida.
+    if (eventClosed) {
+      const exactos = parsed.filter(c => c.tipo === 'exacto')
+      if (exactos.length > 0) {
+        const best = exactos.reduce((a, b) => b.yesPrice > a.yesPrice ? b : a)
+        if (best.yesPrice > 0.80) {
+          console.log(`[Polymarket] Inferred temp from closed event (not yet 1.0): ${slug} ${fechaObjetivo} → ${best.value}°C (yes=${best.yesPrice})`)
+          return best.value
+        }
+      }
+    }
+
+    // PASSO 3: inferencia por alta probabilidad (sin require closed)
+    // Si hay un exacto con > 0.95 y el día ya terminó en Asia, confiar en él.
+    const exactos = parsed.filter(c => c.tipo === 'exacto')
+    if (exactos.length > 0) {
+      const best = exactos.reduce((a, b) => b.yesPrice > a.yesPrice ? b : a)
+      if (best.yesPrice > 0.95 && anyResolved) {
+        console.log(`[Polymarket] Inferred temp from high probability: ${slug} ${fechaObjetivo} → ${best.value}°C (yes=${best.yesPrice})`)
+        return best.value
       }
     }
 
     if (!anyResolved) return null
-    if (maxResolved === -Infinity) return null
-
-    return maxResolved
+    return null
   } catch (e) {
     console.error(`[Polymarket] settlement fetch error for ${slug} ${fechaObjetivo}:`, (e as Error).message)
     return null
