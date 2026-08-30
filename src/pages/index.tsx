@@ -131,6 +131,75 @@ export async function getServerSideProps() {
         }
       }
     }
+    // Fallback 3: reconstruir desde forecast_snapshot cuando daily_runs no tiene
+    // la fecha esperada (ej: el cron falló el insert en daily_runs pero sí creó
+    // forecast_history + forecast_snapshot). Esto usa la última fecha con snapshots.
+    if (!analysis) {
+      const { data: latestSnap } = await client
+        .from('forecast_snapshot' as any)
+        .select('fecha_objetivo')
+        .not('temp_real', 'is', null as any)
+        .order('fecha_objetivo', { ascending: false } as any)
+        .limit(1)
+      // Buscar la última fecha_objetivo en snapshots (incluso sin temp_real)
+      const { data: snapDates } = await client
+        .from('forecast_snapshot' as any)
+        .select('fecha_objetivo')
+        .order('fecha_objetivo', { ascending: false } as any)
+        .limit(1)
+      const snapFecha = (snapDates as any[])?.[0]?.fecha_objetivo
+      if (snapFecha) {
+        console.log(`[SSP] Fallback 3: reconstruyendo desde forecast_snapshot para ${snapFecha}`)
+        const { data: snapCities } = await client
+          .from('forecast_snapshot' as any)
+          .select('*')
+          .eq('fecha_objetivo', snapFecha)
+        if ((snapCities as any[])?.length) {
+          const cities = (snapCities as any[]).map(s => ({
+            ciudad: s.ciudad,
+            slug: s.slug,
+            forecast: {
+              temp_ponderada: s.temp_ponderada,
+              temp_corregida: s.temp_corregida ?? s.temp_11pm ?? s.temp_10pm ?? s.temp_pronosticada,
+              temp_corregida_base: s.temp_pronosticada,
+              modelo_activo: s.modelo_ganador || 'ENSEMBLE',
+              consenso: s.consenso,
+              volatilidad: 0,
+              ensemble_raw: {},
+              sesgo_aplicado: 0,
+              ensemble_members: 0,
+              weather: null,
+              icon_base: '',
+              modelo_muestras: 0,
+              temp_corregida_alt: null,
+              modelo_alt: null,
+              sesgo_alt: 0,
+            },
+            contratos: [],
+            arbitraje: null,
+            nowcast: null,
+            exito_pct: 50,
+            exito_pct_integer: 50,
+            explicacion: '',
+            totalRecords: 0,
+            liquidity_avg: 0,
+            volume_total: 0,
+            avg_spread: 0,
+          }))
+          analysis = {
+            fecha: snapFecha + 'T00:00:00',
+            fecha_objetivo: snapFecha,
+            message: `Pronóstico del ${new Date(snapFecha + 'T12:00:00').toLocaleDateString('es-ES', { timeZone: 'America/Caracas' })} (vía snapshot)`,
+            cities,
+            recommendations: [],
+            total_allocated: 0,
+            global_metrics: null,
+            arbitrage_alerts: [],
+            historicalErrors: {},
+          }
+        }
+      }
+    }
 
     // ===== STEP 2: Hindcast (solo si no hay datos históricos) =====
     const needsHindcast = !(existingActuals as any[] | undefined)?.length
