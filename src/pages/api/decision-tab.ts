@@ -279,13 +279,17 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         sumErr += validErrors[i].error
         countErr++
       }
+      // Último bias conocido para fechas sin temp_real (walk-forward)
+      const lastKnownBias: { mc_bias: number; kal_bias: number } = validErrors.length > 0
+        ? { mc_bias: sumErr / countErr, kal_bias: kalPreds[kalPreds.length - 1] ?? 0 }
+        : { mc_bias: 0, kal_bias: 0 }
 
       // Reconstruir bases faltantes
       const reconstructedBase: Record<string, number> = {}
       for (const d of dayInfos) {
         if (d.base_11pm_real !== null || d.base_11pm_final === null) continue
         const modelo = d.modelo_11pm
-        const biases = biasMap[d.fecha] ?? { mc_bias: 0, kal_bias: 0 }
+        const biases = biasMap[d.fecha] ?? lastKnownBias
         let biasToRemove = 0
         if (modelo === 'KALMAN') biasToRemove = biases.kal_bias
         else if (modelo === 'MEJORA CONTINUA') biasToRemove = biases.mc_bias
@@ -321,7 +325,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             base10 = run10.temp_corregida_base
           } else {
             const modelo10 = run10.modelo_activo
-            const biases10 = biasMap[f] ?? { mc_bias: 0, kal_bias: 0 }
+            const biases10 = biasMap[f] ?? lastKnownBias
             const bias10 = modelo10 === 'KALMAN' ? biases10.kal_bias : biases10.mc_bias
             base10 = round2(run10.temp_corregida - bias10)
           }
@@ -340,7 +344,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         if (run11?.modelo_activo) lastModelo = run11.modelo_activo
         else if (run10?.modelo_activo) lastModelo = run10.modelo_activo
 
-        const biases = biasMap[f] ?? { mc_bias: 0, kal_bias: 0 }
+        const biases = biasMap[f] ?? lastKnownBias
         const mc10 = base10 !== null ? round2(base10 + biases.mc_bias) : null
         const mc11 = base11 !== null ? round2(base11 + biases.mc_bias) : null
         const kal10 = base10 !== null ? round2(base10 + biases.kal_bias) : null

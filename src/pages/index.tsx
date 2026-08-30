@@ -39,6 +39,9 @@ export async function getServerSideProps() {
     const nowCaracas = new Date(Date.now() + caracasOffset)
     nowCaracas.setDate(nowCaracas.getDate() + 1)
     const fecha = nowCaracas.toISOString().slice(0, 10)
+    // También calcular "hoy en Caracas" para fallback
+    const todayCaracas = new Date(Date.now() + caracasOffset)
+    const ycFecha = todayCaracas.toISOString().slice(0, 10)
 
     // ===== STEP 1 + 2 + 4: Paralelizar llamadas independientes =====
     const HINDCAST_DAYS = 30
@@ -46,11 +49,8 @@ export async function getServerSideProps() {
     const [runsResult, ayerResult, existingActualsResult, datesResult, supabaseFns, snapshotsResult] = await Promise.all([
       // Query del día — obtener 10PM y 11PM por separado
       client.from('daily_runs' as any).select('*').eq('fecha_objetivo', fecha).order('fecha_ejecucion', { ascending: false } as any).limit(2),
-      // Query del día anterior (fallback)
-      (() => {
-        const yc = new Date(Date.now() + (-4 * 60 * 60000))
-        return client.from('daily_runs' as any).select('*').eq('fecha_objetivo', yc.toISOString().slice(0, 10)).order('fecha_ejecucion', { ascending: false } as any).limit(1)
-      })(),
+      // Query del día anterior (fallback = hoy Caracas)
+      client.from('daily_runs' as any).select('*').eq('fecha_objetivo', ycFecha).order('fecha_ejecucion', { ascending: false } as any).limit(1),
       // Check si hay datos históricos con temp_real
       client.from('forecast_history' as any).select('fecha_objetivo').not('temp_real', 'is', null).order('fecha_objetivo', { ascending: false } as any).limit(1),
       // Fechas disponibles
@@ -67,6 +67,10 @@ export async function getServerSideProps() {
     const existingActuals = existingActualsResult.data as any[] | undefined
     const datesData = datesResult.data as any[]
     const snapshots = snapshotsResult.data as any[] | undefined
+
+    // Fechas disponibles (ordenadas de más reciente a más antigua)
+    const raw = ((datesData as any[] | undefined)?.map((r: any) => r.fecha_objetivo) ?? [])
+    const availableDates = Array.from(new Set<string>(raw))
 
     // Parsear pronóstico del día o de ayer
     let analysis: DailyAnalysis | null = null
@@ -106,13 +110,27 @@ export async function getServerSideProps() {
         analysis = parseRun(chosen)
       }
     }
+    // Fallback 1: hoy en Caracas
     if (!analysis && (ayerData as any[] | undefined)?.length) {
       analysis = parseRun((ayerData as any[])[0])
     }
-
-    // Fechas disponibles
-    const raw = ((datesData as any[] | undefined)?.map((r: any) => r.fecha_objetivo) ?? [])
-    const availableDates = Array.from(new Set<string>(raw))
+    // Fallback 2: última fecha disponible en daily_runs (por si el cron falló un día)
+    if (!analysis && availableDates.length > 0) {
+      const latestFecha = availableDates[0]
+      if (latestFecha !== fecha && latestFecha !== ycFecha) {
+        console.log(`[SSP] Fallback a última fecha disponible: ${latestFecha} (esperaba ${fecha}, hoy ${ycFecha})`)
+        const { data: fallbackData } = await client
+          .from('daily_runs' as any)
+          .select('*')
+          .eq('fecha_objetivo', latestFecha)
+          .order('fecha_ejecucion', { ascending: false } as any)
+          .limit(2)
+        if ((fallbackData as any[] | undefined)?.length) {
+          const fbRuns = fallbackData as any[]
+          analysis = parseRun(fbRuns[0])
+        }
+      }
+    }
 
     // ===== STEP 2: Hindcast (solo si no hay datos históricos) =====
     const needsHindcast = !(existingActuals as any[] | undefined)?.length
