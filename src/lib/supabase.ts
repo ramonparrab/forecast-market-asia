@@ -32,22 +32,46 @@ export async function saveDailyRun(run: DailyRun): Promise<number | null> {
     return null
   }
 
+  const insertPayload: any = {
+    fecha_ejecucion: run.fecha_ejecucion,
+    fecha_objetivo: run.fecha_objetivo,
+    resultados: JSON.stringify(run.resultados),
+    recomendaciones: JSON.stringify(run.recomendaciones),
+    total_asignado: run.total_asignado,
+    run_type: run.run_type || null,
+  }
+
+  // UPSERT: si ya existe un registro para la misma (fecha_objetivo, run_type),
+  // lo actualiza en vez de duplicar o fallar. Requiere constraint:
+  //   UNIQUE (fecha_objetivo, run_type) en daily_runs (migration-007).
   const { data, error } = await client
     .from('daily_runs' as any)
-    .insert({
-      fecha_ejecucion: run.fecha_ejecucion,
-      fecha_objetivo: run.fecha_objetivo,
-      resultados: JSON.stringify(run.resultados),
-      recomendaciones: JSON.stringify(run.recomendaciones),
-      total_asignado: run.total_asignado,
+    .upsert(insertPayload, {
+      onConflict: 'fecha_objetivo,run_type',
+      ignoreDuplicates: false,
     } as any)
     .select('id')
 
   if (error) {
+    // Fallback: si la constraint no existe, intentar insert normal
+    if (error.message?.includes('could not find a unique constraint')) {
+      console.warn('[saveDailyRun] UPSERT fallback to INSERT (no unique constraint yet)')
+      const fb = await client
+        .from('daily_runs' as any)
+        .insert(insertPayload)
+        .select('id')
+      if (fb.error) {
+        console.error('[saveDailyRun] Error saving daily run (fallback):', fb.error.message, fb.error)
+        return null
+      }
+      const runId = (fb.data as any)?.[0]?.id ?? null
+      console.log(`[saveDailyRun] Saved daily_run id=${runId} for ${run.fecha_objetivo} run_type=${run.run_type || 'none'} (fallback insert)`)
+      return runId
+    }
     console.error('[saveDailyRun] Error saving daily run:', error.message, error)
     return null
   }
-  const runId = (data as any)?.id ?? null
+  const runId = (data as any)?.[0]?.id ?? (data as any)?.id ?? null
   console.log(`[saveDailyRun] Saved daily_run id=${runId} for ${run.fecha_objetivo} run_type=${run.run_type || 'none'}`)
   return runId
 }

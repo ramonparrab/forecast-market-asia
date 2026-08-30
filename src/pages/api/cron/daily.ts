@@ -160,7 +160,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       }
     }
 
-    await saveDailyRun({
+    const dailyRunId = await saveDailyRun({
       fecha_ejecucion: result.fecha,
       fecha_objetivo: fechaObjetivo,
       resultados: result.cities,
@@ -168,6 +168,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       total_asignado: result.total_allocated,
       run_type: (runLabel === '10PM' || runLabel === '11PM') ? runLabel : undefined,
     })
+    if (!dailyRunId) {
+      console.error(`[CRON] ⚠️ saveDailyRun falló para ${fechaObjetivo} ${runLabel} — forecast_history y snapshots se guardaron pero daily_runs NO`)
+    }
 
     // ===== STEP 4: Upsert forecast_snapshot (pronóstico ganador bloqueado) =====
     console.log(`[CRON] Upserting forecast snapshots (${runLabel})...`)

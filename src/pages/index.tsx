@@ -35,13 +35,14 @@ export async function getServerSideProps() {
     const { createClient } = await import('@supabase/supabase-js')
     const client = createClient(supabaseUrl, supabaseKey)
 
-    const caracasOffset = -4 * 60 * 60000
-    const nowCaracas = new Date(Date.now() + caracasOffset)
-    nowCaracas.setDate(nowCaracas.getDate() + 1)
-    const fecha = nowCaracas.toISOString().slice(0, 10)
-    // También calcular "hoy en Caracas" para fallback
-    const todayCaracas = new Date(Date.now() + caracasOffset)
-    const ycFecha = todayCaracas.toISOString().slice(0, 10)
+    // Fecha en Caracas usando Intl (resistente a cambios de huso horario)
+    const caracasTz = 'America/Caracas'
+    const fechaParts = new Intl.DateTimeFormat('en-CA', { timeZone: caracasTz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(Date.now() + 4 * 60 * 60 * 1000)
+    const ycFecha = new Intl.DateTimeFormat('en-CA', { timeZone: caracasTz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(Date.now())
+    // "mañana en Caracas" = objetivo del cron
+    const tomorrowCaracas = new Date(fechaParts + 'T12:00:00Z')
+    tomorrowCaracas.setDate(tomorrowCaracas.getDate() + 1)
+    const fecha = tomorrowCaracas.toISOString().slice(0, 10)
 
     // ===== STEP 1 + 2 + 4: Paralelizar llamadas independientes =====
     const HINDCAST_DAYS = 30
@@ -135,13 +136,6 @@ export async function getServerSideProps() {
     // la fecha esperada (ej: el cron falló el insert en daily_runs pero sí creó
     // forecast_history + forecast_snapshot). Esto usa la última fecha con snapshots.
     if (!analysis) {
-      const { data: latestSnap } = await client
-        .from('forecast_snapshot' as any)
-        .select('fecha_objetivo')
-        .not('temp_real', 'is', null as any)
-        .order('fecha_objetivo', { ascending: false } as any)
-        .limit(1)
-      // Buscar la última fecha_objetivo en snapshots (incluso sin temp_real)
       const { data: snapDates } = await client
         .from('forecast_snapshot' as any)
         .select('fecha_objetivo')
@@ -167,9 +161,9 @@ export async function getServerSideProps() {
               volatilidad: 0,
               ensemble_raw: {},
               sesgo_aplicado: 0,
-              ensemble_members: 0,
+              ensemble_members: undefined,
               weather: null,
-              icon_base: '',
+              icon_base: undefined,
               modelo_muestras: 0,
               temp_corregida_alt: null,
               modelo_alt: null,
@@ -182,9 +176,6 @@ export async function getServerSideProps() {
             exito_pct_integer: 50,
             explicacion: '',
             totalRecords: 0,
-            liquidity_avg: 0,
-            volume_total: 0,
-            avg_spread: 0,
           }))
           analysis = {
             fecha: snapFecha + 'T00:00:00',
@@ -207,18 +198,8 @@ export async function getServerSideProps() {
 
     if (needsHindcast) {
       console.log('[HINDCAST] No hay datos históricos con temp_real. Ejecutando backtest 30 días...')
-      const { saveForecastRecords, getServiceClient } = supabaseFns
+      const { saveForecastRecords } = supabaseFns
       const { runBacktest } = await import('@/lib/backtest-engine')
-
-      const hoy = new Date()
-      const hace30 = new Date(hoy)
-      hace30.setDate(hoy.getDate() - HINDCAST_DAYS)
-      const startStr = hace30.toISOString().slice(0, 10)
-
-      const serviceClient = getServiceClient()
-      if (serviceClient) {
-        await serviceClient.from('forecast_history' as any).delete().gte('fecha_objetivo', startStr).lt('fecha_objetivo', fecha)
-      }
 
       const backtest = await runBacktest(HINDCAST_DAYS)
       const hindcastRecords = backtest.resultados.map((r: any) => ({
@@ -232,10 +213,13 @@ export async function getServerSideProps() {
         error: r.error,
         modelos_usados: r.modelos_usados,
         consenso: r.consenso,
+        run_type: '10PM',
       }))
 
+      // saveForecastRecords usa UPSERT (no DELETE+INSERT), así que si falla
+      // a mitad, los registros parciales ya quedan en BD sin pérdida de datos previos.
       for (let i = 0; i < hindcastRecords.length; i += 50) {
-        await saveForecastRecords(hindcastRecords.slice(i, i + 50))
+        await saveForecastRecords(hindcastRecords.slice(i, i + 50), '10PM')
       }
       hindcastDays = HINDCAST_DAYS
       console.log(`[HINDCAST] Guardados ${hindcastRecords.length} registros (${HINDCAST_DAYS} días x ${backtest.total_ciudades} ciudades)`)
@@ -613,10 +597,11 @@ export default function Home({ initialAnalysis, initialMetrics, initialAvailable
   const [previousMetrics, setPreviousMetrics] = useState<GlobalMetrics | null>(null)
 
   const getDefaultTargetDate = () => {
-    const caracasOffset = -4 * 60 * 60000
-    const nowCaracas = new Date(Date.now() + caracasOffset)
-    nowCaracas.setDate(nowCaracas.getDate() + 1)
-    return nowCaracas.toISOString().slice(0, 10)
+    // Misma lógica que getServerSideProps: mañana en Caracas via Intl
+    const parts = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Caracas', year: 'numeric', month: '2-digit', day: '2-digit' }).format(Date.now() + 4 * 60 * 60 * 1000)
+    const d = new Date(parts + 'T12:00:00Z')
+    d.setDate(d.getDate() + 1)
+    return d.toISOString().slice(0, 10)
   }
 
   useEffect(() => {
@@ -625,10 +610,16 @@ export default function Home({ initialAnalysis, initialMetrics, initialAvailable
       setSelectedDate(targetDate)
 
       // Lanzar las 3 llamadas independientes en PARALELO (no secuencial)
+      // Si el SSR ya trajo datos para la fecha objetivo, no refetch — evita
+      // sobreescribir datos correctos del servidor con datos recalculados por el API
+      // que pueden tener exito_pct diferente y marcar isHistorical incorrectamente.
+      const ssrFecha = initialAnalysis?.fecha_objetivo
       const [metricsResult, datesResult, forecastResult] = await Promise.all([
         fetch('/api/metrics').then(r => r.ok ? r.json() : null).catch(() => null),
         fetch('/api/forecast-history?action=dates').then(r => r.ok ? r.json() : null).catch(() => null),
-        fetch(`/api/forecast-history?fecha=${targetDate}`).then(r => r.ok ? r.json() : null).catch(() => null),
+        ssrFecha === targetDate
+          ? Promise.resolve(null)
+          : fetch(`/api/forecast-history?fecha=${targetDate}`).then(r => r.ok ? r.json() : null).catch(() => null),
       ])
 
       // Procesar métricas
@@ -640,10 +631,10 @@ export default function Home({ initialAnalysis, initialMetrics, initialAvailable
       const dates: string[] = datesResult?.dates ?? []
       setAvailableDates(dates)
 
-      // Procesar pronóstico cargado
+      // Procesar pronóstico cargado (solo si no venía del SSR para esta fecha)
       if (forecastResult && forecastResult.cities) {
         setAnalysis(forecastResult)
-        setIsHistorical(true)
+        setIsHistorical(forecastResult.fecha_objetivo !== targetDate)
         setLastUpdated(`Cargado: ${new Date(forecastResult.fecha).toLocaleDateString('en-CA', { timeZone: 'America/Caracas' })} (cron 10PM)`)
 
         // Buscar día anterior SIN re-fetch de dates (ya lo tenemos)
@@ -936,7 +927,7 @@ export default function Home({ initialAnalysis, initialMetrics, initialAvailable
                 <p className="text-[10px] text-gray-600 mt-2 group-open:hidden">click para ver detalle por ciudad</p>
               </summary>
               <div className="grid grid-cols-3 sm:grid-cols-5 lg:grid-cols-9 divide-x divide-blue-500/10 border-t border-blue-500/10">
-                {analysis.cities.sort((a, b) => b.exito_pct - a.exito_pct).map(city => (
+                {[...analysis.cities].sort((a, b) => b.exito_pct - a.exito_pct).map(city => (
                   <div key={city.slug} className="p-3 text-center hover:bg-blue-500/5 transition">
                     <p className="text-[10px] text-gray-500 truncate">{city.ciudad.split(',')[0]}</p>
                     <p className="text-lg sm:text-xl font-bold text-emerald-400">{city.forecast.temp_corregida.toFixed(1)}°C</p>
@@ -968,7 +959,7 @@ export default function Home({ initialAnalysis, initialMetrics, initialAvailable
               <span className="ml-auto text-xs text-gray-600">click para colapsar</span>
             </summary>
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              {analysis.cities.sort((a, b) => b.exito_pct - a.exito_pct).map(city => (
+              {[...analysis.cities].sort((a, b) => b.exito_pct - a.exito_pct).map(city => (
                 <CityCard key={city.slug} data={city} />
               ))}
             </div>

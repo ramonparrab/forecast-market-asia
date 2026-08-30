@@ -1,7 +1,7 @@
 import { NextApiRequest, NextApiResponse } from 'next'
 import { createClient } from '@supabase/supabase-js'
 import { CIUDADES_ASIA } from '@/lib/cities'
-import { kalmanBiasPredictions, estimateKalmanR, getKalmanQ } from '@/lib/kalman-engine'
+import { kalmanBiasPredictions, kalmanNextBias, estimateKalmanR, getKalmanQ } from '@/lib/kalman-engine'
 
 const supabaseUrl = (process.env.NEXT_PUBLIC_SUPABASE_URL || '').replace(/\/rest\/v1\/?$/, '')
 const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
@@ -99,28 +99,38 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       realMap[key] = r.temp_real
     }
 
-    // ============ 2) daily_runs — MISMA QUERY que backtest-kalman.ts (probada que funciona) ============
-    const { data: runs } = await client
-      .from('daily_runs' as any)
-      .select('id, fecha_ejecucion, fecha_objetivo, resultados')
-      .gte('fecha_ejecucion', startDate.toISOString())
-      .order('fecha_ejecucion', { ascending: true } as any)
+    // ============ 2) daily_runs — paginado para evitar corte PostgREST en 1000 ============
+    const allRuns: any[] = []
+    let runsPage = 0
+    const RUNS_PAGE = 500
+    while (true) {
+      const { data: page } = await client
+        .from('daily_runs' as any)
+        .select('id, fecha_ejecucion, fecha_objetivo, resultados, run_type')
+        .gte('fecha_ejecucion', startDate.toISOString())
+        .order('fecha_ejecucion', { ascending: true } as any)
+        .range(runsPage, runsPage + RUNS_PAGE - 1)
+      if (!page || page.length === 0) break
+      allRuns.push(...page)
+      if (page.length < RUNS_PAGE) break
+      runsPage += RUNS_PAGE
+    }
 
     if (debug) {
       return res.status(200).json({
         _debug: true,
         startDate: startDate.toISOString(),
         endDate: endDate.toISOString(),
-        runsFetched: runs?.length ?? 0,
+        runsFetched: allRuns.length,
         realCount: Object.keys(realMap).length,
         slugs: allSlugs,
-        sampleRun: runs?.[0] ? {
-          id: (runs[0] as any).id,
-          fecha_ejecucion: (runs[0] as any).fecha_ejecucion,
-          fecha_objetivo: (runs[0] as any).fecha_objetivo,
-          run_type: (runs[0] as any).run_type,
-          resultados_length: String((runs[0] as any).resultados ?? '').length,
-          resultados_preview: String((runs[0] as any).resultados ?? '').substring(0, 300),
+        sampleRun: allRuns[0] ? {
+          id: (allRuns[0] as any).id,
+          fecha_ejecucion: (allRuns[0] as any).fecha_ejecucion,
+          fecha_objetivo: (allRuns[0] as any).fecha_objetivo,
+          run_type: (allRuns[0] as any).run_type,
+          resultados_length: String((allRuns[0] as any).resultados ?? '').length,
+          resultados_preview: String((allRuns[0] as any).resultados ?? '').substring(0, 300),
         } : null,
       })
     }
@@ -130,7 +140,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     let skippedNoForecast = 0
     let processedRuns = 0
 
-    for (const run of (runs as any[]) ?? []) {
+    for (const run of allRuns) {
       const fo = run.fecha_objetivo as string
       if (!fo) continue
       let parsed: any[]
@@ -280,8 +290,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         countErr++
       }
       // Último bias conocido para fechas sin temp_real (walk-forward)
+      // kal_bias: estado del filtro DESPUÉS de procesar todos los errores
+      //   (no kalPreds[last] que es la predicción ANTES del último error)
       const lastKnownBias: { mc_bias: number; kal_bias: number } = validErrors.length > 0
-        ? { mc_bias: sumErr / countErr, kal_bias: kalPreds[kalPreds.length - 1] ?? 0 }
+        ? { mc_bias: sumErr / countErr, kal_bias: kalmanNextBias(rawErrors, cityQ, R) }
         : { mc_bias: 0, kal_bias: 0 }
 
       // Reconstruir bases faltantes
@@ -460,7 +472,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(200).json({
       ciudades,
       _stats: {
-        runsFetched: runs?.length ?? 0,
+        runsFetched: allRuns.length,
         entriesCreated: processedRuns,
         skippedNoRunType: skippedNoRT,
         skippedNoForecast: skippedNoForecast,

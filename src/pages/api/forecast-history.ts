@@ -1,7 +1,7 @@
 import { NextApiRequest, NextApiResponse } from 'next'
 import { createClient } from '@supabase/supabase-js'
 import { DailyAnalysis, CityAnalysis, BetRecommendation } from '@/types'
-import { computeGlobalMetrics, getHistoricalAccuracy } from '@/lib/supabase'
+import { computeGlobalMetrics, getHistoricalAccuracy, getHistoricalAccuracyInteger } from '@/lib/supabase'
 import { CIUDADES_ASIA } from '@/lib/cities'
 
 const supabaseUrl = (process.env.NEXT_PUBLIC_SUPABASE_URL || '').replace(/\/rest\/v1\/?$/, '')
@@ -24,7 +24,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       client
         .from('forecast_snapshot' as any)
         .select('fecha_objetivo')
-        .lt('temp_real', null as any)
+        .is('temp_real', null as any)
         .order('fecha_objetivo', { ascending: false } as any)
         .limit(90),
     ])
@@ -133,7 +133,10 @@ async function buildAnalysisFromSnapshot(
           modelo_activo: 'ENSEMBLE',
           consenso: '-',
           ensemble_raw: {},
-        },
+          weather: null,
+          volatilidad: 0,
+          sesgo_aplicado: 0,
+        } as any,
         arbitraje: { desvio: 0, nivel: '-' },
         nowcast: { activo: false, peso_observacion: 0, temp_observada: null, estacion: c.estacion, hora_local: 0 },
         exito_pct: 50,
@@ -159,6 +162,9 @@ async function buildAnalysisFromSnapshot(
         modelo_activo: modelo,
         consenso: consenso,
         ensemble_raw: {},
+        weather: null,
+        volatilidad: 0,
+        sesgo_aplicado: 0,
       } as any,
       arbitraje: { desvio: 0, nivel: '-' },
       nowcast: { activo: false, peso_observacion: 0, temp_observada: null, estacion: c.estacion, hora_local: 0 },
@@ -192,7 +198,10 @@ async function buildAnalysisFromData(
 
   const histMap = await Promise.all(
     ciudades.map(async city => {
-      const hist = await getHistoricalAccuracy(city.slug)
+      const [hist, histInt] = await Promise.all([
+        getHistoricalAccuracy(city.slug),
+        getHistoricalAccuracyInteger(city.slug),
+      ])
       let exitoPct: number
       if (hist.muestras >= 5) {
         const priorStrength = 10
@@ -206,13 +215,23 @@ async function buildAnalysisFromData(
       if (city.forecast.weather?.code === 3) {
         exitoPct = Math.max(10, exitoPct - 1)
       }
-      return { slug: city.slug, exitoPct }
+      let exitoPctInt: number
+      if (histInt.muestras >= 5) {
+        const priorStrength = 10
+        exitoPctInt = Math.round(
+          (histInt.accuracy * histInt.muestras + globalAccuracyPct * priorStrength)
+          / (histInt.muestras + priorStrength)
+        )
+      } else {
+        exitoPctInt = Math.round(globalAccuracyPct)
+      }
+      return { slug: city.slug, exitoPct, exitoPctInt }
     })
   )
-  for (const { slug, exitoPct } of histMap) {
+  for (const { slug, exitoPct, exitoPctInt } of histMap) {
     const city = ciudades.find((c: any) => c.slug === slug)!
     city.exito_pct = exitoPct
-    city.exito_pct_integer = exitoPct
+    city.exito_pct_integer = exitoPctInt
   }
 
   const analysis: DailyAnalysis = {
