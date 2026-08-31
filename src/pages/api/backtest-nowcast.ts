@@ -90,6 +90,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const slugFilter = (req.query.ciudad as string || '').trim()
 
     const endDate = new Date()
+    const startDate = new Date()
+    startDate.setDate(startDate.getDate() - daysLimit - 3)
 
     const allSlugs = slugFilter ? [slugFilter] : CIUDADES_ASIA.map(c => c.slug)
     const slugNames: Record<string, string> = {}
@@ -118,15 +120,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     // ============ 2) daily_runs: SNAPSHOTS GUARDADOS ============
-    // Consultar por run_type directamente (10PM y 11PM) en vez de adivinar por timestamp.
-    // Límite alto para evitar corte de Supabase (default 1000).
     const { data: runs } = await client
       .from('daily_runs' as any)
-      .select('id, fecha_ejecucion, fecha_objetivo, resultados, run_type')
-      .gte('fecha_objetivo', new Date(endDate.getTime() - (daysLimit + 3) * 86400000).toISOString().slice(0, 10))
-      .in('run_type', ['10PM', '11PM'])
-      .order('fecha_objetivo', { ascending: true } as any)
-      .limit(2000)
+      .select('id, fecha_ejecucion, fecha_objetivo, resultados')
+      .gte('fecha_ejecucion', startDate.toISOString())
+      .order('fecha_ejecucion', { ascending: true } as any)
 
     const run10pm: Record<string, RunSnapshot> = {}
     const run11pm: Record<string, RunSnapshot> = {}
@@ -139,13 +137,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       try { parsed = JSON.parse(run.resultados) } catch { continue }
       if (!Array.isArray(parsed)) continue
 
-      const rt = (run.run_type as string || '').toUpperCase()
-      const is10pm = rt === '10PM'
-      const is11pm = rt === '11PM'
-      // Si no tiene run_type reconocible, ignorar (no adivinar por timestamp)
-      if (!is10pm && !is11pm) continue
-
-      const target = is10pm ? run10pm : run11pm
+      const cronTs10 = new Date(fo + 'T02:00:00.000Z').getTime()
+      const cronTs11 = new Date(fo + 'T03:00:00.000Z').getTime()
+      const runTs = new Date(run.fecha_ejecucion).getTime()
 
       for (const slug of allSlugs) {
         const key = slug + '|' + fo
@@ -166,10 +160,22 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           dist: 0,
         }
 
-        // Guardar el run más reciente para cada (slug, fecha_objetivo, run_type)
-        const prev = target[key]
-        if (!prev || run.id > prev.id) {
-          target[key] = entry
+        // Determinar 10PM/11PM por timestamp
+        // 10PM Caracas = 02:00Z, 11PM Caracas = 03:00Z
+        // Punto medio 02:30Z como divisor
+        const midpoint = cronTs10 + 30 * 60 * 1000
+        if (runTs >= cronTs10 - 60 * 60 * 1000 && runTs < midpoint) {
+          const dist = Math.abs(runTs - cronTs10)
+          const prev = run10pm[key]
+          if (!prev || dist < prev.dist) {
+            run10pm[key] = { ...entry, dist }
+          }
+        } else if (runTs >= midpoint && runTs < cronTs11 + 90 * 60 * 1000) {
+          const dist = Math.abs(runTs - cronTs11)
+          const prev = run11pm[key]
+          if (!prev || dist < prev.dist) {
+            run11pm[key] = { ...entry, dist }
+          }
         }
       }
     }
