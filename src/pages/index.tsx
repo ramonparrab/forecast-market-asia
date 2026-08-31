@@ -37,7 +37,7 @@ export async function getServerSideProps() {
 
     // Fecha en Caracas usando Intl (resistente a cambios de huso horario)
     const caracasTz = 'America/Caracas'
-    const fechaParts = new Intl.DateTimeFormat('en-CA', { timeZone: caracasTz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(Date.now() + 4 * 60 * 60 * 1000)
+    const fechaParts = new Intl.DateTimeFormat('en-CA', { timeZone: caracasTz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(Date.now())
     const ycFecha = new Intl.DateTimeFormat('en-CA', { timeZone: caracasTz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(Date.now())
     // "mañana en Caracas" = objetivo del cron
     const tomorrowCaracas = new Date(fechaParts + 'T12:00:00Z')
@@ -598,7 +598,7 @@ export default function Home({ initialAnalysis, initialMetrics, initialAvailable
 
   const getDefaultTargetDate = () => {
     // Misma lógica que getServerSideProps: mañana en Caracas via Intl
-    const parts = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Caracas', year: 'numeric', month: '2-digit', day: '2-digit' }).format(Date.now() + 4 * 60 * 60 * 1000)
+    const parts = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Caracas', year: 'numeric', month: '2-digit', day: '2-digit' }).format(Date.now())
     const d = new Date(parts + 'T12:00:00Z')
     d.setDate(d.getDate() + 1)
     return d.toISOString().slice(0, 10)
