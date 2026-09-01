@@ -448,9 +448,9 @@ export async function updateForecastPrecision(
 }
 
 export async function getRecordsWithoutActuals(
-  limit = 50
+  limit = 100
 ): Promise<{ id: number; slug: string; ciudad: string; fecha_objetivo: string; lat: number; lon: number }[]> {
-  const client = getClient()
+  const client = getServiceClient()
   if (!client) return []
 
   const { data, error } = await client
