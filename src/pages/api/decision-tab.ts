@@ -147,15 +147,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       try { parsed = JSON.parse(run.resultados) } catch { continue }
       if (!Array.isArray(parsed)) continue
 
-      const cronTs10 = new Date(fo + 'T02:00:00.000Z').getTime()
-      const cronTs11 = new Date(fo + 'T03:00:00.000Z').getTime()
-      const runTs = new Date(run.fecha_ejecucion).getTime()
-      // Punto de corte a los 50 min (no 30) para tolerar ejecuciones tardías del cron 10PM
-      const cutoff10 = cronTs10 + 50 * 60 * 1000
-
-      let effectiveRT: '10PM' | '11PM' | '' = ''
-      if (runTs >= cronTs10 - 60 * 60 * 1000 && runTs < cutoff10) effectiveRT = '10PM'
-      else if (runTs >= cutoff10 && runTs < cronTs11 + 90 * 60 * 1000) effectiveRT = '11PM'
+      // Usar run_type de la columna directamente — no adivinar por timestamp
+      const rt = (run.run_type as string || '').toUpperCase()
+      const effectiveRT: '10PM' | '11PM' | '' =
+        rt === '10PM' ? '10PM' : rt === '11PM' ? '11PM' : ''
       if (!effectiveRT) { skippedNoRT++; continue }
 
       for (const slug of allSlugs) {
