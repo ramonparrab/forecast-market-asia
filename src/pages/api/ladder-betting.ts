@@ -20,7 +20,9 @@ const MIN_MUESTRAS_HORA = 10
 const PLAN_TTL = 120 * 1000
 const planCache = new Map<string, { ts: number; data: Record<string, unknown> }>()
 
-export const maxDuration = 120
+// Pages Router: maxDuration como config export (el `export const maxDuration`
+// es sintaxis de App Router y NO aplica aquí — el lí efectivo quedaba en default)
+export const config = { maxDuration: 120 }
 
 const generacionEnCurso = new Map<string, Promise<void>>()
 
@@ -47,13 +49,17 @@ async function asegurarGeneracionManana(fechaNext: string): Promise<void> {
       modelos_usados: Object.keys(city.forecast.ensemble_raw || {}).length,
       consenso: city.forecast.consenso,
     }))
-    await saveForecastRecords(records)
+    // run_type explícito: antes guardaba SIN run_type (filas NULL que contaminan
+    // daily_runs/forecast_history y confunden a decision-tab y a los dedup de métricas).
+    // Con 'MANUAL' coexisten con las filas del cron vía UPSERT y los lectores las filtran.
+    await saveForecastRecords(records, 'MANUAL')
     await saveDailyRun({
       fecha_ejecucion: result.fecha,
       fecha_objetivo: fechaNext,
       resultados: result.cities,
       recomendaciones: result.recommendations,
       total_asignado: result.total_allocated,
+      run_type: 'MANUAL',
     })
   })().finally(() => generacionEnCurso.delete(fechaNext))
   generacionEnCurso.set(fechaNext, gen)

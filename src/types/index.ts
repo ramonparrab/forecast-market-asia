@@ -119,8 +119,8 @@ export interface DailyRun {
   resultados: CityAnalysis[]
   recomendaciones: BetRecommendation[]
   total_asignado: number
-  /** '10PM' o '11PM' — hora de la corrida en Caracas */
-  run_type?: '10PM' | '11PM'
+  /** '10PM' o '11PM' — hora de la corrida en Caracas; 'MANUAL' — generación on-demand (p.ej. ladder) */
+  run_type?: '10PM' | '11PM' | 'MANUAL'
   created_at?: string
 }
 

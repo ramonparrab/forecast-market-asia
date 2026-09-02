@@ -1,41 +1,95 @@
 import { NextApiRequest, NextApiResponse } from 'next'
 import { runDailyAnalysis } from '@/lib/forecast-engine'
-import { CityAnalysis } from '@/types'
-import { saveDailyRun, saveForecastRecords, upsertForecastSnapshot } from '@/lib/supabase'
-import { CIUDADES_ASIA } from '@/lib/cities'
+import { CityAnalysis, DailyAnalysis } from '@/types'
+import { getClient } from '@/lib/supabase'
 
+/**
+ * GET  /api/forecast?fecha=YYYY-MM-DD — SOLO LECTURA de lo guardado por el cron.
+ *        Sirve el último daily_runs de esa fecha (10PM/11PM). No ejecuta el
+ *        pipeline, no llama APIs externas, NO escribe en la BD.
+ *
+ * POST /api/forecast { fecha? } — análisis manual bajo demanda (botón "Analizar").
+ *        Ejecuta runDailyAnalysis y responde el resultado PARA VISUALIZACIÓN.
+ *        NO ESCRIBE nada en la BD: los únicos escritores de daily_runs /
+ *        forecast_history / forecast_snapshot son los crons 10PM/11PM.
+ *        (Antes este endpoint escribía con run_type 'MANUAL' o etiquetas
+ *        10PM/11PM según la hora del click — fuente de contaminación histórica
+ *        y de consumo innecesario de la cuota de Open-Meteo.)
+ */
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST' && req.method !== 'GET') {
     return res.status(405).json({ error: 'Method not allowed' })
   }
 
+  // "Mañana Caracas" = día objetivo del cron (mismo criterio que daily.ts)
+  const caracasOffset = -4 * 60 * 60000
+  const nowCaracas = new Date(Date.now() + caracasOffset)
+  nowCaracas.setDate(nowCaracas.getDate() + 1)
+  const defaultFecha = nowCaracas.toISOString().slice(0, 10)
+  const fecha = (req.query.fecha as string || req.body?.fecha || defaultFecha).slice(0, 10)
+
   try {
-    const fechaQuery = req.query.fecha as string || req.body?.fecha
-    // Default to tomorrow in Caracas timezone (UTC-4): 
-    // if it's 10pm Caracas (02:00 UTC+1d), "tomorrow" in Caracas is today+1 in Caracas
-    const caracasOffset = -4 * 60 * 60000
-    const nowCaracas = new Date(Date.now() + caracasOffset)
-    nowCaracas.setDate(nowCaracas.getDate() + 1)
-    const defaultFecha = nowCaracas.toISOString().slice(0, 10)
-    const fecha = fechaQuery || defaultFecha
+    if (req.method === 'GET') {
+      // ===== LECTURA PURA: lo que guardó el cron =====
+      const client = getClient()
+      if (!client) return res.status(500).json({ error: 'Supabase no configurado' })
+
+      const { data, error } = await (client.from('daily_runs' as any) as any)
+        .select('id, fecha_ejecucion, fecha_objetivo, resultados, recomendaciones, total_asignado, run_type')
+        .eq('fecha_objetivo', fecha)
+        .order('fecha_ejecucion', { ascending: false })
+        .limit(2)
+
+      if (error) {
+        return res.status(500).json({ error: 'Error leyendo daily_runs', details: error.message })
+      }
+      if (!data || data.length === 0) {
+        return res.status(404).json({
+          error: 'Sin datos guardados para esa fecha',
+          fecha,
+          hint: 'Los datos los registra el cron 10PM/11PM Caracas (/api/cron/daily). Usa POST para un análisis en vivo sin guardado.',
+        })
+      }
+
+      // Preferir 11PM (más reciente); fallback 10PM
+      const chosen = (data as any[]).find(r => r.run_type === '11PM') ?? (data as any[])[0]
+      const parseRun = (row: any): DailyAnalysis => {
+        const parsedCities: CityAnalysis[] = typeof row.resultados === 'string' ? JSON.parse(row.resultados) : row.resultados
+        const parsedRecs = typeof row.recomendaciones === 'string' ? JSON.parse(row.recomendaciones) : row.recomendaciones
+        return {
+          fecha: row.fecha_ejecucion,
+          fecha_objetivo: row.fecha_objetivo,
+          message: `Corrida ${row.run_type ?? 'cron'} del ${new Date(row.fecha_ejecucion).toLocaleString('es-ES', { timeZone: 'America/Caracas' })} Caracas`,
+          cities: parsedCities ?? [],
+          recommendations: parsedRecs ?? [],
+          total_allocated: row.total_asignado ?? 0,
+          global_metrics: null,
+          arbitrage_alerts: [],
+          historicalErrors: {},
+        } as DailyAnalysis
+      }
+      return res.status(200).json(parseRun(chosen))
+    }
+
+    // ===== POST: análisis manual en vivo (sin escritura en BD) =====
     const result = await runDailyAnalysis(fecha, true)
 
-    // === RESPONDER AL FRONTEND INMEDIATAMENTE ===
-    // Los cálculos ya terminaron; los saves a Supabase van en background
-    // para no bloquear la respuesta HTTP.
-    res.status(200).json(result)
-
-    // Preserve temp_corregida from the 10PM Caracas cron run if it exists (background)
+    // Alinearse con lo que guardó el cron si ya existe (misma temp_corregida
+    // que verá el usuario en TOMAR DECISION) — ANTES de responder.
     try {
-      const savedResp = await fetch(`${process.env.NEXT_PUBLIC_SUPABASE_URL}/rest/v1/daily_runs?fecha_objetivo=eq.${fecha}&order=fecha_ejecucion.desc&limit=1`, {
-        headers: { apikey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '', Authorization: `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''}` },
-        signal: AbortSignal.timeout(3000),
-      })
-      if (savedResp.ok) {
-        const savedRows = await savedResp.json()
-        if (savedRows && savedRows.length > 0) {
-          const savedCities: CityAnalysis[] = typeof savedRows[0].resultados === 'string' ? JSON.parse(savedRows[0].resultados) : savedRows[0].resultados
-          const savedMap = new Map(savedCities.map(c => [c.slug, c.forecast.temp_corregida]))
+      const client = getClient()
+      if (client) {
+        const { data } = await (client.from('daily_runs' as any) as any)
+          .select('resultados')
+          .eq('fecha_objetivo', fecha)
+          .order('fecha_ejecucion', { ascending: false })
+          .limit(1)
+        const savedCities: CityAnalysis[] | null =
+          data && (data as any[]).length > 0
+            ? (typeof (data as any[])[0].resultados === 'string' ? JSON.parse((data as any[])[0].resultados) : (data as any[])[0].resultados)
+            : null
+        if (savedCities) {
+          const savedMap = new Map(savedCities.map(c => [c.slug, c.forecast?.temp_corregida]))
           for (const city of result.cities) {
             const saved = savedMap.get(city.slug)
             if (saved !== undefined) city.forecast.temp_corregida = saved
@@ -44,68 +98,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       }
     } catch { /* no saved cron data */ }
 
-    // Determinar run_type para corridas manuales
-    const caracasHour = nowCaracas.getUTCHours()
-    const runLabel = caracasHour >= 22 || caracasHour < 1
-      ? (caracasHour >= 23 || caracasHour < 1 ? '11PM' : '10PM')
-      : 'MANUAL'
-
-    // Save to Supabase (fire-and-forget — no bloquea la respuesta)
-    const records = result.cities.map(city => ({
-      fecha_ejecucion: result.fecha,
-      fecha_objetivo: fecha,
-      ciudad: city.ciudad,
-      slug: city.slug,
-      // Base del ensemble en forecast_history (entrenamiento MC/Kalman estable);
-      // el valor corregido por el modelo ganador se guarda en daily_runs.
-      temp_pronosticada: city.forecast.temp_ponderada,
-      temp_corregida: city.forecast.temp_corregida_base ?? city.forecast.temp_corregida,
-      temp_real: null,
-      error: null,
-      modelos_usados: Object.keys(city.forecast.ensemble_raw).length,
-      consenso: city.forecast.consenso,
-    }))
-
-    const { getModelSelectionCache } = await import('@/lib/modelo-selector')
-    const modelCache = getModelSelectionCache()
-
-    // Fire-and-forget: guardar sin await para no bloquear
-    Promise.all([
-      saveForecastRecords(records, runLabel),
-      saveDailyRun({
-        fecha_ejecucion: result.fecha,
-        fecha_objetivo: fecha,
-        resultados: result.cities,
-        recomendaciones: result.recommendations,
-        total_asignado: result.total_allocated,
-        run_type: (runLabel === 'MANUAL' ? undefined : runLabel) as '10PM' | '11PM' | undefined,
-      }),
-      ...result.cities.map(city => {
-        const sel = modelCache[city.slug]
-        return upsertForecastSnapshot({
-          fecha_objetivo: fecha,
-          slug: city.slug,
-          ciudad: city.ciudad,
-          run_type_ganadora: (runLabel === 'MANUAL' ? '11PM' : runLabel) as '10PM' | '11PM',
-          modelo_ganador: sel?.modelo ?? 'ENSEMBLE',
-          temp_pronosticada: city.forecast.temp_ponderada,
-          temp_corregida: city.forecast.temp_corregida,
-          temp_ponderada: city.forecast.temp_ponderada,
-          consenso: city.forecast.consenso,
-          modelos_usados: Object.keys(city.forecast.ensemble_raw).length,
-          temp_10pm: null,
-          temp_11pm: null,
-          modelo_10pm: null,
-          modelo_11pm: null,
-          temp_real: null,
-          error: null,
-        })
-      }),
-    ]).catch(err => console.error('[forecast] Background save error:', err))
+    return res.status(200).json(result)
   } catch (error) {
     console.error('Forecast API error:', error)
     if (!res.headersSent) {
-      res.status(500).json({
+      return res.status(500).json({
         error: 'Error ejecutando análisis',
         details: (error as Error).message,
       })
