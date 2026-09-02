@@ -5,16 +5,19 @@
       "schedule": "0 2 * * *"
     },
     {
-      "path": "/api/cron/backfill-reales",
-      "schedule": "30 2 * * *"
-    },
-    {
       "path": "/api/cron/daily",
       "schedule": "0 3 * * *"
-    },
-    {
-      "path": "/api/cron/backfill-reales",
-      "schedule": "30 3 * * *"
     }
-  ]
+  ],
+  "functions": {
+    "src/pages/api/cron/daily.ts": {
+      "maxDuration": 300
+    },
+    "src/pages/api/cron/backfill-reales.ts": {
+      "maxDuration": 300
+    },
+    "src/pages/api/forecast.ts": {
+      "maxDuration": 60
+    }
+  }
 }

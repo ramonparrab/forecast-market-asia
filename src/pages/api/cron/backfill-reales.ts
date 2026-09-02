@@ -1,21 +1,34 @@
 import { NextApiRequest, NextApiResponse } from 'next'
-import { getServiceClient, updateActualTemperature, getPendingSnapshots, updateSnapshotActual } from '@/lib/supabase'
+import {
+  startCronRun,
+  finishCronRun,
+  getRecordsWithoutActuals,
+  updateActualTemperature,
+  getPendingSnapshots,
+  updateSnapshotActual,
+} from '@/lib/supabase'
 import { fetchStationMaxTemp } from '@/lib/station-weather'
 import { fetchActualMaxTemp } from '@/lib/openmeteo'
 import { CIUDADES_ASIA } from '@/lib/cities'
 
-// Vercel: extender timeout a 120s — solo backfill, no forecast
-export const config = { maxDuration: 120 }
+// Vercel: 300s de presupuesto (vercel.json functions + config export)
+export const config = { maxDuration: 300 }
 
 /**
- * Vercel Cron Job dedicado a backfill de temperaturas reales.
- * Se ejecuta en múltiples horarios:
- *   - 02:30Z (10:30PM Caracas): después del cron 10PM
- *   - 03:30Z (11:30PM Caracas): después del cron 11PM
- *   - 17:00Z (1PM Caracas): después de que termina el día en Asia (16:00Z)
+ * Endpoint MANUAL de recuperación de temperaturas reales.
  *
- * Usa getServiceClient() para evitar problemas de RLS.
- * Filtra por 16:00Z (fin del día Asia) para no registrar parciales.
+ * ⚠️ NO está en vercel.json — el registro de reales es responsabilidad del cron
+ * /api/cron/daily (10PM y 11PM Caracas), que además drena la cola de atrasadas
+ * en cada corrida (30 más viejas por ejecución).
+ *
+ * Este endpoint existe para recuperaciones masivas puntuales, p.ej. el backlog
+ * de julio (~87 filas sin temp_real). Ejecutar manualmente:
+ *
+ *   curl -X POST "https://forecast-market-asia.vercel.app/api/cron/backfill-reales" \
+ *        -H "Authorization: Bearer $CRON_SECRET"
+ *
+ * Procesa TODAS las filas pendientes OLDEST-FIRST (rompe el starvation de las
+ * filas viejas) con fuentes: Polymarket settlement → TWC estación → Open-Meteo Archive.
  */
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   const authHeader = req.headers.authorization
@@ -25,58 +38,26 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(401).json({ error: 'Unauthorized' })
   }
 
+  const startedAt = Date.now()
+  const logId = await startCronRun({ job: 'backfill-reales', run_type: null })
+
   try {
-    const cronHour = new Date().getUTCHours()
-    console.log(`[BACKFILL-CRON] Iniciando (hora UTC: ${cronHour})...`)
+    console.log('[BACKFILL] Recuperación manual de reales (oldest-first)...')
 
-    // Usar service client para evitar RLS
-    const client = getServiceClient()
-    if (!client) return res.status(500).json({ status: 'error', message: 'No service client' })
-
-    // Obtener TODOS los registros sin temp_real (sin filtro de fecha UTC)
-    // El filtro de tiempo se hace client-side con 16:00Z
-    const { data: allPending, error: qErr } = await client
-      .from('forecast_history' as any)
-      .select('id, slug, ciudad, fecha_objetivo')
-      .is('temp_real', null)
-      .order('fecha_objetivo', { ascending: false } as any)
-      .limit(200)
-
-    if (qErr) {
-      console.error('[BACKFILL-CRON] Query error:', qErr.message)
-      return res.status(500).json({ status: 'error', message: qErr.message })
-    }
-
-    const allRecords = (allPending as any[]) ?? []
-
-    // Filtrar: solo días que YA terminaron en Asia
-    // El día en Asia (UTC+8) termina a las 16:00Z del fecha_objetivo
-    const ahoraUtc = Date.now()
-    const pendientes = allRecords.filter(r => {
-      if (!r.fecha_objetivo) return true
-      const finDiaAsia = new Date(r.fecha_objetivo + 'T16:00:00.000Z').getTime()
-      return ahoraUtc >= finDiaAsia
-    })
-
-    console.log(`[BACKFILL-CRON] ${pendientes.length} registros listos para backfill (de ${allRecords.length} sin real)`)
-
-    if (pendientes.length === 0) {
-      return res.status(200).json({
-        status: 'ok',
-        message: 'No hay registros pendientes con día Asia terminado',
-        updated: 0,
-      })
-    }
+    // Pendientes de forecast_history — las MÁS VIEJAS primero
+    const pendientes = await getRecordsWithoutActuals(200, true)
+    console.log(`[BACKFILL] ${pendientes.length} registros pendientes (oldest-first)`)
 
     let backfilled = 0
     const errors: string[] = []
+    const actualizados: Record<string, number> = {}
 
-    // Procesar en paralelo (max 4 concurrentes)
-    const CONCURRENCY = 4
-    for (let i = 0; i < pendientes.length; i += CONCURRENCY) {
-      const batch = pendientes.slice(i, i + CONCURRENCY)
+    // Lotes de 10 en paralelo
+    for (let i = 0; i < pendientes.length; i += 10) {
+      const batch = pendientes.slice(i, i + 10)
       const results = await Promise.allSettled(
         batch.map(async (record) => {
+          // Polymarket settlement → TWC estación → Open-Meteo Archive
           let tempReal = await fetchStationMaxTemp(record.slug, record.fecha_objetivo)
           if (tempReal === null) {
             const city = CIUDADES_ASIA.find(c => c.slug === record.slug)
@@ -84,15 +65,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
               tempReal = await fetchActualMaxTemp(city.lat, city.lon, record.fecha_objetivo)
             }
           }
-          if (tempReal === null) return { record, ok: false }
+          if (tempReal === null) return { record, ok: false, tempReal: null as number | null }
           const ok = await updateActualTemperature(record.id, tempReal)
-          return { record, tempReal, ok }
+          return { record, ok, tempReal }
         })
       )
       for (const r of results) {
         if (r.status === 'fulfilled' && r.value.ok) {
           backfilled++
-          console.log(`[BACKFILL-CRON] ${r.value.record.slug} ${r.value.record.fecha_objetivo} → ${r.value.tempReal}°C`)
+          actualizados[`${r.value.record.slug}@${r.value.record.fecha_objetivo}`] = r.value.tempReal!
+          console.log(`[BACKFILL] ${r.value.record.slug} ${r.value.record.fecha_objetivo} → ${r.value.tempReal}°C`)
         } else if (r.status === 'fulfilled') {
           errors.push(`${r.value.record.slug} ${r.value.record.fecha_objetivo}: sin datos`)
         } else {
@@ -101,37 +83,57 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       }
     }
 
-    // También actualizar snapshots pendientes
-    console.log('[BACKFILL-CRON] Actualizando snapshots pendientes...')
-    const pendingSnaps = await getPendingSnapshots()
+    // Snapshots pendientes — oldest-first, en paralelo
+    const pendingSnaps = await getPendingSnapshots(true, 200)
+    const snapsPendientes = pendingSnaps.filter(s => s.fecha_objetivo < new Date().toISOString().slice(0, 10))
     let snapsUpdated = 0
-    for (const snap of pendingSnaps) {
-      if (snap.fecha_objetivo >= new Date().toISOString().slice(0, 10)) continue
-      const finDiaAsia = new Date(snap.fecha_objetivo + 'T16:00:00.000Z').getTime()
-      if (ahoraUtc < finDiaAsia) continue
-      const tempReal = await fetchStationMaxTemp(snap.slug, snap.fecha_objetivo)
-        ?? (await fetchActualMaxTemp(
-          CIUDADES_ASIA.find(c => c.slug === snap.slug)?.lat ?? 0,
-          CIUDADES_ASIA.find(c => c.slug === snap.slug)?.lon ?? 0,
-          snap.fecha_objetivo
-        ))
-      if (tempReal !== null) {
-        const ok = await updateSnapshotActual(snap.slug, snap.fecha_objetivo, tempReal)
-        if (ok) snapsUpdated++
+    const snapPairs = snapsPendientes.map(snap => {
+      const city = CIUDADES_ASIA.find(c => c.slug === snap.slug)
+      return { snap, lat: city?.lat ?? 0, lon: city?.lon ?? 0 }
+    })
+    for (let i = 0; i < snapPairs.length; i += 10) {
+      const batch = snapPairs.slice(i, i + 10)
+      const results = await Promise.allSettled(
+        batch.map(async ({ snap, lat, lon }) => {
+          let tempReal = await fetchStationMaxTemp(snap.slug, snap.fecha_objetivo)
+          if (tempReal === null && lat && lon) {
+            tempReal = await fetchActualMaxTemp(lat, lon, snap.fecha_objetivo)
+          }
+          if (tempReal === null) return false
+          return updateSnapshotActual(snap.slug, snap.fecha_objetivo, tempReal)
+        })
+      )
+      for (const r of results) {
+        if (r.status === 'fulfilled' && r.value) snapsUpdated++
       }
     }
 
-    console.log(`[BACKFILL-CRON] Resultado: ${backfilled} forecast_history + ${snapsUpdated} snapshots, ${errors.length} errores`)
+    const status = backfilled + snapsUpdated > 0 ? (errors.length > 0 ? 'partial' : 'ok') : 'error'
+    const duracionMs = Date.now() - startedAt
+    const details = {
+      registros_pendientes: pendientes.length,
+      actualizados: backfilled,
+      snapshots_pendientes: snapsPendientes.length,
+      snapshots_actualizados: snapsUpdated,
+      errores: errors.slice(0, 30),
+      valores: actualizados,
+      duration_ms: duracionMs,
+    }
+    await finishCronRun(logId, status, details)
+
+    console.log(`[BACKFILL] Resultado: ${backfilled} forecast_history + ${snapsUpdated} snapshots (${errors.length} errores)`)
     return res.status(200).json({
-      status: 'ok',
-      message: `Backfill: ${backfilled} reales + ${snapsUpdated} snapshots, ${errors.length} errores`,
+      status,
+      message: `Backfill: ${backfilled} reales + ${snapsUpdated} snapshots de ${pendientes.length + snapsPendientes.length} pendientes`,
       updated: backfilled,
       snapshots_updated: snapsUpdated,
+      pending_remaining: Math.max(0, pendientes.length - backfilled),
       errors: errors.length,
-      details: errors,
+      details: details,
     })
   } catch (error) {
-    console.error('[BACKFILL-CRON] Error:', error)
+    console.error('[BACKFILL] Error:', error)
+    await finishCronRun(logId, 'error', { fatal: (error as Error).message, duration_ms: Date.now() - startedAt })
     return res.status(500).json({ status: 'error', message: (error as Error).message })
   }
 }
