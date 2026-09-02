@@ -121,14 +121,18 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const savedHistory = await saveForecastRecords(records, runLabel)
     if (!savedHistory) forecastErrors.push('saveForecastRecords falló')
 
-    // Ciudades degradadas (fallback TWC — Open-Meteo 429) y faltantes
+    // Ciudades degradadas (sin ningún modelo Open-Meteo: quedaron en OWM o TWC
+    // solas por 429) y faltantes
     const degradedCities = result.cities
-      .filter(c => Object.keys(c.forecast.ensemble_raw).includes('twc'))
+      .filter(c => {
+        const keys = Object.keys(c.forecast.ensemble_raw)
+        return keys.length > 0 && !keys.some(k => k !== 'twc' && k !== 'owm')
+      })
       .map(c => c.slug)
     const missingCities = CIUDADES_ASIA
       .map(c => c.slug)
       .filter(slug => !result.cities.some(c => c.slug === slug))
-    if (degradedCities.length > 0) forecastErrors.push(`degradadas a TWC (Open-Meteo 429): ${degradedCities.join(', ')}`)
+    if (degradedCities.length > 0) forecastErrors.push(`degradadas a 1 modelo OWM/TWC (Open-Meteo falló): ${degradedCities.join(', ')}`)
     if (missingCities.length > 0) forecastErrors.push(`sin datos: ${missingCities.join(', ')}`)
 
     // daily_runs + snapshots SOLO para corridas 10PM/11PM legítimas
@@ -186,7 +190,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       }
       // Log resumido de ciudades
       for (const c of result.cities) {
-        console.log(`  ${c.slug}: ${c.forecast.temp_corregida}°C (${Object.keys(c.forecast.ensemble_raw).length} modelos)${Object.keys(c.forecast.ensemble_raw).includes('twc') ? ' [TWC-degradado]' : ''}`)
+        const ensKeys = Object.keys(c.forecast.ensemble_raw)
+        const fullEnsemble = ensKeys.some(k => k !== 'twc' && k !== 'owm')
+        console.log(`  ${c.slug}: ${c.forecast.temp_corregida}°C (${ensKeys.length} modelos)${fullEnsemble ? '' : ' [degradado 1 modelo]'}`)
       }
     } else {
       console.log(`[CRON] Ejecución fuera de ventana (${runLabel}) — solo forecast_history, sin daily_runs/snapshots`)

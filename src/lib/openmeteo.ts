@@ -13,6 +13,12 @@ const OM_API_KEY = process.env.OPENMETEO_API_KEY || ''
 // Key TWC (fallback de pronóstico por ciudad cuando Open-Meteo falla).
 const TWC_API_KEY = process.env.TWC_API_KEY || 'e1f10a1e78da46f5b10a1e78da96f525'
 
+// Key OpenWeatherMap (https://openweathermap.org/api — free 1.000 llamadas/día,
+// ~60/día para 10 ciudades). OWM se consulta EN PARALELO con Open-Meteo y aporta
+// el modelo 'owm' al ensemble (+1 modelo de otro proveedor). Si Open-Meteo falla
+// (429), OWM actúa de segundo fallback (1 modelo) ANTES que TWC. Sin key → sin efecto.
+const OWM_API_KEY = process.env.OPENWEATHERMAP_API_KEY || ''
+
 function withApiKey(url: string): string {
   if (!OM_API_KEY) return url
   return `${url}${url.includes('?') ? '&' : '?'}apikey=${encodeURIComponent(OM_API_KEY)}`
@@ -161,14 +167,47 @@ export async function fetchTWCForecastMax(lat: number, lon: number, fechaISO: st
 }
 
 /**
+ * Pronóstico máximo diario desde OpenWeatherMap 5-day/3h (free tier).
+ * Máximo de main.temp de las entradas 3-horarias del día LOCAL objetivo
+ * (la API devuelve el offset horario de la ciudad en city.timezone).
+ * Requiere OPENWEATHERMAP_API_KEY; sin key o con key inactiva devuelve null.
+ */
+export async function fetchOWMForecastMax(lat: number, lon: number, fechaISO: string): Promise<number | null> {
+  if (!OWM_API_KEY) return null
+  const dateStr = fechaISO.slice(0, 10)
+  try {
+    const url = `https://api.openweathermap.org/data/2.5/forecast?lat=${lat}&lon=${lon}&units=metric&appid=${OWM_API_KEY}`
+    const resp = await fetch(url, { signal: AbortSignal.timeout(10000) })
+    if (!resp.ok) {
+      // 401 = key nueva aún no activa (tarda ~2h en OWM) o key inválida
+      console.warn(`[OWM] HTTP ${resp.status} lat=${lat} lon=${lon} ${dateStr}`)
+      return null
+    }
+    const data = await resp.json()
+    const tzSec: number = typeof data?.city?.timezone === 'number' ? data.city.timezone : 0
+    const list: any[] = Array.isArray(data?.list) ? data.list : []
+    const temps = list
+      .filter(e => new Date((e.dt + tzSec) * 1000).toISOString().slice(0, 10) === dateStr)
+      .map(e => e?.main?.temp)
+      .filter((t: any) => typeof t === 'number')
+    if (temps.length === 0) return null
+    return Math.round(Math.max(...temps) * 100) / 100
+  } catch {
+    return null
+  }
+}
+
+/**
  * Fetch weather model forecasts AND ECMWF ENS 51 ensemble members.
  *
  * Estrategia anti-429 (cuota diaria por IP de Open-Meteo):
  * 1. Una sola llamada por ciudad con los 6 modelos juntos (minimiza llamadas).
  * 2. Reintentos con jitter solo en 429/5xx/timeout (2 → 3 intentos).
  * 3. API key propia vía OPENMETEO_API_KEY (recomendado — ver .env.example).
- * 4. Si Open-Meteo falla para la ciudad: FALLBACK TWC v3 (pronóstico degradado
- *    a 1 modelo, flagged como `degraded`) para garantizar 10/10 ciudades.
+ * 4. OpenWeatherMap en PARALELO con Open-Meteo (modelo 'owm' del ensemble).
+ * 5. Si Open-Meteo falla para la ciudad: FALLBACK OWM (1 modelo) y si también
+ *    falla: FALLBACK TWC v3 — pronóstico degradado a 1 modelo, flagged como
+ *    `degraded`) para garantizar 10/10 ciudades.
  */
 export async function fetchWeatherModels(
   lat: number,
@@ -179,6 +218,9 @@ export async function fetchWeatherModels(
   const toTry = modelos ?? MODELOS_CLIMATICOS
   const results: ModelTemps = {}
   const ensembleMembers: number[] = []
+
+  // OWM en paralelo con Open-Meteo (no agrega latencia al camino crítico)
+  const owmPromise = fetchOWMForecastMax(lat, lon, fechaISO)
 
   const modelsParam = toTry.join(',')
   const baseUrl = `${OPENMETEO_BASE}?latitude=${lat}&longitude=${lon}&daily=temperature_2m_max,weather_code,precipitation_sum,precipitation_probability_max&temperature_unit=celsius&start_date=${fechaISO}&end_date=${fechaISO}&models=${modelsParam}&timezone=auto`
@@ -208,12 +250,29 @@ export async function fetchWeatherModels(
     const precipitation = daily.precipitation_sum_best_match?.[0] ?? daily.precipitation_sum?.[0] ?? 0
 
     if (Object.keys(results).length > 0) {
+      // Open-Meteo OK → sumar 'owm' al ensemble si está disponible (+1 modelo)
+      const owmTemp = await owmPromise
+      if (owmTemp !== null) results['owm'] = owmTemp
       return { models: results, ensembleMembers, weatherCode, precipitation }
     }
   }
 
-  // Open-Meteo falló o devolvió 0 modelos → fallback TWC para no perder la ciudad
+  // Open-Meteo falló o devolvió 0 modelos → FALLBACK OWM (si hay key activa)
   const failReason = r.err ?? 'respuesta sin modelos'
+  const owmTemp = await owmPromise
+  if (owmTemp !== null) {
+    console.warn(`[Open-Meteo] FALLBACK OWM lat=${lat} lon=${lon} ${fechaISO} → ${owmTemp}°C (1 modelo OWM). Razón: ${failReason}`)
+    return {
+      models: { owm: owmTemp },
+      ensembleMembers: [],
+      weatherCode: 0,
+      precipitation: 0,
+      degraded: true,
+      degradedReason: failReason,
+    }
+  }
+
+  // OWM también falló (o no hay key) → fallback TWC para no perder la ciudad
   const twcTemp = await fetchTWCForecastMax(lat, lon, fechaISO)
   if (twcTemp !== null) {
     console.warn(`[Open-Meteo] FALLBACK TWC lat=${lat} lon=${lon} ${fechaISO} → ${twcTemp}°C (degradado, 1 modelo). Razón: ${failReason}`)
