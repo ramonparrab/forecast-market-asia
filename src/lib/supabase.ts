@@ -84,9 +84,9 @@ export async function saveDailyRun(run: DailyRun): Promise<number | null> {
 export async function saveForecastRecords(
   records: HistoricalRecord[],
   runType?: string
-): Promise<void> {
+): Promise<boolean> {
   const client = getServiceClient()
-  if (!client || records.length === 0) return
+  if (!client || records.length === 0) return false
 
   const { error } = await client
     .from('forecast_history' as any)
@@ -109,7 +109,9 @@ export async function saveForecastRecords(
 
   if (error) {
     console.error('Error saving forecast records:', error)
+    return false
   }
+  return true
 }
 
 export async function getRecentErrors(
@@ -148,7 +150,7 @@ export async function getRecentModelErrors(
     .select('slug, error')
     .not('error', 'is', null)
     .order('fecha_objetivo', { ascending: false } as any)
-    .limit(limit * 2)
+    .limit(limit * 10)
 
   if (snapData && (snapData as any[]).length > 0) {
     const grouped: Record<string, number[]> = {}
@@ -164,19 +166,21 @@ export async function getRecentModelErrors(
   // Fallback a forecast_history
   const { data, error } = await client
     .from('forecast_history' as any)
-    .select('slug, error, run_type')
+    .select('slug, error, run_type, fecha_objetivo')
     .not('error', 'is', null as any)
-    .order('fecha_ejecucion', { ascending: false } as any)
-    .limit(limit * 9)
+    .order('fecha_objetivo', { ascending: false } as any)
+    .limit(limit * 10)
 
   if (error || !data) return {}
 
-  // Dedup por (slug, fecha_objetivo) prefiriendo 11PM
+  // Dedup por (slug, fecha_objetivo) prefiriendo 11PM > 10PM > resto.
+  // FIX: la query anterior NO seleccionaba fecha_objetivo, por lo que el
+  // dateKey colapsaba a `slug|undefined` y solo sobrevivía 1 error por ciudad
+  // (los pesos adaptativos del ensemble quedaban entrenados con 1 muestra).
   const seen = new Map<string, any>()
   for (const row of (data as any[])) {
-    const key = row.slug
-    // Agrupar por slug con dedup por fecha
-    const dateKey = `${row.slug}|${row.fecha_ejecucion?.slice(0, 10)}`
+    const dateKey = `${row.slug}|${row.fecha_objetivo}`
+    if (dateKey.endsWith('undefined') || !row.fecha_objetivo) continue
     const existing = seen.get(dateKey)
     const rPrio = row.run_type === '11PM' ? 2 : row.run_type === '10PM' ? 1 : 0
     const ePrio = existing?.run_type === '11PM' ? 2 : existing?.run_type === '10PM' ? 1 : 0
@@ -448,7 +452,8 @@ export async function updateForecastPrecision(
 }
 
 export async function getRecordsWithoutActuals(
-  limit = 100
+  limit = 100,
+  orderAsc = false
 ): Promise<{ id: number; slug: string; ciudad: string; fecha_objetivo: string; lat: number; lon: number }[]> {
   const client = getServiceClient()
   if (!client) return []
@@ -458,7 +463,7 @@ export async function getRecordsWithoutActuals(
     .select('id, slug, ciudad, fecha_objetivo')
     .is('temp_real', null)
     .not('fecha_objetivo', 'gte', new Date().toISOString().slice(0, 10))
-    .order('fecha_objetivo', { ascending: false } as any)
+    .order('fecha_objetivo', { ascending: orderAsc } as any)
     .limit(limit)
 
   if (error || !data) return []
@@ -654,14 +659,13 @@ export interface BacktestBiasEntry {
   muestras: number
 }
 
-export async function saveBacktestBias(entries: BacktestBiasEntry[]): Promise<void> {
+export async function saveBacktestBias(entries: BacktestBiasEntry[]): Promise<boolean> {
   const client = getServiceClient()
-  if (!client || entries.length === 0) return
+  if (!client || entries.length === 0) return false
 
-  // Upsert per slug+mes
-  for (const e of entries) {
-    const { error } = await (client
-      .from('backtest_bias' as any) as any)
+  // Upsert por slug+mes — en paralelo (antes era un loop secuencial de N round-trips)
+  const results = await Promise.allSettled(entries.map(e =>
+    (client.from('backtest_bias' as any) as any)
       .upsert({
         slug: e.slug,
         mes: e.mes,
@@ -672,8 +676,16 @@ export async function saveBacktestBias(entries: BacktestBiasEntry[]): Promise<vo
       }, {
         onConflict: 'slug,mes',
       })
-    if (error) console.error('Error saving backtest bias:', error)
+  ))
+  let failed = 0
+  for (const r of results) {
+    if (r.status === 'rejected' || (r.value as any)?.error) {
+      failed++
+      console.error('Error saving backtest bias:',
+        r.status === 'rejected' ? r.reason : (r.value as any)?.error)
+    }
   }
+  return failed === 0
 }
 
 export async function getBacktestBias(): Promise<BacktestBiasEntry[]> {
@@ -905,11 +917,17 @@ export async function computeGlobalMetrics(): Promise<GlobalMetrics | null> {
 
   if (withActuals.length < 3) return null
 
-  // Dedup by (slug, fecha_objetivo)
+  // Dedup by (slug, fecha_objetivo) con prioridad 11PM > 10PM > MANUAL/null.
+  // FIX: antes se quedaba el primero visto en orden fecha_ejecucion DESC,
+  // que podía ser una corrida MANUAL (datos duplicados que contaminan métricas).
+  const runPriority = (r: any): number => (r.run_type === '11PM' ? 3 : r.run_type === '10PM' ? 2 : r.run_type === 'MANUAL' ? 1 : 0)
   const seen = new Map<string, any>()
   for (const r of withActuals) {
     const key = `${r.slug}|${r.fecha_objetivo || r.fecha_ejecucion?.slice(0, 10)}`
-    if (!seen.has(key)) { seen.set(key, r) }
+    const existing = seen.get(key)
+    if (!existing || runPriority(r) > runPriority(existing)) {
+      seen.set(key, r)
+    }
   }
   withActuals = Array.from(seen.values())
 
@@ -1042,9 +1060,9 @@ export async function recoverEnsembleFromDailyRuns(): Promise<{ fixed: number; s
  */
 export async function upsertForecastSnapshot(
   snapshot: Omit<ForecastSnapshot, 'id' | 'created_at' | 'updated_at'>
-): Promise<void> {
+): Promise<boolean> {
   const client = getServiceClient()
-  if (!client) return
+  if (!client) return false
 
   const { data: existing } = await client
     .from('forecast_snapshot' as any)
@@ -1058,8 +1076,11 @@ export async function upsertForecastSnapshot(
     const { error } = await client
       .from('forecast_snapshot' as any)
       .insert(snapshot as any)
-    if (error) console.error('[snapshot] Error inserting:', error)
-    return
+    if (error) {
+      console.error('[snapshot] Error inserting:', error)
+      return false
+    }
+    return true
   }
 
   // Ya existe — merge con la nueva corrida
@@ -1097,7 +1118,11 @@ export async function upsertForecastSnapshot(
     .eq('slug', snapshot.slug)
     .eq('fecha_objetivo', snapshot.fecha_objetivo)
 
-  if (error) console.error('[snapshot] Error updating:', error)
+  if (error) {
+    console.error('[snapshot] Error updating:', error)
+    return false
+  }
+  return true
 }
 
 /**
@@ -1190,18 +1215,130 @@ async function pickWinner(
 /**
  * getPendingSnapshots — retorna los snapshots sin temp_real (hoy y futuros).
  */
-export async function getPendingSnapshots(): Promise<ForecastSnapshot[]> {
-  const client = getClient()
+export async function getPendingSnapshots(
+  orderAsc: boolean = false,
+  maxRows: number = 200
+): Promise<ForecastSnapshot[]> {
+  const client = getServiceClient()
   if (!client) return []
 
+  // FIX: .limit añadido — sin él, PostgREST trunca silenciosamente a 1000 filas.
+  // FIX: service client — tras migration-005-security-rls la lectura anónima
+  // de snapshots puede fallar según el estado real de las policies.
+  // orderAsc=true procesa los MÁS VIEJOS primero (rompe el starvation de las
+  // filas de julio que nunca recibían backfill).
   const { data, error } = await client
     .from('forecast_snapshot' as any)
     .select('*')
     .is('temp_real', null)
-    .order('fecha_objetivo', { ascending: false } as any)
+    .order('fecha_objetivo', { ascending: orderAsc } as any)
+    .limit(maxRows)
 
   if (error || !data) return []
   return (data as any[]) as ForecastSnapshot[]
+}
+
+// ============================================================
+// CRON LOG — salud de los cron jobs (migration-008)
+// ============================================================
+
+export interface CronLogEntry {
+  id?: number
+  job: string
+  run_type?: string | null
+  status: 'running' | 'ok' | 'partial' | 'error'
+  started_at?: string
+  finished_at?: string | null
+  details?: Record<string, unknown> | null
+}
+
+/** Registra el inicio de una corrida de cron y devuelve el id de la fila. */
+export async function startCronRun(entry: Pick<CronLogEntry, 'job' | 'run_type'>): Promise<number | null> {
+  const client = getServiceClient()
+  if (!client) return null
+  const { data, error } = await client
+    .from('cron_log' as any)
+    .insert({ job: entry.job, run_type: entry.run_type ?? null, status: 'running' })
+    .select('id')
+  if (error) {
+    console.warn('[cron-log] No se pudo registrar inicio (¿migration-008 aplicada?):', error.message)
+    return null
+  }
+  return (data as any)?.[0]?.id ?? null
+}
+
+/** Cierra la fila del cron con el estado final y detalles. */
+export async function finishCronRun(
+  logId: number | null,
+  status: 'ok' | 'partial' | 'error',
+  details: Record<string, unknown>
+): Promise<void> {
+  if (!logId) return
+  const client = getServiceClient()
+  if (!client) return
+  const { error } = await client
+    .from('cron_log' as any)
+    .update({ status, finished_at: new Date().toISOString(), details })
+    .eq('id', logId)
+  if (error) console.warn('[cron-log] No se pudo registrar fin:', error.message)
+}
+
+/** Lee las últimas N corridas de cron (para /api/cron/status). */
+export async function getRecentCronRuns(limit = 20): Promise<CronLogEntry[]> {
+  const client = getClient()
+  if (!client) return []
+  const { data, error } = await client
+    .from('cron_log' as any)
+    .select('*')
+    .order('started_at', { ascending: false } as any)
+    .limit(limit)
+  if (error || !data) return []
+  return (data as any[]) as CronLogEntry[]
+}
+
+/**
+ * getActiveCronRun — lock anti-solapamiento.
+ * Devuelve la corrida de `job` con status='running' iniciada hace menos de
+ * maxAgeMs. Filas 'running' más viejas se consideran muertas (la función fue
+ * matada por maxDuration) y se marcan como 'error' para auto-sanear.
+ */
+export async function getActiveCronRun(
+  job: string,
+  maxAgeMs = 3 * 60 * 1000
+): Promise<CronLogEntry | null> {
+  const client = getServiceClient()
+  if (!client) return null
+
+  const { data, error } = await client
+    .from('cron_log' as any)
+    .select('*')
+    .eq('job', job)
+    .eq('status', 'running')
+    .order('started_at', { ascending: false } as any)
+    .limit(5)
+
+  if (error || !data) return null
+  const rows = (data as any[]) as CronLogEntry[]
+  if (rows.length === 0) return null
+
+  const now = Date.now()
+  const active = rows.find(r => {
+    const started = r.started_at ? new Date(r.started_at).getTime() : 0
+    return started > 0 && now - started < maxAgeMs
+  })
+
+  // Auto-saneamiento: filas 'running' obsoletas se marcan 'error' (stale)
+  const stale = rows.filter(r => r !== active && r.id)
+  if (stale.length > 0) {
+    await (client.from('cron_log' as any) as any)
+      .update({ status: 'error', finished_at: new Date().toISOString(), details: { stale: true } })
+      .in('id', stale.map(r => r.id))
+      .then(({ error: e }: any) => {
+        if (e) console.warn('[cron-log] No se pudo marcar corrida obsoleta:', e.message)
+      })
+  }
+
+  return active ?? null
 }
 
 /**
