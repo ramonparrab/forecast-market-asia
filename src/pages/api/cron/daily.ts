@@ -137,64 +137,60 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // Guardar con run_type para que 10PM y 11PM coexistan
     await saveForecastRecords(records, runLabel)
 
-    // ===== STEP 3b: Respaldo 10PM desde corrida 11PM =====
-    // Si el cron de 10PM (2:00Z) no ejecutó, el de 11PM guarda también como 10PM.
-    // CRÍTICO: solo respaldar ciudades que NO tengan ya un registro 10PM real.
-    // El upsert (slug, fecha_objetivo, run_type) sobreescribiría el dato original.
-    if (runLabel === '11PM') {
-      const serviceClient = getServiceClient()
-      if (serviceClient) {
-        const { data: existing10pm } = await serviceClient
-          .from('forecast_history' as any)
-          .select('slug')
-          .eq('fecha_objetivo', fechaObjetivo)
-          .eq('run_type', '10PM')
-        const existingSlugs = new Set((existing10pm as any[])?.map((r: any) => r.slug) ?? [])
-        const missing = records.filter(r => !existingSlugs.has(r.slug))
-        if (missing.length > 0) {
-          console.log(`[CRON] Respaldo 10PM: ${missing.length} ciudades sin corrida 2:00Z (${records.length - missing.length} ya existen)`)
-          await saveForecastRecords(missing, '10PM')
-        } else {
-          console.log('[CRON] Respaldo 10PM: no necesario, todas las ciudades ya tienen registro 10PM')
-        }
-      }
-    }
+    // ===== STEP 3b: ELIMINADO — respaldo 10PM desde 11PM =====
+    // NO se respaldan datos de 11PM como si fueran 10PM. Si el cron 10PM falló,
+    // la columna 10PM en TOMAR DECISION simplemente queda vacía.
+    // Anteriormente este respaldo sobreescribía datos reales de 10PM cuando
+    // el 10PM se ejecutaba manualmente (run_type incorrecto) y el 11PM
+    // no encontraba el registro, insertando datos de 11PM etiquetados como 10PM.
 
-    const dailyRunId = await saveDailyRun({
-      fecha_ejecucion: result.fecha,
-      fecha_objetivo: fechaObjetivo,
-      resultados: result.cities,
-      recomendaciones: result.recommendations,
-      total_asignado: result.total_allocated,
-      run_type: (runLabel === '10PM' || runLabel === '11PM') ? runLabel : undefined,
-    })
-    if (!dailyRunId) {
-      console.error(`[CRON] ⚠️ saveDailyRun falló para ${fechaObjetivo} ${runLabel} — forecast_history y snapshots se guardaron pero daily_runs NO`)
+    // Solo guardar daily_runs para corridas 10PM/11PM legítimas.
+    // Ejecuciones manuales fuera de ventana NO crean daily_runs,
+    // evitando datos sin run_type que el decision-tab ignora.
+    const isLegitRun = runLabel === '10PM' || runLabel === '11PM'
+    let dailyRunId: number | null = null
+    if (isLegitRun) {
+      dailyRunId = await saveDailyRun({
+        fecha_ejecucion: result.fecha,
+        fecha_objetivo: fechaObjetivo,
+        resultados: result.cities,
+        recomendaciones: result.recommendations,
+        total_asignado: result.total_allocated,
+        run_type: runLabel,
+      })
+      if (!dailyRunId) {
+        console.error(`[CRON] ⚠️ saveDailyRun falló para ${fechaObjetivo} ${runLabel}`)
+      }
+    } else {
+      console.log(`[CRON] Ejecución fuera de ventana (${runLabel}) — solo se guarda forecast_history, NO daily_runs ni snapshots`)
     }
 
     // ===== STEP 4: Upsert forecast_snapshot (pronóstico ganador bloqueado) =====
-    console.log(`[CRON] Upserting forecast snapshots (${runLabel})...`)
+    // Solo para corridas 10PM/11PM legítimas — las manuales no tocan snapshots
     const modelCache = getModelSelectionCache()
-    for (const city of result.cities) {
-      const sel = modelCache[city.slug]
-      await upsertForecastSnapshot({
-        fecha_objetivo: fechaObjetivo,
-        slug: city.slug,
-        ciudad: city.ciudad,
-        run_type_ganadora: runLabel,
-        modelo_ganador: sel?.modelo ?? 'ENSEMBLE',
-        temp_pronosticada: city.forecast.temp_ponderada,
-        temp_corregida: city.forecast.temp_corregida,
-        temp_ponderada: city.forecast.temp_ponderada,
-        consenso: city.forecast.consenso,
-        modelos_usados: Object.keys(city.forecast.ensemble_raw).length,
-        temp_10pm: runLabel === '10PM' ? city.forecast.temp_corregida : null,
-        temp_11pm: runLabel === '11PM' ? city.forecast.temp_corregida : null,
-        modelo_10pm: runLabel === '10PM' ? (sel?.modelo ?? 'ENSEMBLE') : null,
-        modelo_11pm: runLabel === '11PM' ? (sel?.modelo ?? 'ENSEMBLE') : null,
-        temp_real: null,
-        error: null,
-      })
+    if (isLegitRun) {
+      console.log(`[CRON] Upserting forecast snapshots (${runLabel})...`)
+      for (const city of result.cities) {
+        const sel = modelCache[city.slug]
+        await upsertForecastSnapshot({
+          fecha_objetivo: fechaObjetivo,
+          slug: city.slug,
+          ciudad: city.ciudad,
+          run_type_ganadora: runLabel,
+          modelo_ganador: sel?.modelo ?? 'ENSEMBLE',
+          temp_pronosticada: city.forecast.temp_ponderada,
+          temp_corregida: city.forecast.temp_corregida,
+          temp_ponderada: city.forecast.temp_ponderada,
+          consenso: city.forecast.consenso,
+          modelos_usados: Object.keys(city.forecast.ensemble_raw).length,
+          temp_10pm: runLabel === '10PM' ? city.forecast.temp_corregida : null,
+          temp_11pm: runLabel === '11PM' ? city.forecast.temp_corregida : null,
+          modelo_10pm: runLabel === '10PM' ? (sel?.modelo ?? 'ENSEMBLE') : null,
+          modelo_11pm: runLabel === '11PM' ? (sel?.modelo ?? 'ENSEMBLE') : null,
+          temp_real: null,
+          error: null,
+        })
+      }
     }
 
     // ===== STEP 5: Backfill temp_real en snapshots existentes =====

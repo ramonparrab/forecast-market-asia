@@ -99,6 +99,31 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       realMap[key] = r.temp_real
     }
 
+    // ============ 1b) forecast_snapshot: temp_10pm y temp_11pm INMUTABLES ============
+    // Los snapshots guardan el valor exacto que produjo cada corrida.
+    // Estos NUNCA cambian después de que el cron correspondiente ejecutó.
+    // Se usan directamente como final_10pm y final_11pm en vez de
+    // reconstruirlos desde daily_runs (que pueden ser sobrescritos por
+    // ejecuciones manuales o fallbacks de forecast_history).
+    const snapSince = new Date()
+    snapSince.setDate(snapSince.getDate() - daysLimit - 10)
+    const snapSinceStr = snapSince.toISOString().slice(0, 10)
+    const { data: snapRecords } = await client
+      .from('forecast_snapshot' as any)
+      .select('slug, fecha_objetivo, temp_10pm, temp_11pm, modelo_10pm, modelo_11pm, modelo_ganador, run_type_ganadora')
+      .gte('fecha_objetivo', snapSinceStr)
+    // Mapa: slug|fecha → { temp_10pm, temp_11pm, modelo_10pm, modelo_11pm }
+    const snapshotFinalMap: Record<string, { temp_10pm: number | null; temp_11pm: number | null; modelo_10pm: string | null; modelo_11pm: string | null }> = {}
+    for (const s of (snapRecords as any[]) ?? []) {
+      const key = s.slug + '|' + s.fecha_objetivo
+      snapshotFinalMap[key] = {
+        temp_10pm: s.temp_10pm,
+        temp_11pm: s.temp_11pm,
+        modelo_10pm: s.modelo_10pm,
+        modelo_11pm: s.modelo_11pm,
+      }
+    }
+
     // ============ 2) daily_runs — paginado para evitar corte PostgREST en 1000 ============
     const allRuns: any[] = []
     let runsPage = 0
@@ -345,8 +370,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           }
         }
 
-        const final10 = run10?.temp_corregida ?? null
-        const final11 = run11?.temp_corregida ?? null
+        // FINAL values vienen de forecast_snapshot (INMUTABLES).
+        // Una vez que el cron 10PM ejecuta y guarda snapshot.temp_10pm,
+        // ese valor NUNCA cambia, sin importar lo que pase después.
+        const snap = snapshotFinalMap[slug + '|' + f]
+        const final10 = snap?.temp_10pm ?? null
+        const final11 = snap?.temp_11pm ?? null
 
         if (run11?.modelo_activo) lastModelo = run11.modelo_activo
         else if (run10?.modelo_activo) lastModelo = run10.modelo_activo
@@ -421,7 +450,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           mc_acierto: mcAcierto,
           kal_acierto: kalAcierto,
           final_acierto: finalAcierto,
-          modelo_ganador: run11?.modelo_activo ?? run10?.modelo_activo ?? null,
+          modelo_ganador: snap?.modelo_11pm ?? snap?.modelo_10pm ?? run11?.modelo_activo ?? run10?.modelo_activo ?? null,
         })
       }
 
