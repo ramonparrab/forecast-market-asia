@@ -50,7 +50,9 @@ async function fetchHKORhrread(): Promise<number | null> {
  */
 async function fetchMetarObservation(lat: number, lon: number): Promise<number | null> {
   try {
-    const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&hourly=temperature_2m&temperature_unit=celsius&forecast_days=1`
+    // API key propia (ver openmeteo.ts): sin key la cuota diaria es por IP compartido
+    const apiKey = process.env.OPENMETEO_API_KEY
+    const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&hourly=temperature_2m&temperature_unit=celsius&forecast_days=1${apiKey ? `&apikey=${encodeURIComponent(apiKey)}` : ''}`
     const resp = await fetch(url, { signal: AbortSignal.timeout(5000) })
     if (!resp.ok) return null
     const data = await resp.json()

@@ -1,6 +1,9 @@
 import { fetchActualTempFromPolymarket } from './polymarket'
 
-const TWC_API_KEY = 'e1f10a1e78da46f5b10a1e78da96f525'
+// Key TWC: sobrescribible por env (TWC_API_KEY). El fallback es la key pública
+// de consumidor embebida en weather.com que el proyecto ha usado siempre —
+// funciona, pero es compartida: para producción conviene una propia.
+const TWC_API_KEY = process.env.TWC_API_KEY || 'e1f10a1e78da46f5b10a1e78da96f525'
 const TWC_API = 'https://api.weather.com/v1/location'
 const HKO_API = 'https://data.weather.gov.hk/weatherAPI/opendata/opendata.php'
 

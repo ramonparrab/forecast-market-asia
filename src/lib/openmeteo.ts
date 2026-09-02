@@ -4,6 +4,54 @@ import { MODELOS_CLIMATICOS } from './cities'
 const OPENMETEO_BASE = 'https://api.open-meteo.com/v1/forecast'
 const OPENMETEO_ARCHIVE = 'https://archive-api.open-meteo.com/v1/archive'
 
+// API key opcional de Open-Meteo (https://open-meteo.com/en/docs — gratis no-comercial).
+// SIN key, la cuota diaria se cuenta por IP: en Vercel las funciones salen por IPs NAT
+// COMPARTIDAS con otras apps, y el IP puede llegar ya agotado (HTTP 429) — causa raíz
+// de corridas con 2/10 o 8/10 ciudades. CON key, la cuota es propia (10k/día) y estable.
+const OM_API_KEY = process.env.OPENMETEO_API_KEY || ''
+
+// Key TWC (fallback de pronóstico por ciudad cuando Open-Meteo falla).
+const TWC_API_KEY = process.env.TWC_API_KEY || 'e1f10a1e78da46f5b10a1e78da96f525'
+
+function withApiKey(url: string): string {
+  if (!OM_API_KEY) return url
+  return `${url}${url.includes('?') ? '&' : '?'}apikey=${encodeURIComponent(OM_API_KEY)}`
+}
+
+interface OmFetchResult {
+  ok: boolean
+  status: number
+  data?: any
+  err?: string
+}
+
+/**
+ * fetch con reintentos (solo 429/5xx/timeout), backoff con jitter y API key.
+ * Los 4xx de parámetros no se reintentan (fallan igual siempre).
+ */
+async function omFetchJson(url: string, timeoutMs = 12000, attempts = 3): Promise<OmFetchResult> {
+  let lastErr = 'unknown'
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      const resp = await fetch(withApiKey(url), { signal: AbortSignal.timeout(timeoutMs) })
+      if (resp.ok) {
+        return { ok: true, status: resp.status, data: await resp.json() }
+      }
+      const body = await resp.text().catch(() => '')
+      lastErr = body.slice(0, 160) || `HTTP ${resp.status}`
+      // 429 = cuota por IP agotada; 5xx = transitorio → reintentar
+      const retryable = resp.status === 429 || resp.status >= 500
+      if (!retryable) return { ok: false, status: resp.status, err: lastErr }
+    } catch (e) {
+      lastErr = (e as Error).message
+    }
+    if (attempt < attempts) {
+      await new Promise(resolve => setTimeout(resolve, 400 + Math.random() * 600))
+    }
+  }
+  return { ok: false, status: 0, err: lastErr }
+}
+
 /**
  * Fetch the ACTUAL maximum temperature for a date.
  * For past dates, uses the Archive API (reliable historical data).
@@ -20,23 +68,16 @@ export async function fetchActualMaxTemp(
   const baseUrl = isPast ? OPENMETEO_ARCHIVE : OPENMETEO_BASE
   const label = isPast ? 'Archive' : 'Forecast'
 
-  try {
-    const url = `${baseUrl}?latitude=${lat}&longitude=${lon}&daily=temperature_2m_max&temperature_unit=celsius&start_date=${dateStr}&end_date=${dateStr}`
-    console.log(`[Open-Meteo ${label}] ${dateStr} lat=${lat} lon=${lon}`)
-    const resp = await fetch(url, { signal: AbortSignal.timeout(15000) })
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
-    const data = await resp.json()
-    const maxTemp = data?.daily?.temperature_2m_max?.[0]
-    if (maxTemp !== null && maxTemp !== undefined) {
-      console.log(`[Open-Meteo ${label}] ${dateStr} → ${maxTemp}°C`)
-    } else {
-      console.warn(`[Open-Meteo ${label}] ${dateStr} → no data`)
-    }
-    return maxTemp ?? null
-  } catch (e) {
-    console.warn(`[Open-Meteo ${label}] Error for ${dateStr}:`, (e as Error).message)
-    return null
+  const url = `${baseUrl}?latitude=${lat}&longitude=${lon}&daily=temperature_2m_max&temperature_unit=celsius&start_date=${dateStr}&end_date=${dateStr}`
+  const r = await omFetchJson(url, 15000, 2)
+  const maxTemp = r.data?.daily?.temperature_2m_max?.[0]
+
+  if (r.ok && maxTemp !== null && maxTemp !== undefined) {
+    console.log(`[Open-Meteo ${label}] ${dateStr} → ${maxTemp}°C`)
+    return maxTemp
   }
+  console.warn(`[Open-Meteo ${label}] ${dateStr} → sin datos (${r.err ?? 'sin valor'})`)
+  return null
 }
 
 export interface WeatherModelsResult {
@@ -44,6 +85,10 @@ export interface WeatherModelsResult {
   ensembleMembers: number[]
   weatherCode: number
   precipitation: number
+  /** true si Open-Meteo falló y se usó el fallback TWC (pronóstico degradado a 1 modelo) */
+  degraded?: boolean
+  /** razón del fallo de Open-Meteo (para cron_log / diagnóstico) */
+  degradedReason?: string
 }
 
 const WMO_LABELS: Record<number, { label: string; icon: string; severity: 'none' | 'low' | 'moderate' | 'severe' }> = {
@@ -64,14 +109,14 @@ const WMO_LABELS: Record<number, { label: string; icon: string; severity: 'none'
   66: { label: 'Lluvia helada ligera', icon: '🌧', severity: 'moderate' },
   67: { label: 'Lluvia helada fuerte', icon: '🌧', severity: 'severe' },
   71: { label: 'Nieve ligera', icon: '🌨', severity: 'moderate' },
-  73: { label: 'Nieve moderada', icon: '❄️', severity: 'moderate' },
-  75: { label: 'Nieve fuerte', icon: '❄️', severity: 'severe' },
-  77: { label: 'Granos de nieve', icon: '❄️', severity: 'moderate' },
+  73: { label: 'Nieve moderada', icon: '❄', severity: 'severe' },
+  75: { label: 'Nieve fuerte', icon: '❄', severity: 'severe' },
+  77: { label: 'Granos de nieve', icon: '❄', severity: 'moderate' },
   80: { label: 'Chubascos ligeros', icon: '🌦', severity: 'low' },
   81: { label: 'Chubascos moderados', icon: '🌧', severity: 'moderate' },
   82: { label: 'Chubascos violentos', icon: '🌧', severity: 'severe' },
   85: { label: 'Chubascos de nieve ligeros', icon: '🌨', severity: 'moderate' },
-  86: { label: 'Chubascos de nieve fuertes', icon: '❄️', severity: 'severe' },
+  86: { label: 'Chubascos de nieve fuertes', icon: '❄', severity: 'severe' },
   95: { label: 'Tormenta', icon: '⛈', severity: 'severe' },
   96: { label: 'Tormenta con granizo ligero', icon: '⛈', severity: 'severe' },
   99: { label: 'Tormenta con granizo fuerte', icon: '⛈', severity: 'severe' },
@@ -89,12 +134,41 @@ export function getWeatherInfo(code: number, precipitation: number): { label: st
 }
 
 /**
+ * FALLBACK: pronóstico máximo diario desde TWC v3 (1 solo modelo, degradado).
+ * Se usa SOLO cuando Open-Meteo falla por completo para una ciudad (p.ej. 429).
+ * calendarDayTemperatureMax[0] = hoy local en la ubicación; el índice se calcula
+ * como días entre la fecha objetivo y el "hoy local" aproximado (UTC + lon/15).
+ */
+export async function fetchTWCForecastMax(lat: number, lon: number, fechaISO: string): Promise<number | null> {
+  try {
+    const url = `https://api.weather.com/v3/wx/forecast/daily/5day?geocode=${lat},${lon}&apiKey=${TWC_API_KEY}&units=e&language=en-US&format=json`
+    const resp = await fetch(url, { signal: AbortSignal.timeout(10000) })
+    if (!resp.ok) return null
+    const data = await resp.json()
+    const maxes: (number | null)[] = data?.calendarDayTemperatureMax ?? []
+    const offsetH = Math.round(lon / 15)
+    const localToday = new Date(Date.now() + offsetH * 3600000).toISOString().slice(0, 10)
+    const diffDays = Math.round(
+      (new Date(fechaISO + 'T12:00:00Z').getTime() - new Date(localToday + 'T12:00:00Z').getTime()) / 86400000
+    )
+    const idx = Math.max(0, Math.min(maxes.length - 1, diffDays))
+    const maxF = maxes[idx]
+    if (maxF === null || maxF === undefined) return null
+    return Math.round((maxF - 32) * 5 / 9 * 100) / 100
+  } catch {
+    return null
+  }
+}
+
+/**
  * Fetch weather model forecasts AND ECMWF ENS 51 ensemble members.
- * 
- * ECMWF ENS provides 51 perturbed members + 1 control run, giving a real
- * probability distribution (empirical CDF) instead of assumed parametric.
- * 
- * Includes retry logic for transient API failures.
+ *
+ * Estrategia anti-429 (cuota diaria por IP de Open-Meteo):
+ * 1. Una sola llamada por ciudad con los 6 modelos juntos (minimiza llamadas).
+ * 2. Reintentos con jitter solo en 429/5xx/timeout (2 → 3 intentos).
+ * 3. API key propia vía OPENMETEO_API_KEY (recomendado — ver .env.example).
+ * 4. Si Open-Meteo falla para la ciudad: FALLBACK TWC v3 (pronóstico degradado
+ *    a 1 modelo, flagged como `degraded`) para garantizar 10/10 ciudades.
  */
 export async function fetchWeatherModels(
   lat: number,
@@ -109,54 +183,50 @@ export async function fetchWeatherModels(
   const modelsParam = toTry.join(',')
   const baseUrl = `${OPENMETEO_BASE}?latitude=${lat}&longitude=${lon}&daily=temperature_2m_max,weather_code,precipitation_sum,precipitation_probability_max&temperature_unit=celsius&start_date=${fechaISO}&end_date=${fechaISO}&models=${modelsParam}&timezone=auto`
 
-  // Retry logic: try up to 2 times with short backoff (rate-limit friendly)
-  let lastError: Error | null = null
-  for (let attempt = 1; attempt <= 2; attempt++) {
-    try {
-      const resp = await fetch(baseUrl, { signal: AbortSignal.timeout(12000) })
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
-      const data = await resp.json()
+  const r = await omFetchJson(baseUrl, 12000, 3)
+  if (r.ok && r.data?.daily) {
+    const daily = r.data.daily
 
-      const daily = data.daily || {}
+    for (const model of toTry) {
+      const key = `temperature_2m_max_${model}`
+      const temps = daily[key]
+      if (temps && Array.isArray(temps) && temps.length > 0 && temps[0] !== null) {
+        results[model] = temps[0]
+      }
+    }
 
-      for (const model of toTry) {
-        const key = `temperature_2m_max_${model}`
-        const temps = daily[key]
-        if (temps && Array.isArray(temps) && temps.length > 0 && temps[0] !== null) {
-          results[model] = temps[0]
+    for (const key of Object.keys(daily)) {
+      if (key.startsWith('temperature_2m_max_member') && key.includes('ecmwf_ens')) {
+        const vals = daily[key]
+        if (vals && Array.isArray(vals) && vals.length > 0 && vals[0] !== null) {
+          ensembleMembers.push(vals[0])
         }
       }
+    }
 
-      for (const key of Object.keys(daily)) {
-        if (key.startsWith('temperature_2m_max_member') && key.includes('ecmwf_ens')) {
-          const vals = daily[key]
-          if (vals && Array.isArray(vals) && vals.length > 0 && vals[0] !== null) {
-            ensembleMembers.push(vals[0])
-          }
-        }
-      }
+    const weatherCode = daily.weather_code_best_match?.[0] ?? daily.weather_code?.[0] ?? 0
+    const precipitation = daily.precipitation_sum_best_match?.[0] ?? daily.precipitation_sum?.[0] ?? 0
 
-      // Extract weather data (with models param, Open-Meteo returns model-specific fields)
-      const weatherCode = daily.weather_code_best_match?.[0] ?? daily.weather_code?.[0] ?? 0
-      const precipitation = daily.precipitation_sum_best_match?.[0] ?? daily.precipitation_sum?.[0] ?? 0
-
-      // Success - if we got at least 1 model, return
-      if (Object.keys(results).length > 0) {
-        return { models: results, ensembleMembers, weatherCode, precipitation }
-      }
-    } catch (e) {
-      lastError = e as Error
-      console.warn(`Open-Meteo attempt ${attempt}/2 failed for lat=${lat} lon=${lon}:`, (e as Error).message)
-      if (attempt < 2) {
-        await new Promise(resolve => setTimeout(resolve, 800))
-      }
+    if (Object.keys(results).length > 0) {
+      return { models: results, ensembleMembers, weatherCode, precipitation }
     }
   }
 
-  // All attempts failed - return whatever we got (might be empty)
-  if (Object.keys(results).length === 0) {
-    console.error(`Open-Meteo FAILED for lat=${lat} lon=${lon} after 2 attempts:`, lastError?.message)
+  // Open-Meteo falló o devolvió 0 modelos → fallback TWC para no perder la ciudad
+  const failReason = r.err ?? 'respuesta sin modelos'
+  const twcTemp = await fetchTWCForecastMax(lat, lon, fechaISO)
+  if (twcTemp !== null) {
+    console.warn(`[Open-Meteo] FALLBACK TWC lat=${lat} lon=${lon} ${fechaISO} → ${twcTemp}°C (degradado, 1 modelo). Razón: ${failReason}`)
+    return {
+      models: { twc: twcTemp },
+      ensembleMembers: [],
+      weatherCode: 0,
+      precipitation: 0,
+      degraded: true,
+      degradedReason: failReason,
+    }
   }
 
-  return { models: results, ensembleMembers, weatherCode: 0, precipitation: 0 }
+  console.error(`[Open-Meteo] FAILED lat=${lat} lon=${lon} ${fechaISO} (Open-Meteo y TWC fallaron): ${failReason}`)
+  return { models: results, ensembleMembers, weatherCode: 0, precipitation: 0, degradedReason: failReason }
 }

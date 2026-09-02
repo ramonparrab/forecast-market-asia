@@ -23,6 +23,26 @@ export function computeEnsemble(input: EnsembleInput): ForecastResult {
   let numModelos = modelos.length
 
   if (numModelos < 2) {
+    // 0 modelos → último recurso (no debería llegar aquí: openmeteo.ts ya
+    // aplica fallback TWC cuando Open-Meteo falla por completo)
+    if (numModelos === 0) {
+      return {
+        temp_ponderada: 21.0,
+        temp_corregida: 21.0,
+        volatilidad: 2.0,
+        consenso: 'FALLBACK',
+        ensemble_raw: modelsRaw,
+        sesgo_aplicado: 0,
+        ensemble_members: ensembleMembers,
+      }
+    }
+    // 1 solo modelo (p.ej. fallback TWC por 429 de Open-Meteo, o respuesta
+    // parcial de la API) → ese modelo ES la base. Antes esto devolvía 21°C
+    // hardcodeado: con un modelo válido en mano era basura para el pronóstico.
+    const singleTemp = modelsRaw[modelos[0]]
+    if (typeof singleTemp === 'number') {
+      return buildSingleModelBase(input, singleTemp, 'FALLBACK 1 MODELO', false)
+    }
     return {
       temp_ponderada: 21.0,
       temp_corregida: 21.0,
