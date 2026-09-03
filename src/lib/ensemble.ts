@@ -4,6 +4,65 @@ import { computeDynamicBias, computeAdaptiveWeights } from './bias-correction'
 import { getEstacion } from './cities'
 import { getWeatherInfo } from './openmeteo'
 
+// ============================================================================
+// σ (VOLATILIDAD) — MEZCLA SPREAD + RMSE HISTÓRICO "B 30/70"
+// ============================================================================
+// IMPLEMENTADO sep-2026 tras backtest walk-forward (919 días-ciudad, mayo-sep
+// 2026, bootstrap pareado n=8190 → mejora SIGNIFICATIVA en Brier/LogLoss).
+//
+// ANTES (A):      σ = std(modelos del día) × 1.75          → solo "opinión de hoy"
+// AHORA (B 30/70): σ = √( 0.3·σ_spread² + 0.7·RMSE_30d² )  → + "cuánto fallamos de verdad"
+//
+// σ_spread = std(modelos)×1.75 (la que ya existía, clamp 0.9–5.2)
+// RMSE_30d = error REAL de NUESTROS pronósticos de los últimos 30 días de esa
+//            ciudad (columna `error` de forecast_history, calculada contra
+//            temp_corregida FINAL → incluye Kalman/sesgo, i.e. es residual post-corrección)
+//
+// Hallazgo del backtest: el RMSE real era MENOR que σ de spread en 9/10
+// ciudades → el sistema estaba SUB-calibrado (σ inflada, probabilidades blandas,
+// edge regalado). Con la mezcla: Brier 0.1883→0.1862, LogLoss 0.5459→0.5378,
+// fallo en p≥90%: 2.0%→1.5%, cobertura 80%: 84.9%→81.2% (nominal 80).
+// En días de FRENTE (Δreal≥3°C, n=229) B también gana (Brier 0.1770→0.1741):
+// el frente lo predice el CENTRO (modelos/Kalman), no la σ; el RMSE 30d ya
+// viene inflado por frentes pasados; y el 30% de spread reacciona el mismo día.
+//
+// Constantes ajustables — SI SE CAMBIAN, re-corre
+// scripts/backtest_volatilidad.py + significancia_volatilidad.py (repo local).
+// ============================================================================
+export const SIGMA_W_SPREAD = 0.3         // peso del spread de modelos (0.3 = 30%)
+export const SIGMA_W_RMSE = 0.7           // peso del RMSE histórico (0.7 = 70%)  ← EL NÚMERO
+export const SIGMA_RMSE_WINDOW = 30       // días de errores para el RMSE
+export const SIGMA_RMSE_MIN_SAMPLES = 10  // mín. errores para activar mezcla; con menos → solo spread
+export const SIGMA_MIN = 0.9              // clamp inferior de σ (°C)
+export const SIGMA_MAX = 5.2              // clamp superior de σ (°C)
+
+/**
+ * Mezcla σ = √(W_SPREAD·σ_spread² + W_RMSE·RMSE²), clamped [0.9, 5.2].
+ * Si hay < SIGMA_RMSE_MIN_SAMPLES errores reales → devuelve σ_spread pura
+ * (comportamiento anterior, sin historia suficiente para confiar).
+ */
+export function computeSigmaMixed(
+  sigmaSpread: number,
+  recentErrors: { error: number }[]
+): { sigma: number; rmse30d: number | null; sigmaSpread: number } {
+  const errs = (recentErrors ?? [])
+    .map(e => e?.error)
+    .filter((e): e is number => typeof e === 'number' && Number.isFinite(e))
+  if (errs.length < SIGMA_RMSE_MIN_SAMPLES) {
+    return { sigma: sigmaSpread, rmse30d: null, sigmaSpread }
+  }
+  const rmse = Math.sqrt(errs.reduce((s, e) => s + e * e, 0) / errs.length)
+  const mixed = Math.sqrt(
+    SIGMA_W_SPREAD * sigmaSpread * sigmaSpread +
+    SIGMA_W_RMSE * rmse * rmse
+  )
+  return {
+    sigma: Math.max(SIGMA_MIN, Math.min(mixed, SIGMA_MAX)),
+    rmse30d: Math.round(rmse * 100) / 100,
+    sigmaSpread: Math.round(sigmaSpread * 100) / 100,
+  }
+}
+
 interface EnsembleInput {
   slug: string
   mes: number
@@ -109,7 +168,9 @@ export function computeEnsemble(input: EnsembleInput): ForecastResult {
   const filteredTemps = modelos.map(m => modelsRaw[m])
   const spread = Math.max(...filteredTemps) - Math.min(...filteredTemps)
   const stdDev = std(filteredTemps)
-  const volatilidad = Math.max(0.9, Math.min(stdDev * 1.75, 5.2))
+  const sigmaSpread = Math.max(SIGMA_MIN, Math.min(stdDev * 1.75, SIGMA_MAX))
+  // σ final: mezcla 30/70 spread + RMSE histórico de la ciudad (Mejora B 30/70)
+  const { sigma: volatilidad, rmse30d, sigmaSpread: spreadC } = computeSigmaMixed(sigmaSpread, recentErrors)
 
   // Consensus
   let consenso: string
@@ -138,6 +199,11 @@ export function computeEnsemble(input: EnsembleInput): ForecastResult {
     sesgo_aplicado: Math.round(sesgo * 100) / 100,
     ensemble_members: ensembleMembers,
     weather,
+    sigma_rmse_30d: rmse30d ?? undefined,
+    sigma_spread: spreadC ?? undefined,
+    sigma_formula: rmse30d != null
+      ? `σ=√(${SIGMA_W_SPREAD}·${spreadC}² + ${SIGMA_W_RMSE}·${rmse30d}²)`
+      : undefined,
   }
 }
 
@@ -154,7 +220,12 @@ function buildSingleModelBase(
 ): ForecastResult {
   const { modelsRaw, ensembleMembers } = input
   const allTemps = Object.values(modelsRaw).filter((v): v is number => typeof v === 'number')
-  const vol = allTemps.length >= 2 ? Math.max(0.9, Math.min(std(allTemps) * 1.75, 5.2)) : 2.0
+  const sigmaSpread = allTemps.length >= 2
+    ? Math.max(SIGMA_MIN, Math.min(std(allTemps) * 1.75, SIGMA_MAX))
+    : 2.0
+  // σ mixta también en bases de modelo único (Seúl ICON / HK BestMatch / fallback):
+  // con 1 modelo el spread no existe → el RMSE histórico es la ÚNICA señal honesta.
+  const { sigma: vol, rmse30d, sigmaSpread: spreadC } = computeSigmaMixed(sigmaSpread, input.recentErrors ?? [])
   let weather: WeatherCondition | undefined
   if (input.weatherCode !== undefined) {
     const info = getWeatherInfo(input.weatherCode, input.precipitation ?? 0)
@@ -170,6 +241,11 @@ function buildSingleModelBase(
     ensemble_members: ensembleMembers,
     weather,
     icon_base: isIconBase || undefined,
+    sigma_rmse_30d: rmse30d ?? undefined,
+    sigma_spread: spreadC ?? undefined,
+    sigma_formula: rmse30d != null
+      ? `σ=√(${SIGMA_W_SPREAD}·${spreadC}² + ${SIGMA_W_RMSE}·${rmse30d}²)`
+      : undefined,
   }
 }
 

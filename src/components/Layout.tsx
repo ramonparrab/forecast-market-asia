@@ -20,6 +20,10 @@ export default function Layout({ children, lastUpdated }: LayoutProps) {
               <p className="text-xs text-gray-400 sm:text-sm">
                 6 modelos (BestMatch · ECMWF · GFS · ICON · JMA · MeteoFrance) vs precios Polymarket · Nowcasting · Student-t ν=4
               </p>
+              <p className="mt-1 text-[10px] text-gray-500">
+                <span className="rounded-full bg-emerald-500/15 border border-emerald-500/30 px-2 py-0.5 text-emerald-400 font-semibold">σ B 30/70 ACTIVA</span>
+                <span className="ml-1.5">Volatilidad = √(0.3·spread_modelos² + 0.7·RMSE_30d²) · calibrada con nuestros errores reales</span>
+              </p>
             </div>
             <div className="flex items-center gap-3 text-xs text-gray-500">
               {lastUpdated && (
@@ -49,7 +53,7 @@ export default function Layout({ children, lastUpdated }: LayoutProps) {
       {/* Footer */}
       <footer className="border-t border-gray-700/30 bg-slate-900/50 py-4">
         <div className="mx-auto max-w-7xl px-4 text-center text-xs text-gray-600">
-          <p className="mb-1">v6.0 · Empirical CDF · Platt Scaling · EWMA weights · Nowcasting · Z-score filter · Kelly 0.25 · Resumen Ejecutivo</p>
+          <p className="mb-1">v6.1 · Empirical CDF · Platt Scaling · EWMA weights · Nowcasting · Z-score filter · σ B 30/70 (spread+RMSE) · Kelly 0.25 · Resumen Ejecutivo</p>
           <p className="text-gray-700">Ejecución automática 22:00 Caracas (02:00 UTC) · No es consejo financiero</p>
         </div>
       </footer>

@@ -45,7 +45,10 @@ export function probGaussInt(k: number, mu: number, sd: number): number {
 }
 
 export function roundInt(v: number): number {
-  return Math.round(v + 0.05)
+  // Redondeo estándar. ANTES: Math.round(v + 0.05) — desplazaba el ancla al
+  // entero siguiente para valores con fracción ∈ [.45, .50) (ej. 32.49 → 33
+  // en vez de 32), colocando el pronóstico en el bucket equivocado.
+  return Math.round(v)
 }
 
 export function round2(v: number): number {
@@ -126,11 +129,15 @@ function construirPlan(
 
   // === FILTRO $1 MÍNIMO POR ESCALÓN (Polymarket no acepta apuestas < $1) ===
   // Se eliminan escalones no protegidos cuyo monto sería < $1 con el bankroll dado.
+  // Regla sep-2026: la COBERTURA forzada (vecino ±1) TAMBIÉN se suelta si su monto
+  // queda < $1 — antes mataba el plan completo (ej. Seúl: vecino a $0.04 con
+  // bankroll $10 → NO-BET pese a EV +$9). El ANCLA sigue siendo intocable: si el
+  // ancla misma no llega a $1, sí se exige más bankroll (mensaje minBankroll).
   for (;;) {
     const mc = sel.map(x => ({ ...x, _m: (bankroll * x.c.precio) / sumP }))
-    const bajoMinimo = mc.filter(m => m._m < MONTO_MIN && !m.ancla && !m.forzado)
+    const bajoMinimo = mc.filter(m => m._m < MONTO_MIN && !m.ancla)
     if (bajoMinimo.length === 0) break
-    const peor = bajoMinimo.reduce((a, b) => (a.c.precio < b.c.precio ? a : b))
+    const peor = bajoMinimo.reduce((a, b) => (a._m < b._m ? a : b))
     sel = sel.filter(r => r.k !== peor.k)
     if (sel.length === 0) {
       return { ...sinBase, motivo_no_bet: `Todos los escalones quedan por debajo del mínimo de $1 (Polymarket). Bankroll $${bankroll} insuficiente.` }
@@ -138,12 +145,12 @@ function construirPlan(
     sumP = sel.reduce((s, r) => s + r.c.precio, 0)
   }
 
-  // Verificar que ancla/cobertura también cumplen $1 mínimo
+  // Verificar que el ANCLA también cumple $1 mínimo (la cobertura ya se soltó arriba)
   const montoFinal = sel.map(x => ({ ...x, monto: (bankroll * x.c.precio) / sumP }))
-  const protegidoBajo = montoFinal.filter(m => m.monto < MONTO_MIN && (m.ancla || m.forzado))
-  if (protegidoBajo.length > 0) {
-    const minBankroll = Math.ceil(sumP * MONTO_MIN / Math.min(...protegidoBajo.map(m => m.c.precio)))
-    return { ...sinBase, motivo_no_bet: `El escalón ancla/cobertura requiere < $1 con bankroll $${bankroll}. Mínimo necesario: $${minBankroll}.` }
+  const anclaBajo = montoFinal.filter(m => m.monto < MONTO_MIN && m.ancla)
+  if (anclaBajo.length > 0) {
+    const minBankroll = Math.ceil(sumP * MONTO_MIN / Math.min(...anclaBajo.map(m => m.c.precio)))
+    return { ...sinBase, motivo_no_bet: `El escalón ancla requiere < $1 con bankroll $${bankroll}. Mínimo necesario: $${minBankroll}.` }
   }
 
   const total = montoFinal.reduce((s, x) => s + x.monto, 0)
@@ -200,7 +207,15 @@ export function calcularLadderEmpirica(
   const r = roundInt(corregida)
   const temps = Object.keys(contracts).map(Number).sort((a, b) => a - b)
   const probs = temps.map(k => {
-    const e = k - r
+    // SIGNO CORREGIDO (sep-2026): hist[e] = P(redondeo(pronóstico) - redondeo(real) = e),
+    // es decir e = +1 significa "el pronóstico fue 1° MÁS ALTO que el real"
+    // (sobreestimó) → el real tendió a caer 1 DEBAJO del pronóstico.
+    // Por tanto P(real = k) = hist[r - k], NO hist[k - r].
+    // El código antiguo (hist[k - r]) ponía la masa de probabilidad del lado
+    // INVERSO del sesgo histórico: si el modelo subestimaba, la escalera creía
+    // que iba a sobreestimar. Verificado en vivo (sep-2026): Seúl 30°C mostraba
+    // 35% cuando el historial propio decía 8%; Wuhan 27°C mostraba 59% vs 11% real.
+    const e = r - k
     const pEmp = nHist > 0 ? (hist[e] ?? 0) / nHist : 0
     const p = mezclaGauss ? 0.5 * pEmp + 0.5 * probGaussInt(k, corregida, sd) : pEmp
     return { k, p }
