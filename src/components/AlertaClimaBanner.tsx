@@ -30,16 +30,21 @@ const peso = (c: AlertaCiudadUI) => Math.max(1, ...c.alertas.map(a => a.severida
 
 export default function AlertaClimaBanner({ compact = false }: { compact?: boolean }) {
   const [ciudades, setCiudades] = useState<AlertaCiudadUI[] | null>(null)
+  const [aviso, setAviso] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   const cargar = useCallback(() => {
     setError(null)
+    setAviso(null)
     fetch('/api/alerta-clima')
       .then(r => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`)
         return r.json()
       })
-      .then(j => setCiudades(j.ciudades ?? []))
+      .then(j => {
+        setCiudades(j.ciudades ?? [])
+        setAviso(j.aviso ?? null)
+      })
       .catch(e => setError(e.message))
   }, [])
 
@@ -60,10 +65,22 @@ export default function AlertaClimaBanner({ compact = false }: { compact?: boole
   const sinAlertas = ciudades.filter(c => c.alertas.length === 0)
   const hayCriticas = conAlertas.some(c => c.alertas.some(a => a.severidad !== 'MODERADA'))
 
+  // FIX sep-2026 — honestidad visual: si Open-Meteo no respondió para NINGUNA
+  // ciudad, NO mostrar "✅ Sin alertas" (falso negativo: no lo sabemos). Mostrar
+  // el estado real: no disponible. Un día con tifón jamás saldrá verde por falla.
+  if (ciudades.length === 0) {
+    return (
+      <div className="rounded-xl bg-slate-800/40 border border-amber-600/30 p-3 text-xs text-amber-300">
+        ⚠️ Alertas climáticas no disponibles ahora{aviso ? ` — ${aviso}` : ' — reintenta en unos minutos'}.
+      </div>
+    )
+  }
+
   if (conAlertas.length === 0) {
     return (
       <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 px-3 py-2 text-[11px] text-emerald-300">
         ✅ Sin alertas climáticas para {sinAlertas.length ? sinAlertas.map(c => c.nombre).join(', ') : 'el próximo día'} — sin frente frío, calor extremo, nieve ni lluvia fuerte pronosticada.
+        {aviso && <span className="ml-2 text-amber-400/80">⚠️ {aviso}</span>}
       </div>
     )
   }

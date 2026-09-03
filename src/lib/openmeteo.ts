@@ -24,7 +24,7 @@ function withApiKey(url: string): string {
   return `${url}${url.includes('?') ? '&' : '?'}apikey=${encodeURIComponent(OM_API_KEY)}`
 }
 
-interface OmFetchResult {
+export interface OmFetchResult {
   ok: boolean
   status: number
   data?: any
@@ -66,7 +66,7 @@ function omRelease(): void {
  * fetch con reintentos (429/5xx/timeout/"Too many concurrent"), backoff con
  * jitter y API key. Los 4xx de parámetros no se reintentan (fallan igual siempre).
  */
-async function omFetchJson(url: string, timeoutMs = 12000, attempts = 3): Promise<OmFetchResult> {
+export async function omFetchJson(url: string, timeoutMs = 12000, attempts = 3): Promise<OmFetchResult> {
   await omAcquire()
   try {
     let lastErr = 'unknown'

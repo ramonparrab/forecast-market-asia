@@ -2,6 +2,7 @@ import { NextApiRequest, NextApiResponse } from 'next'
 import { createClient } from '@supabase/supabase-js'
 import { CIUDADES_ASIA } from '@/lib/cities'
 import { AlertaClima, DatosDia, detectarAlertas } from '@/lib/alerta-clima'
+import { omFetchJson } from '@/lib/openmeteo'
 
 const supabaseUrl = (process.env.NEXT_PUBLIC_SUPABASE_URL || '').replace(/\/rest\/v1\/?$/, '')
 const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
@@ -69,8 +70,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
           const url = `https://api.open-meteo.com/v1/forecast?latitude=${city.lat}&longitude=${city.lon}&daily=temperature_2m_max,temperature_2m_min,precipitation_sum,precipitation_probability_max,wind_speed_10m_max,weather_code&temperature_unit=celsius&start_date=${start}&end_date=${end}&models=${MODELS.join(',')}&timezone=auto`
 
-          const resp = await fetch(url)
-          const j = await resp.json()
+          // FIX sep-2026: omFetchJson (semáforo máx 4 + reintentos con backoff)
+          // en vez de fetch crudo. Antes, si el banner cargaba mientras el cron
+          // 10PM/11PM descargaba sus 60 llamadas OM, Open-Meteo rechazaba las 10
+          // del banner ("Too many concurrent") y devolvíamos ciudades:[] — que el
+          // UI mostraba como falso "✅ Sin alertas". Ahora: cola FIFO + 3 reintentos.
+          const r = await omFetchJson(url)
+          const j = r.ok ? r.data : null
           const d = j?.daily
           if (!d) return null
 
@@ -128,7 +134,20 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       }
     }
 
-    res.status(200).json({ fecha_consulta: new Date().toISOString(), ciudades: resultado })
+    // Ciudades que no pudieron consultarse (rechazo OM total, timeout, etc.)
+    const fallidas = slugs.filter(s => !resultado.some(r => r.slug === s))
+
+    res.status(200).json({
+      fecha_consulta: new Date().toISOString(),
+      ciudades: resultado,
+      degradado: fallidas.length > 0,
+      ciudades_fallidas: fallidas,
+      aviso: resultado.length === 0
+        ? 'Open-Meteo no respondió para ninguna ciudad — reintenta en unos minutos'
+        : fallidas.length > 0
+          ? `${fallidas.length}/${slugs.length} ciudades sin datos de Open-Meteo`
+          : undefined,
+    })
   } catch (error) {
     console.error('[alerta-clima]', error)
     res.status(500).json({ error: (error as Error).message })
