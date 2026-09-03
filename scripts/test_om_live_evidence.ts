@@ -26,7 +26,7 @@ async function parteA() {
     CIUDADES_ASIA.map(async c => {
       const r = await fetch(urlOM(c.lat, c.lon), { signal: AbortSignal.timeout(15000) })
       const body = await r.text()
-      return { ciudad: c.ciudad, ok: r.ok, status: r.status, body: body.slice(0, 200) }
+      return { ciudad: c.nombre, ok: r.ok, status: r.status, body: body.slice(0, 200) }
     })
   )
   let rechazadas = 0

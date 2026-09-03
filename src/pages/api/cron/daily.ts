@@ -21,14 +21,28 @@ import { fetchActualMaxTemp } from '@/lib/openmeteo'
 import { CIUDADES_ASIA } from '@/lib/cities'
 import { computeBacktestBiasFromResults } from '@/lib/backtest-bias'
 import { getModelSelectionCache } from '@/lib/modelo-selector'
+import { resolveRunLabel, resolveFechaObjetivo, CARACAS_OFFSET_MS } from '@/lib/cron-slot'
 
 // Vercel: 300s de presupuesto (doble vía: config export + vercel.json functions)
 export const config = { maxDuration: 300 }
 
 /**
- * ÚNICO cron de datos del proyecto (vercel.json — SOLO 2 horarios):
- *   - 02:00 UTC = 10:00 PM Caracas (UTC-4)
- *   - 03:00 UTC = 11:00 PM Caracas (UTC-4)
+ * ÚNICO cron de datos del proyecto (vercel.json — 4 horarios, 2 por slot):
+ *   - 02:00 UTC = 10:00 PM Caracas  ┐ ambos → registro '10PM' (UPSERT: el
+ *   - 02:30 UTC = 10:30 PM Caracas  ┘ segundo REFRESCA al primero)
+ *   - 03:00 UTC = 11:00 PM Caracas  ┐ ambos → registro '11PM'
+ *   - 03:30 UTC = 11:30 PM Caracas  ┘
+ *
+ * Redundancia doble por slot (pedido sep-2026): el cron de Hobby dispara
+ * ~20-25 min tarde y a veces SE CAE entero (11PM del 2-sep nunca disparó).
+ * Con 2 disparos por slot, si el primero falla el segundo llena; si ambos
+ * corren, el segundo (más fresco) refresca el mismo registro vía UPSERT.
+ *
+ * ETIQUETA POR SCHEDULE, NO POR RELOJ: Vercel envía el header
+ * x-vercel-cron-schedule con el schedule exacto que disparó la invocación
+ * → 02:xx UTC = '10PM', 03:xx UTC = '11PM'. Así un retraso grande (p. ej.
+ * el de 02:30 disparando a las 23:05 Caracas) NUNCA contamina el slot
+ * siguiente. Sin header (trigger manual) se usa la hora de reloj Caracas.
  *
  * Arquitectura por corrida (TODO AUTOMATIZADO, orden = criticidad):
  *   1. PRONÓSTICO para el día D+1 asiático (10 ciudades, paralelo) → BD
@@ -40,10 +54,11 @@ export const config = { maxDuration: 300 }
  *   4. Recalcular sesgos (backtest_bias) con los nuevos errores
  *
  * Fiabilidad:
+ *   - Semáforo Open-Meteo máx 4 concurrentes + reintentos (fix sep-2026)
  *   - Fallback TWC v3 por ciudad si Open-Meteo da 429 (cuota por IP compartido)
  *   - Guardados idempotentes (UPSERT por fecha_objetivo+slug+run_type)
  *   - cron_log (migration-008): estado visible ok/partial/error + detalles
- *   - Lock anti-solapamiento entre 10PM y 11PM (cron de Hobby puede retrasarse)
+ *   - Lock anti-solapamiento (los 4 disparos + manuales no se pisan)
  *   - Errores por paso NO tumban los demás pasos (respuestas parciales siguen siendo útiles)
  */
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
@@ -57,14 +72,17 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const startedAt = Date.now()
 
   // ===== Determinar etiqueta de corrida: 10PM / 11PM Caracas =====
-  const caracasOffset = -4 * 60 * 60000
-  const nowCaracas = new Date(Date.now() + caracasOffset)
+  // La lógica vive en src/lib/cron-slot.ts (testeada en scripts/test_cron_slot.ts):
+  // etiqueta por SCHEDULE (header x-vercel-cron-schedule) y no por reloj.
+  const nowCaracas = new Date(Date.now() + CARACAS_OFFSET_MS)
   const caracasHour = nowCaracas.getUTCHours()
-  const runLabel = caracasHour === 23 ? '11PM'
-    : caracasHour === 22 ? '10PM'
-    : `${String(caracasHour).padStart(2, '0')}:00`
+
+  const schedHeader = String(req.headers['x-vercel-cron-schedule'] ?? '')
+  const slotParam = String(req.query.slot ?? '')
+
+  const { label: runLabel, via: triggerVia } = resolveRunLabel({ schedHeader, slotParam, caracasHour })
   const isLegitRun = runLabel === '10PM' || runLabel === '11PM'
-  console.log(`[CRON] === CORRIDA ${runLabel} CARACAS === ${nowCaracas.toISOString().slice(0, 16).replace('T', ' ')} Caracas`)
+  console.log(`[CRON] === CORRIDA ${runLabel} CARACAS === ${nowCaracas.toISOString().slice(0, 16).replace('T', ' ')} Caracas (vía ${triggerVia}${schedHeader ? `, schedule "${schedHeader}"` : ''})`)
 
   // ===== Lock anti-solapamiento (esperar hasta 45s si hay corrida activa) =====
   try {
@@ -85,16 +103,20 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   // ===== Registrar inicio en cron_log (si migration-008 está aplicada) =====
   const logId = await startCronRun({ job: 'daily', run_type: runLabel })
 
-  const details: Record<string, unknown> = { run_type: runLabel }
+  const details: Record<string, unknown> = {
+    run_type: runLabel,
+    trigger: { via: triggerVia, schedule: schedHeader || null, caracas_hour: caracasHour },
+  }
 
   try {
     // ============================================================
     // STEP 1 — PRONÓSTICO D+1 (lo más crítico, va primero)
     // ============================================================
     // "Mañana Caracas" = día asiático objetivo. Ej.: 2-sep 10PM Caracas → 3-sep Asia.
-    const tomorrowCaracas = new Date(nowCaracas.getTime())
-    tomorrowCaracas.setDate(tomorrowCaracas.getDate() + 1)
-    const fechaObjetivo = tomorrowCaracas.toISOString().slice(0, 10)
+    // Corridas NOCTURNAS TARDÍAS (00-05 Caracas, cron retrasado o manual de
+    // recuperación): el día objetivo es HOY Caracas (el día asiático ya comenzó
+    // y su mercado aún no resuelve) — igual que el botón Actualizar backup.
+    const fechaObjetivo = resolveFechaObjetivo(caracasHour, nowCaracas.getTime())
 
     console.log(`[CRON] STEP 1: Pronóstico para ${fechaObjetivo} (día D+1 asiático)...`)
     const forecastInfo: Record<string, unknown> = { fecha_objetivo: fechaObjetivo }
