@@ -39,6 +39,12 @@ export interface ForecastResult {
   temp_corregida_alt?: number
   /** Modelo perdedor: el que NO fue seleccionado */
   modelo_alt?: 'MEJORA CONTINUA' | 'KALMAN'
+  /** σ mixta B 30/70: RMSE 30d de errores reales de la ciudad (null si <10 muestras) */
+  sigma_rmse_30d?: number
+  /** σ_spread pura (std modelos ×1.75, clamp 0.9–5.2) — componente del día */
+  sigma_spread?: number
+  /** Fórmula de σ aplicada, legible: "σ=√(0.3·1.8² + 0.7·1.26²)" */
+  sigma_formula?: string
   /** Sesgo del modelo perdedor */
   sesgo_alt?: number
   /** Seoul usa ICON crudo como base en vez del ensemble ponderado */

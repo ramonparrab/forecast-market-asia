@@ -372,7 +372,15 @@ export async function buildPlanData(slug: string, monto: number, ctx?: PlanCtx):
 
     // 8. Plan ladder: empírico del ganador (mezcla gauss en TRANSICIÓN), gauss si poco historial
     let plan: LadderPlan
-    if (mercadoCerrado) {
+    if (Object.keys(priceMap).length === 0) {
+      // Antes: priceMap vacío caía en calcularLadder* → rungs vacíos → respuesta
+      // sin escalones NI explicación (sin_contratos siempre false). Ahora se informa.
+      plan = {
+        inversion: 0, sd: regimen.sd, escalones: [], probabilidad_ganar: 0, ev: 0, peor_caso: 0,
+        sin_contratos: true, empirica: false,
+        motivo_no_bet: `No hay contratos de temperatura exacta cotizados en Polymarket para ${nombre} ${currentRecord.fecha_objetivo} — sin escalones posibles.`,
+      }
+    } else if (mercadoCerrado) {
       plan = {
         inversion: 0, sd: regimen.sd, escalones: [], probabilidad_ganar: 0, ev: 0, peor_caso: 0,
         sin_contratos: false, empirica: false,
@@ -437,7 +445,7 @@ export async function buildPlanData(slug: string, monto: number, ctx?: PlanCtx):
       nota_horas: horarioDisponible
         ? 'daily_runs guarda corridas por hora (02:00Z=10PM y 03:00Z=11PM Caracas). El LADDER compara los 4 combos modelo×hora y usa el mejor: ' + modeloGanador + ' @ ' + (horaGanadora || '—') + ' (MAE ' + (combosMae[horaGanadora === '10PM' ? (modeloGanador === 'KALMAN' ? 'kal_10pm' : 'mc_10pm') : horaGanadora === '11PM' ? (modeloGanador === 'KALMAN' ? 'kal_11pm' : 'mc_11pm') : 'kal_10pm']) + '°) — ' + muestrasHoras + ' días con corrida horaria.'
         : 'No hubo suficientes corridas horarias en daily_runs (' + muestrasHoras + ' < ' + MIN_MUESTRAS_HORA + '): se usó la serie almacenada sin comparación 10PM/11PM.',
-      metodologia: 'escalera NO-PERDER: montos ∝ % Polymarket (mínimo $1/escalón, se eliminan escalones < $1) → cada escalón paga > inversión si Σ precios ≤ 95% · se descartan los de peor edge hasta cumplir, si no → NO-BET · CRITICO=no apostar',
+      metodologia: 'escalera NO-PERDER: montos ∝ % Polymarket (mínimo $1/escalón, se eliminan escalones < $1) → cada escalón paga > inversión si Σ precios ≤ 95% · se descartan los de peor edge hasta cumplir, si no → NO-BET · CRITICO=no apostar · [fix sep-2026: P(real=k) = hist[ancla−k] (signo corregido), ancla = redondeo estándar, cobertura bajo $1 se suelta en vez de matar el plan]',
     }
     if (!ctx) planCache.set(slug + '|' + monto, { ts: Date.now(), data: out })
     return out

@@ -331,15 +331,15 @@ function ImprovementLegend() {
     <details className="mb-6 rounded-xl bg-slate-800/50 border border-gray-700/30 overflow-hidden">
       <summary className="cursor-pointer px-4 py-3 text-sm font-medium text-blue-400 hover:text-blue-300 transition flex items-center gap-2">
         <span>⚡</span>
-        Modelo Global v6.0 — 7 de 9 mejoras activas
+        Modelo Global v6.1 — 8 de 10 mejoras activas
         <span className="ml-auto text-xs text-gray-500">(click para expandir)</span>
       </summary>
       <div className="p-4 pt-2 space-y-4">
 
         {/* Header */}
         <div className="rounded-xl bg-gradient-to-r from-blue-600/10 via-purple-600/10 to-emerald-600/10 border border-blue-500/20 p-4">
-          <p className="text-sm font-bold text-white mb-1">Modelo Unificado v6.0</p>
-          <p className="text-xs text-gray-400">Combina las 6 mejoras del sistema en un pipeline coherente. Backtest validado con train/test split.</p>
+          <p className="text-sm font-bold text-white mb-1">Modelo Unificado v6.1</p>
+          <p className="text-xs text-gray-400">Combina las mejoras del sistema en un pipeline coherente. v6.1: σ calibrada con RMSE histórico (B 30/70). Backtest walk-forward validado (919 días-ciudad, sep-2026).</p>
         </div>
 
         {/* Grid of improvements */}
@@ -510,11 +510,32 @@ function ImprovementLegend() {
             </div>
           </div>
 
+          {/* 10. σ Mixta B 30/70 (RMSE histórico) */}
+          <div className="rounded-lg bg-slate-900/50 p-3 border border-fuchsia-500/30 relative">
+            <div className="absolute top-2 right-2 rounded-full bg-fuchsia-500/20 px-2 py-0.5 text-[9px] text-fuchsia-400 font-bold">NUEVO v6.1</div>
+            <p className="font-semibold text-fuchsia-400 mb-1 text-xs">10. σ Mixta B 30/70 (RMSE histórico)</p>
+            <p className="text-gray-400 text-[10px] leading-relaxed mb-2">
+              <strong className="text-fuchsia-300">Qué hace:</strong> La volatilidad σ que alimenta el Monte Carlo ya no es solo "cuánto pelean los modelos hoy", sino que se calibra con NUESTROS errores reales de los últimos 30 días por ciudad.
+            </p>
+            <p className="text-gray-400 text-[10px] leading-relaxed mb-2">
+              <strong className="text-fuchsia-300">Cómo:</strong> <code className="text-fuchsia-400">σ = √(0.3·σ_spread² + 0.7·RMSE_30d²)</code> donde σ_spread = std(modelos)×1.75 (clamp 0.9–5.2) y RMSE_30d = error real de forecast_history (ventana 30d, mín. 10 muestras; con menos → solo spread, comportamiento anterior).
+            </p>
+            <p className="text-gray-400 text-[10px] leading-relaxed mb-2">
+              <strong className="text-fuchsia-300">Números actuales:</strong> W_SPREAD=0.3 · W_RMSE=0.7 · ventana=30d · mín. muestras=10 · clamp=[0.9, 5.2]°C. Constantes exportadas en <code>ensemble.ts</code> (SIGMA_W_RMSE etc.) — cambiarlas y re-validar con backtest.
+            </p>
+            <p className="text-gray-400 text-[10px] leading-relaxed mb-2">
+              <strong className="text-fuchsia-300">Impacto (backtest walk-forward, 919 días-ciudad):</strong> Brier 0.1883→0.1862 · LogLoss 0.5459→0.5378 · fallo en p≥90%: 2.0%→1.5% · cobertura 80%: 84.9%→81.2% (nominal). El hallazgo: el RMSE real era MENOR que σ de spread en 9/10 ciudades → estábamos regalando edge por σ inflada. El RMSE es residual post-Kalman (mira el centro, no la dispersión → complementarios, no redundantes). En días de frente (Δ≥3°C) B también gana: Brier 0.1770→0.1741.
+            </p>
+            <div className="text-[9px] text-gray-500 mt-2">
+              Archivos: <code className="text-fuchsia-400">ensemble.ts (computeSigmaMixed)</code>, <code className="text-fuchsia-400">types/index.ts (sigma_rmse_30d)</code>
+            </div>
+          </div>
+
         </div>
 
         {/* Pipeline flow */}
         <div className="rounded-xl bg-slate-900/50 border border-gray-700/20 p-4">
-          <p className="text-xs font-bold text-white mb-3">Pipeline del Modelo Unificado v6.0</p>
+          <p className="text-xs font-bold text-white mb-3">Pipeline del Modelo Unificado v6.1</p>
           <div className="flex flex-wrap items-center gap-2 text-[10px]">
             <span className="rounded-full bg-emerald-500/20 px-2 py-1 text-emerald-400 font-bold">① Open-Meteo 6 modelos</span>
             <span className="text-gray-600">→</span>
@@ -526,12 +547,17 @@ function ImprovementLegend() {
             <span className="text-gray-600">→</span>
             <span className="rounded-full bg-cyan-500/20 px-2 py-1 text-cyan-400 font-bold">⑤ Nowcasting</span>
             <span className="text-gray-600">→</span>
-            <span className="rounded-full bg-purple-500/20 px-2 py-1 text-purple-400 font-bold">⑥ Platt calibración</span>
+            <span className="rounded-full bg-fuchsia-500/20 px-2 py-1 text-fuchsia-400 font-bold" title="σ = √(0.3·spread_modelos² + 0.7·RMSE_30d²) — volatilidad calibrada con errores reales">⑥ σ B 30/70 (spread+RMSE)</span>
             <span className="text-gray-600">→</span>
-            <span className="rounded-full bg-rose-500/20 px-2 py-1 text-rose-400 font-bold">⑦ Kelly allocation</span>
+            <span className="rounded-full bg-purple-500/20 px-2 py-1 text-purple-400 font-bold">⑦ Monte Carlo + Platt</span>
             <span className="text-gray-600">→</span>
-            <span className="rounded-full bg-yellow-500/20 px-2 py-1 text-yellow-400 font-bold">⑧ Resumen Ejecutivo</span>
+            <span className="rounded-full bg-rose-500/20 px-2 py-1 text-rose-400 font-bold">⑧ Kelly allocation</span>
+            <span className="text-gray-600">→</span>
+            <span className="rounded-full bg-yellow-500/20 px-2 py-1 text-yellow-400 font-bold">⑨ Resumen Ejecutivo</span>
           </div>
+          <p className="text-[10px] text-gray-500 mt-2">
+            ⑥ σ B 30/70 (nuevo v6.1): la volatilidad del Monte Carlo se calcula como <code className="text-fuchsia-400">√(0.3·σ_spread² + 0.7·RMSE_30d²)</code> — 30% pelea entre modelos HOY + 70% nuestros errores REALES de la ciudad (30d, mín. 10 muestras). Backtest: Brier 0.1883→0.1862, fallo p≥90% 2.0%→1.5%.
+          </p>
         </div>
 
       </div>
@@ -894,7 +920,7 @@ export default function Home({ initialAnalysis, initialMetrics, initialAvailable
             <span>·</span>
             <span>Empirical CDF</span>
             <span>·</span>
-            <span>Isotonic PAVA</span>
+            <span>σ B 30/70 (spread + RMSE 30d)</span>
             <span>·</span>
             <span>EWMA + Z-score</span>
             <span>·</span>

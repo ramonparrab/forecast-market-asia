@@ -37,7 +37,7 @@ const STEPS_MEJORA = [
 ]
 
 const STEPS_POST = [
-  { paso: 12, etapa: 'Monte Carlo 20K Sims', desc: '20,000 simulaciones con Student-t ν=4 o CDF empírica ECMWF ENS' },
+  { paso: 12, etapa: 'Monte Carlo 20K Sims', desc: '20,000 simulaciones con Student-t ν=4 o CDF empírica ECMWF ENS · σ B 30/70 = √(0.3·spread² + 0.7·RMSE_30d²)' },
   { paso: 13, etapa: 'Probabilidad por Bucket', desc: '% de simulaciones que caen en cada bucket de Polymarket' },
   { paso: 14, etapa: 'Normalización', desc: 'prob_ia_norm = prob_ia_raw / sum. Identity scaling' },
   { paso: 15, etapa: 'Kelly Allocation', desc: 'f=0.25, edge mínimo 6%, $10/día' },
@@ -311,6 +311,7 @@ function GlobalView() {
           <h3 className="font-semibold text-amber-400 text-sm mb-2">4. Probabilidad Monte Carlo</h3>
           <ul className="text-xs text-gray-400 space-y-1">
             <li>• 20,000 simulaciones por contrato</li>
+            <li>• σ B 30/70: spread + RMSE histórico <span className="text-fuchsia-400">(v6.1)</span></li>
             <li>• Student-t ν=4 (colas gordas)</li>
             <li>• Empirical CDF cuando hay ≥20 miembros</li>
           </ul>
@@ -356,6 +357,36 @@ function GlobalView() {
         <h3 className="font-semibold text-emerald-400 text-sm mb-2">🟢 ECMWF ENS 51 Miembros</h3>
         <p className="text-xs text-gray-400 mb-2">Mejora más importante: el Ensemble del Centro Europeo proporciona 51 perturbaciones del mismo modelo, dando una distribución de probabilidad REAL. Esto reemplaza la suposición paramétrica (Student-t) con una CDF empírica, eliminando el mayor error de calibración.</p>
         <div className="text-xs text-gray-500">Cada miembro: misma fecha, misma ciudad, condiciones iniciales ligeramente perturbadas → spread realista</div>
+      </div>
+
+      {/* σ B 30/70 — volatilidad calibrada */}
+      <div className="rounded-xl bg-fuchsia-500/5 border border-fuchsia-500/30 p-4 mb-4">
+        <div className="flex items-center justify-between mb-2">
+          <h3 className="font-semibold text-fuchsia-400 text-sm">🟣 σ Mixta B 30/70 — Volatilidad Calibrada (NUEVO v6.1)</h3>
+          <span className="rounded-full bg-fuchsia-500/20 px-2 py-0.5 text-[9px] text-fuchsia-400 font-bold">ACTIVO · sep-2026</span>
+        </div>
+        <p className="text-xs text-gray-400 mb-2">
+          <strong className="text-fuchsia-300">Qué es:</strong> la σ (volatilidad) define el ancho del cono de confianza alrededor del pronóstico y de ella salen TODAS las probabilidades del Monte Carlo (P≥x, P=x, rangos). Antes se calculaba solo con la dispersión de los modelos del día (σ_spread = std×1.75); ahora se mezcla con el RMSE de nuestros errores REALES por ciudad.
+        </p>
+        <div className="rounded-lg bg-slate-900/60 border border-fuchsia-500/20 p-3 mb-2 font-mono text-[11px] text-fuchsia-300">
+          σ = √( 0.3 · σ_spread²  +  0.7 · RMSE_30d² )    clamped [0.9, 5.2] °C
+        </div>
+        <p className="text-xs text-gray-400 mb-2">
+          <strong className="text-fuchsia-300">De dónde sale cada componente:</strong> σ_spread = std(6-7 modelos)×1.75 (pelea de modelos HOY, reacciona instantáneo a regímenes inciertos). RMSE_30d = √(media de error²) de la columna <code>error</code> de forecast_history de ESA ciudad, últimos 30 días — el error se calcula contra temp_corregida FINAL, o sea es el residuo POST-Kalman/sesgo (dispersión pura, no sesgo).
+        </p>
+        <p className="text-xs text-gray-400 mb-2">
+          <strong className="text-fuchsia-300">Números en uso (constantes en ensemble.ts):</strong> W_SPREAD = 0.3 · W_RMSE = 0.7 (← el peso clave) · ventana RMSE = 30 días · mín. muestras = 10 (con menos → solo spread) · clamp = [0.9, 5.2]°C. Ejemplo real: Seúl σ_spread 2.27, RMSE 1.26 → σ = 1.63.
+        </p>
+        <p className="text-xs text-gray-400 mb-2">
+          <strong className="text-fuchsia-300">Por qué (backtest walk-forward, 919 días-ciudad, mayo-sep 2026, bootstrap pareado n=8190):</strong> el RMSE real era MENOR que σ_spread en 9/10 ciudades → probabilidades demasiado tímidas = edge regalado. Con la mezcla: Brier 0.1883→0.1862 · LogLoss 0.5459→0.5378 · fallo cuando p≥90%: 2.0%→1.5% · cobertura intervalo 80%: 84.9%→81.2% (nominal 80). Alternativas descartadas con datos: 50/50 (Brier 0.1871), 70/30 (0.1881), ventana 14/10 (≈ igual), adaptativa por spread (0.1880, peor), corrección de Sheppard por redondeo (4º decimal, sin impacto).
+        </p>
+        <p className="text-xs text-gray-400 mb-2">
+          <strong className="text-fuchsia-300">Frentes fríos/cálidos rápidos:</strong> medido en los 229 días de frente (Δreal≥3°C día a día) del historial: B 30/70 gana TAMBIÉN ahí (Brier 0.1770→0.1741; frentes fuertes ≥5°C: 0.1527→0.1493, cobertura 82.9%→80.3%). El frente lo predice el CENTRO del pronóstico (modelos+Kalman), no la σ; el RMSE ya viene inflado por frentes pasados; y el 30% de spread reacciona el mismo día.
+        </p>
+        <p className="text-xs text-gray-400">
+          <strong className="text-fuchsia-300">Kalman vs RMSE:</strong> no se duplican — Kalman corrige el CENTRO (media de errores, “dónde apuntar”), la σ calibra el ANCHO (dispersión de errores, “cuánto se esparcen los tiros”). El RMSE es lo que Kalman NO puede comer porque es ruido, no sesgo.
+        </p>
+        <div className="text-xs text-gray-500 mt-2">Archivos: ensemble.ts (computeSigmaMixed + constantes SIGMA_*) · forecast-engine.ts (pasa recentErrors) · scripts/backtest_volatilidad.py (re-validar si se cambian pesos)</div>
       </div>
 
       {/* PAVA */}
