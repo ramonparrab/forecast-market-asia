@@ -614,6 +614,8 @@ export default function Home({ initialAnalysis, initialMetrics, initialAvailable
   const [metrics, setMetrics] = useState<GlobalMetrics | null>(initialMetrics)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // Nota del modo backup del botón Actualizar (slot 10PM/11PM llenado/refrescado)
+  const [backupNote, setBackupNote] = useState<string | null>(null)
   const [activeView, setActiveView] = useState<View>('executive')
   const [lastUpdated, setLastUpdated] = useState<string>(initialAnalysis ? `Auto ${new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}` : '')
   const [selectedDate, setSelectedDate] = useState<string>('')
@@ -706,15 +708,26 @@ export default function Home({ initialAnalysis, initialMetrics, initialAvailable
   const runAnalysis = useCallback(async (fecha?: string) => {
     setLoading(true)
     setError(null)
+    setBackupNote(null)
     try {
       const targetDate = fecha || selectedDate || getDefaultTargetDate()
-      const resp = await fetch(`/api/forecast?fecha=${targetDate}`, { method: 'POST' })
+      // persist_backup: true → si el cron dejó vacío el slot 10PM/11PM de esta
+      // noche, esta corrida en vivo lo LLENA (nunca degrada lo ya guardado; el
+      // cron automático pisa con su UPSERT cuando dispare). Fuera de la ventana
+      // nocturna solo visualiza, no escribe.
+      const resp = await fetch(`/api/forecast?fecha=${targetDate}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ persist_backup: true }),
+      })
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
       const data: DailyAnalysis = await resp.json()
       setAnalysis(data)
       setIsHistorical(false)
       setSelectedDate(data.fecha_objetivo)
       setLastUpdated(new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit', second: '2-digit' }))
+      const bw = (data as any).backup_write
+      if (bw && (bw.write || bw.reason)) setBackupNote(bw.write ? `💾 ${bw.reason}` : `👁 ${bw.reason}`)
     } catch (e) {
       setError((e as Error).message)
     } finally {
@@ -818,6 +831,11 @@ export default function Home({ initialAnalysis, initialMetrics, initialAvailable
             <span className="text-xs text-gray-500">
               <span className="inline-block h-2 w-2 rounded-full bg-emerald-400 mr-1"></span>
               {analysis.cities.length} ciudades · {analysis.recommendations.length} recom. · ${analysis.total_allocated.toFixed(2)} asignados
+            </span>
+          )}
+          {backupNote && (
+            <span className="text-xs text-blue-300/90 max-w-[260px] truncate" title={backupNote}>
+              {backupNote}
             </span>
           )}
         </div>

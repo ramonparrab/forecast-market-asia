@@ -31,31 +31,68 @@ interface OmFetchResult {
   err?: string
 }
 
+// =====================================================================
+// SEMÁFORO GLOBAL ANTI "Too many concurrent requests" (fix sep-2026).
+// Open-Meteo (free, sin key) RECHAZA cuando llegan muchas requests
+// SIMULTÁNEAS: el pipeline lanza las 10 ciudades en paralelo y cada una
+// dispara su llamada OM → 10 en vuelo → la API responde
+//   {"error":true,"reason":"Too many concurrent requests"}
+// y la ciudad cae al fallback OWM de 1 modelo (→ "pocos modelos" en el
+// panel ejecutivo, aunque el cron ya hubiera guardado 7 modelos en BD).
+// Solución: limitar a OM_MAX_CONCURRENT llamadas en vuelo por instancia;
+// el resto espera en cola (FIFO). El costo es ~2-3 olas de 4 llamadas en
+// vez de 1 ola de 10 → +4-6s de latencia total, a cambio de 7/7 modelos.
+// =====================================================================
+const OM_MAX_CONCURRENT = 4
+let omActive = 0
+const omQueue: Array<() => void> = []
+
+async function omAcquire(): Promise<void> {
+  if (omActive < OM_MAX_CONCURRENT) {
+    omActive++
+    return
+  }
+  await new Promise<void>(resolve => omQueue.push(resolve))
+  omActive++
+}
+
+function omRelease(): void {
+  omActive--
+  const next = omQueue.shift()
+  if (next) next()
+}
+
 /**
- * fetch con reintentos (solo 429/5xx/timeout), backoff con jitter y API key.
- * Los 4xx de parámetros no se reintentan (fallan igual siempre).
+ * fetch con reintentos (429/5xx/timeout/"Too many concurrent"), backoff con
+ * jitter y API key. Los 4xx de parámetros no se reintentan (fallan igual siempre).
  */
 async function omFetchJson(url: string, timeoutMs = 12000, attempts = 3): Promise<OmFetchResult> {
-  let lastErr = 'unknown'
-  for (let attempt = 1; attempt <= attempts; attempt++) {
-    try {
-      const resp = await fetch(withApiKey(url), { signal: AbortSignal.timeout(timeoutMs) })
-      if (resp.ok) {
-        return { ok: true, status: resp.status, data: await resp.json() }
+  await omAcquire()
+  try {
+    let lastErr = 'unknown'
+    for (let attempt = 1; attempt <= attempts; attempt++) {
+      try {
+        const resp = await fetch(withApiKey(url), { signal: AbortSignal.timeout(timeoutMs) })
+        if (resp.ok) {
+          return { ok: true, status: resp.status, data: await resp.json() }
+        }
+        const body = await resp.text().catch(() => '')
+        lastErr = body.slice(0, 160) || `HTTP ${resp.status}`
+        // 429 = cuota por IP agotada; 5xx = transitorio; "Too many concurrent"
+        // = rechazo por concurrencia (a veces llega como 400) → reintentar
+        const retryable = resp.status === 429 || resp.status >= 500 || body.includes('Too many concurrent')
+        if (!retryable) return { ok: false, status: resp.status, err: lastErr }
+      } catch (e) {
+        lastErr = (e as Error).message
       }
-      const body = await resp.text().catch(() => '')
-      lastErr = body.slice(0, 160) || `HTTP ${resp.status}`
-      // 429 = cuota por IP agotada; 5xx = transitorio → reintentar
-      const retryable = resp.status === 429 || resp.status >= 500
-      if (!retryable) return { ok: false, status: resp.status, err: lastErr }
-    } catch (e) {
-      lastErr = (e as Error).message
+      if (attempt < attempts) {
+        await new Promise(resolve => setTimeout(resolve, 400 + Math.random() * 600))
+      }
     }
-    if (attempt < attempts) {
-      await new Promise(resolve => setTimeout(resolve, 400 + Math.random() * 600))
-    }
+    return { ok: false, status: 0, err: lastErr }
+  } finally {
+    omRelease()
   }
-  return { ok: false, status: 0, err: lastErr }
 }
 
 /**
