@@ -1087,12 +1087,20 @@ export async function upsertForecastSnapshot(
   const e = existing as any
   const currentRun = snapshot.run_type_ganadora // la corrida que acaba de llegar
 
+  // FIX sep-2026 (bug "registro 10PM pisado por 11PM"): antes se usaba
+  //   temp_10pm: ... : (e.temp_10pm ?? snapshot.temp_corregida)
+  // El fallback ?? rellenaba la columna del OTRO slot con el valor de la
+  // corrida actual cuando estaba vacía → el 02-sep la corrida 11PM llenó
+  // temp_10pm con su propio valor (Seúl 27.6 en la columna 10PM cuando el
+  // 10PM real era 28.56, verificado en daily_runs #830 vs #828). El contrato
+  // del decision-tab dice "temp_10pm NUNCA cambia" — un slot vacío queda
+  // vacío (honesto) hasta que SU propia corrida lo escriba.
   const update: any = {
-    // Preservar la corrida que ya estaba
-    temp_10pm: currentRun === '10PM' ? snapshot.temp_corregida : (e.temp_10pm ?? snapshot.temp_corregida),
-    temp_11pm: currentRun === '11PM' ? snapshot.temp_corregida : (e.temp_11pm ?? snapshot.temp_corregida),
-    modelo_10pm: currentRun === '10PM' ? snapshot.modelo_ganador : (e.modelo_10pm ?? snapshot.modelo_ganador),
-    modelo_11pm: currentRun === '11PM' ? snapshot.modelo_ganador : (e.modelo_11pm ?? snapshot.modelo_ganador),
+    // Preservar la corrida que ya estaba — SIN cross-fill
+    temp_10pm: currentRun === '10PM' ? snapshot.temp_corregida : e.temp_10pm ?? null,
+    temp_11pm: currentRun === '11PM' ? snapshot.temp_corregida : e.temp_11pm ?? null,
+    modelo_10pm: currentRun === '10PM' ? snapshot.modelo_ganador : e.modelo_10pm ?? null,
+    modelo_11pm: currentRun === '11PM' ? snapshot.modelo_ganador : e.modelo_11pm ?? null,
   }
 
   // Si ambas corridas existen, elegir ganador por historial MAE
