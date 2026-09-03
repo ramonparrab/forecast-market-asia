@@ -326,6 +326,71 @@ function TargetDateBanner({ fechaObjetivo, caracasTime, isHistorical }: { fechaO
   )
 }
 
+// Crones de escritura: 22:00, 22:30 (slot 10PM) y 23:00, 23:30 (slot 11PM) Caracas.
+// Devuelve la próxima corrida y cuánto falta, p.ej. "próximo cron a las 22:00 Caracas (en 9h 38m)".
+function proximaCorridaCron(): string {
+  try {
+    const fmt = new Intl.DateTimeFormat('en-GB', { timeZone: 'America/Caracas', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
+    const [hStr, mStr] = fmt.format(new Date()).split(':')
+    const mins = parseInt(hStr, 10) * 60 + parseInt(mStr, 10)
+    const slots = [22 * 60, 22 * 60 + 30, 23 * 60, 23 * 60 + 30]
+    const next = slots.find(s => s > mins)
+    const diff = next !== undefined ? next - mins : 24 * 60 - mins + 22 * 60
+    const h = Math.floor(diff / 60)
+    const m = diff % 60
+    const hora = next !== undefined
+      ? `${String(Math.floor(next / 60)).padStart(2, '0')}:${String(next % 60).padStart(2, '0')}`
+      : '22:00'
+    return `Próxima corrida automática: ${hora} Caracas (en ${h}h ${String(m).padStart(2, '0')}m)`
+  } catch {
+    return ''
+  }
+}
+
+/**
+ * Banner del modo de escritura del botón "Actualizar":
+ * · write=true  → el botón LLENÓ/REFRESCÓ un slot nocturno (verde).
+ * · write=false → fuera de ventana: corrida en vivo SOLO VISUALIZACIÓN (azul
+ *   informativo — nunca rojo/ámbar: no es un error, es el diseño del sistema:
+ *   el cron automático es el único escritor oficial de la noche).
+ */
+function BackupNoteBanner({ note, onClose }: { note: { write: boolean; reason: string }, onClose: () => void }) {
+  const cronInfo = note.write ? null : proximaCorridaCron()
+  return (
+    <div className={`mb-4 rounded-xl border p-4 ${
+      note.write
+        ? 'bg-emerald-500/10 border-emerald-500/30'
+        : 'bg-sky-500/10 border-sky-500/25'
+    }`}>
+      <div className="flex items-start gap-3">
+        <span className="text-2xl leading-none mt-0.5 select-none">{note.write ? '💾' : '🕒'}</span>
+        <div className="flex-1 min-w-0">
+          <p className={`text-sm font-bold ${note.write ? 'text-emerald-300' : 'text-sky-300'}`}>
+            {note.write
+              ? 'Registro guardado en la base de datos'
+              : 'Vista en vivo — sin escritura en la base de datos'}
+          </p>
+          <p className="text-xs mt-1 text-gray-300/90 leading-relaxed break-words">{note.reason}</p>
+          {cronInfo && (
+            <p className="text-xs mt-2 flex items-center gap-2 text-sky-400">
+              <span className="inline-block h-1.5 w-1.5 rounded-full bg-sky-400 animate-pulse" />
+              <span>{cronInfo}</span>
+            </p>
+          )}
+        </div>
+        <button
+          onClick={onClose}
+          className="text-gray-500 hover:text-white transition text-sm leading-none px-1"
+          title="Ocultar aviso"
+          aria-label="Ocultar aviso"
+        >
+          ✕
+        </button>
+      </div>
+    </div>
+  )
+}
+
 function ImprovementLegend() {
   return (
     <details className="mb-6 rounded-xl bg-slate-800/50 border border-gray-700/30 overflow-hidden">
@@ -614,8 +679,8 @@ export default function Home({ initialAnalysis, initialMetrics, initialAvailable
   const [metrics, setMetrics] = useState<GlobalMetrics | null>(initialMetrics)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  // Nota del modo backup del botón Actualizar (slot 10PM/11PM llenado/refrescado)
-  const [backupNote, setBackupNote] = useState<string | null>(null)
+  // Nota del modo backup del botón Actualizar (slot 10PM/11PM llenado/refrescado o modo solo-lectura)
+  const [backupNote, setBackupNote] = useState<{ write: boolean; reason: string } | null>(null)
   const [activeView, setActiveView] = useState<View>('executive')
   const [lastUpdated, setLastUpdated] = useState<string>(initialAnalysis ? `Auto ${new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}` : '')
   const [selectedDate, setSelectedDate] = useState<string>('')
@@ -727,7 +792,9 @@ export default function Home({ initialAnalysis, initialMetrics, initialAvailable
       setSelectedDate(data.fecha_objetivo)
       setLastUpdated(new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit', second: '2-digit' }))
       const bw = (data as any).backup_write
-      if (bw && (bw.write || bw.reason)) setBackupNote(bw.write ? `💾 ${bw.reason}` : `👁 ${bw.reason}`)
+      if (bw && (bw.write || bw.reason)) {
+        setBackupNote({ write: !!bw.write, reason: String(bw.reason || '') })
+      }
     } catch (e) {
       setError((e as Error).message)
     } finally {
@@ -833,11 +900,6 @@ export default function Home({ initialAnalysis, initialMetrics, initialAvailable
               {analysis.cities.length} ciudades · {analysis.recommendations.length} recom. · ${analysis.total_allocated.toFixed(2)} asignados
             </span>
           )}
-          {backupNote && (
-            <span className="text-xs text-blue-300/90 max-w-[260px] truncate" title={backupNote}>
-              {backupNote}
-            </span>
-          )}
         </div>
 
         {/* Date picker */}
@@ -901,6 +963,9 @@ export default function Home({ initialAnalysis, initialMetrics, initialAvailable
       {analysis?.fecha_objetivo && (
         <TargetDateBanner fechaObjetivo={analysis.fecha_objetivo} caracasTime={caracasTime} isHistorical={isHistorical} />
       )}
+
+      {/* Modo de escritura del botón Actualizar: guardado (verde) / solo visualización (azul) */}
+      {backupNote && <BackupNoteBanner note={backupNote} onClose={() => setBackupNote(null)} />}
       {isHistorical && (
         <div className="mb-4 rounded-lg bg-amber-500/10 border border-amber-500/20 px-4 py-2 text-sm text-amber-400 flex items-center gap-2">
           <span>📖</span>

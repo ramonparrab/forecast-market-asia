@@ -115,7 +115,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       } else if (!slot) {
         backupInfo = {
           write: false,
-          reason: `Fuera de ventana de escritura (${String(cHour).padStart(2, '0')}:xx Caracas — el cron escribe 22:00/23:00). Solo visualización en vivo.`,
+          reason: `Ahora son las ${String(cHour).padStart(2, '0')}:xx Caracas. El pronóstico oficial de la noche lo escribe el cron automático (22:00, 22:30, 23:00 y 23:30 Caracas). Esta corrida es en vivo y NO modifica la base de datos: ves el estado actual del modelo para visualizar, y el próximo registro quedará guardado solo cuando el cron dispare.`,
         }
       } else {
         // ¿El cron ya escribió el slot esperado?
