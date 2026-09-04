@@ -2,7 +2,7 @@ import { NextApiRequest, NextApiResponse } from 'next'
 import { runDailyAnalysis } from '@/lib/forecast-engine'
 import { CityAnalysis, DailyAnalysis } from '@/types'
 import { getClient } from '@/lib/supabase'
-import { saveDailyRun, saveForecastRecords, upsertForecastSnapshot } from '@/lib/supabase'
+import { saveDailyRun, saveForecastRecords, upsertForecastSnapshot, slotYaRegistrado } from '@/lib/supabase'
 import { getModelSelectionCache } from '@/lib/modelo-selector'
 
 /**
@@ -20,6 +20,9 @@ import { getModelSelectionCache } from '@/lib/modelo-selector'
  *          · 22:00–22:59 Caracas → slot '10PM' del día D+1: si está VACÍO lo
  *            llena; si el cron ya escribió, lo REFRESCA solo si el live salió
  *            completo (sin ciudades degradadas) — nunca degrada lo guardado.
+ *            INMUTABILIDAD POST-11PM (fix 04-sep-2026): si el cron 11PM registró
+ *            su slot mientras corría este análisis, el refresh del 10PM ya NO
+ *            aplica — el valor que el usuario vio queda congelado.
  *          · 23:00–23:59 o 00:00–05:59 Caracas → slot '11PM': se llena SOLO si
  *            está VACÍO (el 11PM es el registro final de la noche; si ya existe,
  *            no se toca). En la ventana 00-05, si se pide el día D+1 pero el
@@ -181,6 +184,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         backupInfo = {
           write: false,
           reason: `Live degradado (${minModels} modelos mín.) — se conserva intacta la corrida ${runSlot} del cron (prioridad del automático).`,
+          slot: runSlot,
+          target,
+        }
+      } else if (backupInfo.pending_refresh && (await slotYaRegistrado(target, '11PM'))) {
+        // INMUTABILIDAD POST-11PM: el slot 11PM se registró (cron o fill) mientras
+        // corría este análisis — el refresh del 10PM YA NO aplica, la noche avanzó.
+        backupInfo = {
+          write: false,
+          reason: `El 11PM de ${target} ya está registrado — el 10PM queda congelado y no se refresca (inmutabilidad post-11PM).`,
           slot: runSlot,
           target,
         }

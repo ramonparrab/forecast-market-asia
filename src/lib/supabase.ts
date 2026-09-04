@@ -77,6 +77,33 @@ export async function saveDailyRun(run: DailyRun): Promise<number | null> {
 }
 
 /**
+ * slotYaRegistrado — ¿existe ya un daily_run para (fecha_objetivo, run_type)?
+ * Base de la INMUTABILIDAD POST-11PM: una corrida '10PM' tardía (p. ej. el
+ * refresh de las 10:30 con latencia Hobby de ~33 min, ver 03-sep-2026) NO
+ * debe pisar el slot 10PM si el slot 11PM de esa noche ya está registrado.
+ * Fail-open: si no se puede consultar, devuelve false (comportamiento previo).
+ */
+export async function slotYaRegistrado(
+  fechaObjetivo: string,
+  runType: '10PM' | '11PM'
+): Promise<boolean> {
+  const client = getServiceClient()
+  if (!client) return false
+  try {
+    const { data, error } = await client
+      .from('daily_runs' as any)
+      .select('id')
+      .eq('fecha_objetivo', fechaObjetivo)
+      .eq('run_type', runType)
+      .limit(1)
+    if (error) return false
+    return !!(data && (data as any[]).length > 0)
+  } catch {
+    return false
+  }
+}
+
+/**
  * saveForecastRecords — UPSERT con run_type.
  * Ya NO borra registros existentes. Usa upsert con onConflict para que
  * 10PM y 11PM coexistan (UNIQUE = slug, fecha_objetivo, run_type).

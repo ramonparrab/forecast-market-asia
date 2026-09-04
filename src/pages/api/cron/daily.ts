@@ -5,6 +5,7 @@ import {
 import {
   saveDailyRun,
   saveForecastRecords,
+  slotYaRegistrado,
   getRecordsWithoutActuals,
   updateActualTemperature,
   getHistoricalRecords,
@@ -43,6 +44,12 @@ export const config = { maxDuration: 300 }
  * → 02:xx UTC = '10PM', 03:xx UTC = '11PM'. Así un retraso grande (p. ej.
  * el de 02:30 disparando a las 23:05 Caracas) NUNCA contamina el slot
  * siguiente. Sin header (trigger manual) se usa la hora de reloj Caracas.
+ *
+ * INMUTABILIDAD POST-11PM (fix 04-sep-2026): una corrida '10PM' NO muta su
+ * slot si el '11PM' de la misma fecha ya está registrado (el refresh de las
+ * 10:30 puede aterrizar 30-40 min tarde, después del 11PM — anoche pisó el
+ * valor que el usuario ya había visto en TOMAR DECISION). El slot 10PM
+ * VACÍO sí se puede llenar tarde (mejor valor tardío que hueco).
  *
  * Arquitectura por corrida (TODO AUTOMATIZADO, orden = criticidad):
  *   1. PRONÓSTICO para el día D+1 asiático (10 ciudades, paralelo) → BD
@@ -118,6 +125,23 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // y su mercado aún no resuelve) — igual que el botón Actualizar backup.
     const fechaObjetivo = resolveFechaObjetivo(caracasHour, nowCaracas.getTime())
 
+    // ===== INMUTABILIDAD POST-11PM (fix 04-sep-2026) =====
+    // Anoche (03-sep) el sched "30 2 * * *" (refresh 10:30) disparó a las
+    // 23:03:39 Caracas — 33 min de latencia Hobby — y su UPSERT pisó el slot
+    // 10PM ya registrado a las 22:02/22:21, 2 minutos después de que el slot
+    // 11PM existiera. El usuario lo vio en TOMAR DECISION como "el 11PM
+    // modificó también el de las 10PM". Regla: corrida '10PM' + slot '11PM'
+    // ya registrado + slot '10PM' ya con datos → NO se escribe nada del slot
+    // (history, daily_runs ni snapshots); solo corren reales y bias.
+    let frozen10pm = false
+    if (isLegitRun && runLabel === '10PM') {
+      const slot11Ya = await slotYaRegistrado(fechaObjetivo, '11PM')
+      if (slot11Ya && (await slotYaRegistrado(fechaObjetivo, '10PM'))) {
+        frozen10pm = true
+        console.log(`[CRON] CONGELADO: corrida 10PM tardía (${nowCaracas.toISOString().slice(11, 16)}Z) y el slot 11PM de ${fechaObjetivo} ya existe — NO se pisa el 10PM ya registrado. Esta corrida solo procesa reales y bias.`)
+      }
+    }
+
     console.log(`[CRON] STEP 1: Pronóstico para ${fechaObjetivo} (día D+1 asiático)...`)
     const forecastInfo: Record<string, unknown> = { fecha_objetivo: fechaObjetivo }
     const forecastErrors: string[] = []
@@ -140,8 +164,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }))
 
     // Guardar con run_type para que 10PM y 11PM coexistan (UPSERT idempotente)
-    const savedHistory = await saveForecastRecords(records, runLabel)
-    if (!savedHistory) forecastErrors.push('saveForecastRecords falló')
+    // Congelado → NO se toca el history del slot (el valor ya visto queda)
+    const savedHistory = frozen10pm ? false : await saveForecastRecords(records, runLabel)
+    if (!savedHistory && !frozen10pm) forecastErrors.push('saveForecastRecords falló')
 
     // Ciudades degradadas (sin ningún modelo Open-Meteo: quedaron en OWM o TWC
     // solas por 429) y faltantes
@@ -159,10 +184,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     // daily_runs + snapshots SOLO para corridas 10PM/11PM legítimas
     // (las manuales fuera de ventana no crean daily_runs — el decision-tab las ignora)
+    // Congelado → se omiten TAMBIÉN (inmutabilidad post-11PM)
     let dailyRunId: number | null = null
     let snapshotsOk = 0
     let snapshotsFail = 0
-    if (isLegitRun) {
+    if (isLegitRun && !frozen10pm) {
       dailyRunId = await saveDailyRun({
         fecha_ejecucion: result.fecha,
         fecha_objetivo: fechaObjetivo,
@@ -216,6 +242,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         const fullEnsemble = ensKeys.some(k => k !== 'twc' && k !== 'owm')
         console.log(`  ${c.slug}: ${c.forecast.temp_corregida}°C (${ensKeys.length} modelos)${fullEnsemble ? '' : ' [degradado 1 modelo]'}`)
       }
+    } else if (frozen10pm) {
+      console.log(`[CRON] daily_runs/snapshots/history del slot 10PM OMITIDOS: congelado (el 11PM de ${fechaObjetivo} ya está registrado)`)
     } else {
       console.log(`[CRON] Ejecución fuera de ventana (${runLabel}) — solo forecast_history, sin daily_runs/snapshots`)
     }
@@ -223,7 +251,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     forecastInfo.cities = result.cities.length
     forecastInfo.degraded_twc = degradedCities
     forecastInfo.missing = missingCities
-    forecastInfo.saved_history = savedHistory
+    forecastInfo.saved_history = frozen10pm ? 'skipped_frozen_10pm' : savedHistory
+    forecastInfo.frozen_10pm = frozen10pm
     forecastInfo.saved_daily_run_id = dailyRunId
     forecastInfo.snapshots_ok = snapshotsOk
     forecastInfo.snapshots_fail = snapshotsFail
@@ -354,7 +383,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // ============================================================
     const allErrors = [...forecastErrors, ...realesErrors]
     const forecastComplete = result.cities.length === CIUDADES_ASIA.length
-    const status: 'ok' | 'partial' | 'error' = forecastComplete && savedHistory && realesErrors.length === 0
+    const status: 'ok' | 'partial' | 'error' = frozen10pm
+      ? (realesErrors.length === 0 ? 'ok' : 'partial') // congelar es intencional, no es fallo
+      : forecastComplete && savedHistory && realesErrors.length === 0
       ? 'ok'
       : result.cities.length === 0 && !savedHistory
         ? 'error'
@@ -376,7 +407,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       bias: biasInfo,
       duracion_ms: duracionMs,
       errores: allErrors.slice(0, 30),
-      message: `${runLabel}: ${result.cities.length}/10 ciudades pronosticadas para ${fechaObjetivo}, ${backfilled} reales registradas (día ${realDay} + backlog), ${snapBackfilled} snapshots`,
+      message: `${runLabel}: ${frozen10pm
+        ? `slot 10PM de ${fechaObjetivo} CONGELADO (refresh tardío NO pisó el valor — el 11PM ya estaba registrado)`
+        : `${result.cities.length}/10 ciudades pronosticadas para ${fechaObjetivo}`}, ${backfilled} reales registradas (día ${realDay} + backlog), ${snapBackfilled} snapshots`,
     })
   } catch (error) {
     console.error('[CRON] Error fatal:', error)
