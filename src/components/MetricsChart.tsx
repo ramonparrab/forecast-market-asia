@@ -42,6 +42,7 @@ export default function MetricsChart() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [selectedCity, setSelectedCity] = useState<string | null>(null)
+  const [brier, setBrier] = useState<{ brier_ia: number | null; brier_mkt: number | null; skill: number | null; n: number } | null>(null)
 
   useEffect(() => {
     setLoading(true)
@@ -51,6 +52,11 @@ export default function MetricsChart() {
       .then(setData)
       .catch(e => setError(e.message))
       .finally(() => setLoading(false))
+    // Brier en paralelo (calibración de probabilidades IA vs mercado)
+    fetch(`/api/brier?dias=${period}`)
+      .then(r => r.ok ? r.json() : null)
+      .then(j => setBrier(j && j.ok ? { brier_ia: j.global?.brier_ia ?? null, brier_mkt: j.global?.brier_mkt ?? null, skill: j.global?.skill ?? null, n: j.n_contratos ?? 0 } : null))
+      .catch(() => setBrier(null))
   }, [period])
 
   // Chart data: pivot daily errors into rows per date
@@ -119,11 +125,17 @@ export default function MetricsChart() {
       </div>
 
       {/* Global summary cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-5 gap-3">
         <MiniCard label="MAE" value={`${g.mae}°C`} sub="Error absoluto medio" color="text-blue-400" />
         <MiniCard label="Sesgo" value={`${g.bias > 0 ? '+' : ''}${g.bias}°C`} sub={g.bias > 0.2 ? 'Sobreestima' : g.bias < -0.2 ? 'Subestima' : 'Neutral'} color={Math.abs(g.bias) < 0.3 ? 'text-emerald-400' : 'text-amber-400'} />
         <MiniCard label="±1°C" value={`${g.accuracy_pct}%`} sub="Aciertos" color="text-emerald-400" />
         <MiniCard label="RMSE" value={`${g.rmse}°C`} sub="Error cuadrático" color="text-amber-400" />
+        <MiniCard
+          label="BRIER"
+          value={brier?.brier_ia != null ? brier.brier_ia.toFixed(3) : '—'}
+          sub={brier?.brier_ia != null && brier.brier_mkt != null ? `mercado ${brier.brier_mkt.toFixed(3)} · ${brier.skill != null && brier.skill > 0 ? '+' : ''}${((brier.skill ?? 0) * 100).toFixed(0)}% edge` : 'calibración de probabilidades'}
+          color={brier?.brier_ia != null && brier.brier_mkt != null && brier.brier_ia < brier.brier_mkt ? 'text-emerald-400' : brier?.brier_ia != null ? 'text-red-400' : 'text-gray-400'}
+        />
       </div>
 
       {/* Chart: city selector + all cities */}

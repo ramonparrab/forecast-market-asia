@@ -1,5 +1,6 @@
 import { NextApiRequest, NextApiResponse } from 'next'
 import { computeGlobalMetrics, runBacktestFromHistory } from '@/lib/supabase'
+import { computeBrier } from '@/lib/brier'
 import { AccuracyMetrics } from '@/types'
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
@@ -18,6 +19,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       overall_mae: 0, overall_rmse: 0, overall_bias: 0, brier_score: 0,
       total_muestras: 0, accuracy_pct: 0, por_ciudad: [], evolucion_diaria: [],
     }
+
+    // Llena el brier_score real (calibración de probabilidades IA, ventana 30d)
+    try {
+      const brier = await computeBrier(30)
+      if (brier.ok && brier.global.brier_ia != null) {
+        result.brier_score = brier.global.brier_ia
+        result.brier = { ia: brier.global.brier_ia, mercado: brier.global.brier_mkt, skill: brier.global.skill, n: brier.n_contratos }
+      }
+    } catch { /* brier_score queda como estaba — no bloquea la métrica principal */ }
 
     // Attach backtest data if available
     if (backtestSummary && backtestSummary.total_muestras > 0) {

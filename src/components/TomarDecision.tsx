@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { CIUDADES_ASIA } from '@/lib/cities'
+import BrierPanel from './BrierPanel'
 
 interface DecisionDay {
   fecha_objetivo: string
@@ -133,6 +134,9 @@ export default function TomarDecision() {
           </div>
         </div>
       </div>
+
+      {/* Calibración Brier: ¿son confiables las probabilidades antes de apostar? */}
+      <BrierPanel />
 
       {/* Legend */}
       <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-gray-500 px-1">
