@@ -376,6 +376,8 @@ function CityTable({ city }: { city: DecisionCityResult }) {
               <th className="px-1 py-1 text-[9px] text-gray-600">11PM</th>
               <th className="px-1 py-1 text-[9px] text-gray-600">10PM</th>
               <th className="px-1 py-1 text-[9px] text-gray-600">11PM</th>
+              <th className="px-1 py-1 text-[9px] text-emerald-500/70">10PM</th>
+              <th className="px-1 py-1 text-[9px] text-emerald-500/70">11PM</th>
               <th className="px-1 py-1 text-[9px] text-cyan-500/70">prod 10PM</th>
               <th className="px-1 py-1 text-[9px] text-cyan-500/70">prod 11PM</th>
               <th className="px-1 py-1 text-[9px] text-orange-500/70">v2 10PM</th>
