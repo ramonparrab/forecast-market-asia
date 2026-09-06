@@ -196,6 +196,25 @@ function probSombra(tipo: string, valor: number | [number, number], centro: numb
   return null
 }
 
+/**
+ * Probs SOMBRA v2 (receta congelada, analítica y determinista) para TODOS los
+ * contratos de una corrida, normalizadas igual que producción. Única fuente
+ * de verdad de la receta: la usan computeShadowDuelo (subpestaña del duelo) y
+ * las columnas "P. CUBO" de TOMAR DECISIÓN (decision-tab).
+ * Devuelve null si algún contrato no es puntuable (mismo criterio que el duelo).
+ */
+export function shadowProbsContratos(
+  contratos: Array<{ tipo?: string | null; valor?: number | [number, number] | null }>,
+  centro: number
+): number[] | null {
+  if (!Array.isArray(contratos) || contratos.length === 0 || isNaN(centro)) return null
+  const raws: Array<number | null> = contratos.map(c =>
+    c && c.tipo != null && c.valor != null ? probSombra(c.tipo, c.valor, centro) : null
+  )
+  if (raws.some(p => p == null)) return null
+  return normalize(raws as number[])
+}
+
 /** Misma normalización que producción (montecarlo.ts) */
 function normalize(raws: number[]): number[] {
   const sum = raws.reduce((s, v) => s + v, 0)
@@ -352,9 +371,8 @@ export async function computeShadowDuelo(dias: number | 'all' = 30): Promise<Sha
         if (isNaN(centro)) continue
 
         // Receta v2 (analítica, exacta) + normalización como producción
-        const raws = contratos.map(c => probSombra(c.tipo!, c.valor!, centro))
-        if (raws.some(p => p == null)) continue
-        const norm = normalize(raws as number[])
+        const norm = shadowProbsContratos(contratos, centro)
+        if (!norm) continue
 
         const real = realMap.get(`${city.slug}|${fecha}`)
         if (real == null) {

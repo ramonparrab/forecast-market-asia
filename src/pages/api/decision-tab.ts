@@ -2,6 +2,7 @@ import { NextApiRequest, NextApiResponse } from 'next'
 import { createClient } from '@supabase/supabase-js'
 import { CIUDADES_ASIA } from '@/lib/cities'
 import { kalmanBiasPredictions, kalmanNextBias, estimateKalmanR, getKalmanQ } from '@/lib/kalman-engine'
+import { shadowProbsContratos } from '@/lib/shadow'
 
 const supabaseUrl = (process.env.NEXT_PUBLIC_SUPABASE_URL || '').replace(/\/rest\/v1\/?$/, '')
 const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
@@ -36,6 +37,12 @@ export interface DecisionDay {
   kal_acierto: boolean | null
   final_acierto: boolean | null
   modelo_ganador: string | null
+  /** Cubo redondeado al que se refiere p_prod_cubo/p_som_cubo (round(real) si resolvió, si no round(temp_corregida)) */
+  cubo: number | null
+  /** Prob PRODUCCIÓN (prob_ia_norm) del cubo — solo visual, no afecta la recomendación */
+  p_prod_cubo: number | null
+  /** Prob SOMBRA v2 (receta congelada) del mismo cubo — solo visual, no afecta la recomendación */
+  p_som_cubo: number | null
 }
 
 export interface DecisionCityResult {
@@ -64,6 +71,10 @@ interface RunData {
   temp_corregida_base: number
   temp_corregida: number
   modelo_activo: string | null
+  /** Sombra v2 (solo visual): cubo elegido y probs prod/sombra de ese cubo */
+  cubo: number | null
+  p_prod_cubo: number | null
+  p_som_cubo: number | null
 }
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
@@ -186,6 +197,42 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         const final_ = cityData.forecast.temp_corregida ?? null
         if (final_ === null && realBase === null) continue
 
+        // ===== SOMBRA v2 (solo visual — NO afecta la recomendación) =====
+        // Receta congelada calculada al vuelo sobre los contratos GUARDADOS de
+        // esta corrida (mismo instante de captura que prob_ia_norm/prob_mkt).
+        // Cubo mostrado: round(temp_real) si el día ya resolvió ("cuánto pagó
+        // cada versión por lo que pasó"), si no round(temp_corregida) ("cuánto
+        // paga cada versión por el cubo del centro HOY").
+        let cubo: number | null = null
+        let pProdCubo: number | null = null
+        let pSomCubo: number | null = null
+        const contratos: any[] = Array.isArray(cityData.contratos) ? cityData.contratos : []
+        const centroNum = Number(final_)
+        if (contratos.length > 0 && final_ !== null && !isNaN(centroNum)) {
+          const probs = shadowProbsContratos(contratos, centroNum)
+          const exactos = contratos
+            .map((c: any, i: number) => ({ c, i }))
+            .filter((x: any) => x.c && x.c.tipo === 'exacto' && typeof x.c.valor === 'number')
+          if (probs && exactos.length > 0) {
+            const real = realMap[slug + '|' + fo] ?? null
+            const bucketObjetivo = real !== null ? Math.round(real) : Math.round(centroNum)
+            let pick = exactos.find((x: any) => Number(x.c.valor) === bucketObjetivo) ?? null
+            if (!pick) {
+              // El cubo objetivo no está listado (real de cola) → exacto más cercano al cubo del centro
+              const centroBucket = Math.round(centroNum)
+              pick = exactos.reduce((best: any, x: any) =>
+                Math.abs(Number(x.c.valor) - centroBucket) < Math.abs(Number(best.c.valor) - centroBucket) ? x : best)
+            }
+            cubo = Number(pick.c.valor)
+            pProdCubo = typeof pick.c.prob_ia_norm === 'number'
+              ? Math.max(0, Math.min(1, Number(pick.c.prob_ia_norm)))
+              : null
+            pSomCubo = typeof probs[pick.i] === 'number'
+              ? Math.max(0, Math.min(1, Number(probs[pick.i])))
+              : null
+          }
+        }
+
         const key = slug + '|' + fo + '|' + effectiveRT
         runDataMap[key] = {
           run_type: effectiveRT,
@@ -193,6 +240,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           temp_corregida_base: realBase ?? final_ ?? 0,
           temp_corregida: final_ ?? realBase ?? 0,
           modelo_activo: cityData.forecast.modelo_activo ?? null,
+          cubo,
+          p_prod_cubo: pProdCubo,
+          p_som_cubo: pSomCubo,
         }
         processedRuns++
       }
@@ -248,6 +298,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         temp_corregida_base: r.temp_pronosticada ?? r.temp_corregida ?? 0,
         temp_corregida: r.temp_corregida ?? r.temp_pronosticada ?? 0,
         modelo_activo: modeloActivo,
+        cubo: null,
+        p_prod_cubo: null,
+        p_som_cubo: null,
       }
       processedRuns++
     }
@@ -380,6 +433,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         if (run11?.modelo_activo) lastModelo = run11.modelo_activo
         else if (run10?.modelo_activo) lastModelo = run10.modelo_activo
 
+        // SOMBRA v2 (solo visual): 11PM preferido, 10PM de respaldo
+        const somInfo =
+          run11 && (run11.p_prod_cubo !== null || run11.p_som_cubo !== null)
+            ? run11
+            : run10 && (run10.p_prod_cubo !== null || run10.p_som_cubo !== null)
+              ? run10
+              : null
+
         const biases = biasMap[f] ?? lastKnownBias
         const mc10 = base10 !== null ? round2(base10 + biases.mc_bias) : null
         const mc11 = base11 !== null ? round2(base11 + biases.mc_bias) : null
@@ -451,6 +512,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           kal_acierto: kalAcierto,
           final_acierto: finalAcierto,
           modelo_ganador: snap?.modelo_11pm ?? snap?.modelo_10pm ?? run11?.modelo_activo ?? run10?.modelo_activo ?? null,
+          cubo: somInfo?.cubo ?? null,
+          p_prod_cubo: somInfo?.p_prod_cubo ?? null,
+          p_som_cubo: somInfo?.p_som_cubo ?? null,
         })
       }
 
