@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { CIUDADES_ASIA } from '@/lib/cities'
 import BrierPanel from './BrierPanel'
+import ShadowPanel from './ShadowPanel'
 
 interface DecisionDay {
   fecha_objetivo: string
@@ -48,6 +49,7 @@ interface DecisionCityResult {
 }
 
 type CiudadFilter = 'todas' | string
+type SubTab = 'modelos' | 'duelo'
 
 export default function TomarDecision() {
   const [data, setData] = useState<Record<string, DecisionCityResult> | null>(null)
@@ -55,6 +57,7 @@ export default function TomarDecision() {
   const [error, setError] = useState('')
   const [ciudad, setCiudad] = useState<CiudadFilter>('todas')
   const [dias, setDias] = useState(30)
+  const [subtab, setSubtab] = useState<SubTab>('modelos')
 
   const fetchData = useCallback(async () => {
     setLoading(true)
@@ -135,6 +138,35 @@ export default function TomarDecision() {
         </div>
       </div>
 
+      {/* Subpestañas */}
+      <div className="flex flex-wrap gap-1.5">
+        <button
+          onClick={() => setSubtab('modelos')}
+          className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition ${
+            subtab === 'modelos'
+              ? 'bg-amber-500/20 border-amber-400/40 text-amber-200'
+              : 'bg-slate-800 border-gray-700 text-gray-400 hover:text-gray-200'
+          }`}
+        >
+          🌡️ Modelos de temperatura (MC vs KALMAN)
+        </button>
+        <button
+          onClick={() => setSubtab('duelo')}
+          className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition ${
+            subtab === 'duelo'
+              ? 'bg-orange-500/20 border-orange-400/40 text-orange-200'
+              : 'bg-slate-800 border-gray-700 text-gray-400 hover:text-gray-200'
+          }`}
+        >
+          🥊 Duelo de probs (Producción vs Sombra v2)
+        </button>
+      </div>
+
+      {subtab === 'duelo' ? (
+        /* Subpestaña 2: comparación diaria producción vs receta candidata — NO toca los cálculos actuales */
+        <ShadowPanel />
+      ) : (
+        <>
       {/* Calibración Brier: ¿son confiables las probabilidades antes de apostar? */}
       <BrierPanel />
 
@@ -203,6 +235,8 @@ export default function TomarDecision() {
           {filteredCities.map(city => (
             <CityTable key={city.slug} city={city} />
           ))}
+        </>
+      )}
         </>
       )}
     </div>
