@@ -37,12 +37,23 @@ export interface DecisionDay {
   kal_acierto: boolean | null
   final_acierto: boolean | null
   modelo_ganador: string | null
-  /** Cubo redondeado al que se refiere p_prod_cubo/p_som_cubo (round(real) si resolvió, si no round(temp_corregida)) */
+  /** Cubo redondeado al que se refiere p_prod_cubo/p_som_cubo (round(real) si resolvió, si no round(temp_corregida)) — ensamblado 11PM preferido */
   cubo: number | null
   /** Prob PRODUCCIÓN (prob_ia_norm) del cubo — solo visual, no afecta la recomendación */
   p_prod_cubo: number | null
   /** Prob SOMBRA v2 (receta congelada) del mismo cubo — solo visual, no afecta la recomendación */
   p_som_cubo: number | null
+  /** Desglose por slot (cada corrida con SUS contratos guardados y SU cubo):
+      día resuelto → cubo = round(temp_real) (igual en ambos slots);
+      día pendiente → cubo = round(temp_corregida de ESA corrida, puede diferir). */
+  cubo_10pm: number | null
+  cubo_11pm: number | null
+  /** Prob PRODUCCIÓN por slot: prob_ia_norm del contrato exacto de ese cubo */
+  p_prod_cubo_10pm: number | null
+  p_prod_cubo_11pm: number | null
+  /** Prob SOMBRA v2 por slot: receta congelada sobre los contratos de ESA corrida */
+  p_som_cubo_10pm: number | null
+  p_som_cubo_11pm: number | null
 }
 
 export interface DecisionCityResult {
@@ -515,6 +526,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           cubo: somInfo?.cubo ?? null,
           p_prod_cubo: somInfo?.p_prod_cubo ?? null,
           p_som_cubo: somInfo?.p_som_cubo ?? null,
+          // Desglose por slot (10PM y 11PM por separado, cada uno con su cubo)
+          cubo_10pm: run10?.cubo ?? null,
+          cubo_11pm: run11?.cubo ?? null,
+          p_prod_cubo_10pm: run10?.p_prod_cubo ?? null,
+          p_prod_cubo_11pm: run11?.p_prod_cubo ?? null,
+          p_som_cubo_10pm: run10?.p_som_cubo ?? null,
+          p_som_cubo_11pm: run11?.p_som_cubo ?? null,
         })
       }
 

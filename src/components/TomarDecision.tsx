@@ -26,12 +26,19 @@ interface DecisionDay {
   kal_acierto: boolean | null
   final_acierto: boolean | null
   modelo_ganador: string | null
-  /** Cubo redondeado al que se refieren p_prod_cubo/p_som_cubo (round(real) si resolvió, si no round(temp)) */
+  /** Cubo redondeado al que se refieren p_prod_cubo/p_som_cubo (round(real) si resolvió, si no round(temp)) — ensamblado 11PM preferido */
   cubo: number | null
   /** Prob PRODUCCIÓN (prob_ia_norm) del cubo — solo visual, no afecta la recomendación */
   p_prod_cubo: number | null
   /** Prob SOMBRA v2 (receta congelada) del mismo cubo — solo visual, no afecta la recomendación */
   p_som_cubo: number | null
+  /** Desglose por slot: cubo y probs de cada corrida por separado (10PM y 11PM) */
+  cubo_10pm: number | null
+  cubo_11pm: number | null
+  p_prod_cubo_10pm: number | null
+  p_prod_cubo_11pm: number | null
+  p_som_cubo_10pm: number | null
+  p_som_cubo_11pm: number | null
 }
 
 interface DecisionCityResult {
@@ -182,8 +189,8 @@ export default function TomarDecision() {
         <span><span className="inline-block w-2 h-2 rounded-full bg-purple-400 mr-1"></span>KALMAN = base + bias exponencial (~9 días memoria)</span>
         <span><span className="inline-block w-2 h-2 rounded-full bg-emerald-400 mr-1"></span>FINAL = valor del Resumen (modelo ganador ya aplicado)</span>
         <span><span className="inline-block w-2 h-2 rounded-full bg-amber-400 mr-1"></span>BASE = ensemble + nowcast + sesgo dinámico (sin MC ni KALMAN)</span>
-        <span title="Probabilidad de cada versión para el cubo redondeado (día resuelto: el cubo que SALIÓ; día pendiente: el cubo del centro). Producción = prob_ia_norm guardada · SOMBRA v2 = receta congelada (centro único + t(4)·σ=1.5). Solo comparación visual.">
-          <span className="inline-block w-2 h-2 rounded-full bg-orange-400 mr-1"></span>P. CUBO = prob del cubo redondeado: PRODUCCIÓN (cian) vs SOMBRA v2 (naranja) — solo visual, no afecta la recomendación
+        <span title="Probabilidad de cada versión para el cubo redondeado, POR CORRIDA (10PM y 11PM por separado): día resuelto → el cubo que SALIÓ (cuánto pagó cada versión por lo que pasó); día pendiente → el cubo del centro de esa corrida. Producción = prob_ia_norm guardada · SOMBRA v2 = receta congelada (centro único + t(4)·σ=1.5). Solo comparación visual.">
+          <span className="inline-block w-2 h-2 rounded-full bg-orange-400 mr-1"></span>P. CUBO = prob del cubo redondeado, 10PM y 11PM por separado: PRODUCCIÓN (cian) vs SOMBRA v2 (naranja) — solo visual, no afecta la recomendación
         </span>
       </div>
 
@@ -351,8 +358,8 @@ function CityTable({ city }: { city: DecisionCityResult }) {
               <th className="px-2 py-2 text-center text-emerald-400/70 font-medium whitespace-nowrap" colSpan={2}>FINAL</th>
               <th
                 className="px-2 py-2 text-center text-orange-400/70 font-medium whitespace-nowrap"
-                colSpan={2}
-                title="Probabilidad del cubo redondeado: PRODUCCIÓN (prob_ia_norm) vs SOMBRA v2 (receta congelada centro único). Día resuelto → cubo que salió; día pendiente → cubo del centro. Solo visual: NO afecta la recomendación."
+                colSpan={4}
+                title="Probabilidad del cubo redondeado por corrida (10PM y 11PM): PRODUCCIÓN (prob_ia_norm) vs SOMBRA v2 (receta congelada centro único). Día resuelto → cubo que salió; día pendiente → cubo del centro de esa corrida. Solo visual: NO afecta la recomendación."
               >
                 P. CUBO
               </th>
@@ -369,8 +376,10 @@ function CityTable({ city }: { city: DecisionCityResult }) {
               <th className="px-1 py-1 text-[9px] text-gray-600">11PM</th>
               <th className="px-1 py-1 text-[9px] text-gray-600">10PM</th>
               <th className="px-1 py-1 text-[9px] text-gray-600">11PM</th>
-              <th className="px-1 py-1 text-[9px] text-cyan-500/70">prod</th>
-              <th className="px-1 py-1 text-[9px] text-orange-500/70">v2</th>
+              <th className="px-1 py-1 text-[9px] text-cyan-500/70">prod 10PM</th>
+              <th className="px-1 py-1 text-[9px] text-cyan-500/70">prod 11PM</th>
+              <th className="px-1 py-1 text-[9px] text-orange-500/70">v2 10PM</th>
+              <th className="px-1 py-1 text-[9px] text-orange-500/70">v2 11PM</th>
               <th className="px-1 py-1 text-[9px] text-gray-600">11PM</th>
               <th className="px-1 py-1 text-[9px] text-gray-600">11PM</th>
               <th className="px-1 py-1 text-[9px] text-gray-600">11PM</th>
@@ -379,9 +388,17 @@ function CityTable({ city }: { city: DecisionCityResult }) {
           <tbody>
             {[...showDays].reverse().map((day) => {
               const isPending = day.temp_real === null
-              const cuboTitle = day.cubo != null
-                ? `Cubo ${day.cubo}°C · producción ${day.p_prod_cubo != null ? Math.round(day.p_prod_cubo * 100) + '%' : '—'} vs sombra v2 ${day.p_som_cubo != null ? Math.round(day.p_som_cubo * 100) + '%' : '—'}${isPending ? ' · día pendiente (cubo del centro)' : ' · día resuelto (cubo que salió)'} — solo visual, no afecta la recomendación`
-                : 'Sin contratos guardados de esta corrida'
+              const pct = (v: number | null) => v != null ? Math.round(v * 100) + '%' : '—'
+              const titleSlot = (slot: '10PM' | '11PM') => {
+                const cubo = slot === '10PM' ? day.cubo_10pm : day.cubo_11pm
+                const pProd = slot === '10PM' ? day.p_prod_cubo_10pm : day.p_prod_cubo_11pm
+                const pSom = slot === '10PM' ? day.p_som_cubo_10pm : day.p_som_cubo_11pm
+                return cubo != null
+                  ? `Corrida ${slot} · cubo ${cubo}°C · producción ${pct(pProd)} vs sombra v2 ${pct(pSom)}${isPending ? ' · día pendiente (cubo del centro de la corrida ' + slot + ')' : ' · día resuelto (cubo que salió)'} — solo visual, no afecta la recomendación`
+                  : `Sin contratos guardados de la corrida ${slot}`
+              }
+              const title10 = titleSlot('10PM')
+              const title11 = titleSlot('11PM')
               return (
                 <tr
                   key={day.fecha_objetivo}
@@ -418,12 +435,18 @@ function CityTable({ city }: { city: DecisionCityResult }) {
                   <td className={`px-1 py-1.5 text-center ${day.final_acierto === true ? 'text-emerald-300 font-bold' : day.final_acierto === false ? 'text-emerald-500/60' : 'text-emerald-400'}`}>
                     {fmt(day.final_11pm)}
                   </td>
-                  {/* P. CUBO — producción vs sombra v2 (solo visual, no afecta la decisión) */}
-                  <td className="px-1 py-1.5 text-center text-cyan-400/90" title={cuboTitle}>
-                    {fmtPct(day.p_prod_cubo)}
+                  {/* P. CUBO — producción vs sombra v2, 10PM y 11PM por separado (solo visual, no afecta la decisión) */}
+                  <td className="px-1 py-1.5 text-center text-cyan-400/75" title={title10}>
+                    {fmtPct(day.p_prod_cubo_10pm)}
                   </td>
-                  <td className="px-1 py-1.5 text-center text-orange-400 font-medium" title={cuboTitle}>
-                    {fmtPct(day.p_som_cubo)}
+                  <td className="px-1 py-1.5 text-center text-cyan-400 font-medium" title={title11}>
+                    {fmtPct(day.p_prod_cubo_11pm)}
+                  </td>
+                  <td className="px-1 py-1.5 text-center text-orange-400/75" title={title10}>
+                    {fmtPct(day.p_som_cubo_10pm)}
+                  </td>
+                  <td className="px-1 py-1.5 text-center text-orange-400 font-medium" title={title11}>
+                    {fmtPct(day.p_som_cubo_11pm)}
                   </td>
                   {/* Errors (11PM preferred) */}
                   <td className={`px-1 py-1.5 text-center ${errColor(day.mc_err_11pm ?? day.mc_err_10pm)}`}>
