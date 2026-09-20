@@ -214,7 +214,8 @@ export default function CoberturaSiNo() {
       {error && <div className="text-center py-4 text-red-400 text-xs sm:text-sm border border-red-500/20 rounded-lg bg-red-500/5 mb-4">{error}</div>}
 
       {/* ═══════════ MODO NO-PERDER ═══════════ */}
-      {modo === 'noperder' && data && !loading && (
+      {/* data?.modo === 'noperder': evita renderizar JSON de estrella aquí durante el cambio de modo (data.apuesta_si no existe en estrella → crash) */}
+      {modo === 'noperder' && data?.modo === 'noperder' && !loading && (
         <div className="space-y-4">
           {/* SI Bet Section */}
           <div className="rounded-xl bg-gradient-to-br from-blue-500/10 to-blue-500/5 border border-blue-500/20 p-3 sm:p-4">
@@ -393,7 +394,7 @@ export default function CoberturaSiNo() {
       )}
 
       {/* ═══════════ MODO ESTRELLA+ABANICO ═══════════ */}
-      {modo === 'estrella' && data && !loading && data.estrella && (
+      {modo === 'estrella' && data?.modo === 'estrella' && !loading && data.estrella && (
         <div className="space-y-4">
           {/* Aviso de riesgo */}
           <div className="text-[10px] sm:text-xs bg-red-500/10 border border-red-500/30 rounded-lg px-3 py-2">
@@ -581,7 +582,7 @@ export default function CoberturaSiNo() {
       )}
 
       {/* ═══════════ MODO TOP 5 CIUDADES ═══════════ */}
-      {modo === 'ranking' && rankData && !loading && (
+      {modo === 'ranking' && rankData?.modo === 'ranking' && !loading && (
         <div className="space-y-4">
           {/* Podio */}
           <div className="grid grid-cols-1 lg:grid-cols-5 gap-3">
@@ -681,7 +682,7 @@ export default function CoberturaSiNo() {
       )}
 
       {/* Footer — guard por modo: evita leer rankData cuando data viejo aún existe (crash al cambiar de modo) */}
-      {((modo !== 'ranking' && data) || (modo === 'ranking' && rankData)) && !loading && (
+      {((modo !== 'ranking' && data?.modo === modo) || (modo === 'ranking' && rankData?.modo === 'ranking')) && !loading && (
         <div className="text-center text-[9px] sm:text-[10px] text-gray-600 pt-2 border-t border-gray-700/30 mt-2">
           {modo !== 'ranking'
             ? `${data?.total_contratos_disponibles} contratos disponibles en Polymarket · Análisis generado ${analisisDate}`
