@@ -88,6 +88,9 @@ export default function CoberturaSiNo() {
   const analyze = async (m: string, s: string, mo: number) => {
     setLoading(true)
     setError(null)
+    // Limpiar el estado del otro modo YA: si no, un render intermedio lee data vieja con modo ranking (o viceversa) y crashea
+    if (m === 'ranking') setData(null)
+    else setRankData(null)
     try {
       const params = new URLSearchParams({ modo: m, monto: String(mo) })
       if (m !== 'ranking') params.set('slug', s)
@@ -677,8 +680,8 @@ export default function CoberturaSiNo() {
         </div>
       )}
 
-      {/* Footer */}
-      {(data || rankData) && !loading && (
+      {/* Footer — guard por modo: evita leer rankData cuando data viejo aún existe (crash al cambiar de modo) */}
+      {((modo !== 'ranking' && data) || (modo === 'ranking' && rankData)) && !loading && (
         <div className="text-center text-[9px] sm:text-[10px] text-gray-600 pt-2 border-t border-gray-700/30 mt-2">
           {modo !== 'ranking'
             ? `${data?.total_contratos_disponibles} contratos disponibles en Polymarket · Análisis generado ${analisisDate}`
