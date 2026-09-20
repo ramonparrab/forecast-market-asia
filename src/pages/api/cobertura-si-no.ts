@@ -363,7 +363,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         medalla: ['🥇', '🥈', '🥉'][i] || ('#' + (i + 1)),
         puesto: i + 1,
       }))
-      const descartadas = resultados.filter((r: any) => r.descartada)
+      // Descartadas = con error (sin mercado activo) + las que quedaron fuera del top 5 con su score
+      const conError = resultados.filter((r: any) => r.descartada)
+      const fueraDelTop = validas.slice(5).map((r: any, i: number) => ({
+        slug: r.slug,
+        ciudad: r.ciudad,
+        descartada: `Puesto #${i + 6} · score ${r.score} · estrella ${r.estrella.bucket}°C @${r.estrella.precio_si_pct}¢ — fuera del top 5 de hoy`,
+      }))
+      const descartadas = [...conError, ...fueraDelTop]
 
       return res.json({
         modo: 'ranking',
